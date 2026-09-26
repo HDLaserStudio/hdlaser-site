@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Price lab | HD Laser Studio</title>
+<meta name="robots" content="noindex, nofollow, noarchive">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#F6F4EF">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Figtree:wght@400;500;700;800&display=swap">
+<style>
+:root{--bg:#F6F4EF;--ink:#15191E;--muted:#545B63;--red:#C8372A;--redd:#A32C21;--blue:#1F6FB2;--line:#E4E0D8;--good:#2F6B4F;--warn:#8A5A00;--bad:#A32C21}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Figtree,"Helvetica Neue",Arial,sans-serif;-webkit-text-size-adjust:100%}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:18px 24px;border-bottom:1px solid var(--line);max-width:1100px;margin:0 auto}
+.brand{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--ink);font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-weight:800;letter-spacing:2px;font-size:16px}
+main{max-width:1100px;margin:0 auto;padding:28px 24px 90px}
+h1{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:42px;line-height:1.05;margin:0 0 8px}
+.lead{margin:0 0 24px;font-size:18px;line-height:1.5;color:var(--muted);max-width:680px}
+h2{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:24px;margin:34px 0 6px}
+.sub{margin:0 0 14px;color:var(--muted);line-height:1.45}
+.card{background:#fff;border:1px solid var(--line);border-radius:20px;padding:20px 22px}
+.dials{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.dial{display:grid;grid-template-columns:1fr auto;gap:4px 14px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.dial:last-child{border-bottom:0}
+.dial label{font-weight:700}
+.dial small{grid-column:1;color:var(--muted);font-size:13px;line-height:1.35}
+.dial output{grid-column:2;grid-row:1/3;font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:26px;font-weight:700;min-width:84px;text-align:right}
+.dial input[type=range]{grid-column:1/3;width:100%;accent-color:var(--red);height:36px;margin:2px 0 0}
+.card h3{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:19px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+.sw{display:inline-block;width:14px;height:14px;border-radius:4px}
+.presets{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px}
+.chip{border:2px solid var(--line);background:#fff;border-radius:999px;padding:9px 16px;font:inherit;font-weight:700;cursor:pointer;color:var(--ink)}
+.chip.on{border-color:var(--red);background:#FBE9E6}
+.chart{position:relative}
+.chart svg{width:100%;height:auto;display:block}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;color:var(--muted);margin:0 0 10px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:#fff;font-size:13px;padding:7px 10px;border-radius:8px;white-space:nowrap;transform:translate(-50%,-115%);display:none}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}.tbl th,.tbl td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}.tbl td.n,.tbl th.n{text-align:right}
+.jobs{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.job{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px 18px}
+.job .t{font-weight:700;line-height:1.3;min-height:38px}
+.job .big{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:32px;font-weight:700;margin:8px 0 2px}
+.job .row{display:flex;justify-content:space-between;font-size:14px;color:var(--muted);padding:3px 0}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;padding:3px 10px;border-radius:999px;margin-top:8px}
+.pill.good{background:#E7F2EC;color:var(--good)}.pill.warn{background:#FBF3D6;color:var(--warn)}.pill.bad{background:#FBE9E6;color:var(--bad)}
+.items{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px 18px}
+.item{display:grid;grid-template-columns:1fr 84px 84px;gap:8px;align-items:center;font-size:14px}
+.item b{font-weight:700}.item input{font:inherit;font-size:15px;padding:8px 8px;border:1px solid var(--line);border-radius:10px;width:100%;text-align:right}
+.item small{grid-column:1/4;color:var(--muted);font-size:12px;margin-top:-4px}
+.ihead{display:grid;grid-template-columns:1fr 84px 84px;gap:8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.send{position:fixed;left:0;right:0;bottom:0;background:var(--ink);color:#fff;padding:12px 18px;display:flex;justify-content:center;gap:12px;align-items:center;flex-wrap:wrap;z-index:5}
+.send a,.send button{background:var(--red);color:#fff;border:0;border-radius:999px;padding:12px 22px;font:inherit;font-weight:700;cursor:pointer;text-decoration:none}
+.send button.ghost{background:transparent;border:2px solid #fff}
+.send span{font-size:13px;color:#C9CED4}
+.note{font-size:13px;color:var(--muted);line-height:1.45}
+@media (max-width:760px){.dials{grid-template-columns:1fr}h1{font-size:34px}main{padding:20px 16px 120px}.card{padding:16px}.send{justify-content:stretch}.send a,.send button{flex:1;text-align:center}}
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/hub/"><svg width="78" height="26" viewBox="220 115 1930 640" aria-hidden="true"><path fill="#C8372A" d="M510 125 L730 125 L636 371 L963 371 L1072 125 L2000 125 C2100 125 2160 210 2130 300 L2010 610 C1970 700 1880 742 1790 742 L1115 742 L1283 341 L1525 341 L1425 595 L1800 595 L1938 272 L1222 272 L1030 742 L808 742 L907 523 L572 523 L483 742 L232 742 Z"></path></svg><span>PRICE LAB</span></a>
+  <span class="note">Private. Nothing here changes the website until Jake loads it.</span>
+</header>
+<main>
+  <h1>Set the prices by feel.</h1>
+  <p class="lead">Six dials decide every price on the order page. Drag them and watch the whole list, and what real jobs would cost and earn, move underneath. When it looks right, press <b>Send to Jake</b>.</p>
+
+  <div class="presets" id="presets">
+    <button type="button" class="chip" data-preset="current">Jake&rsquo;s starting numbers</button>
+    <button type="button" class="chip" data-preset="soft">Softer</button>
+    <button type="button" class="chip" data-preset="premium">Premium</button>
+  </div>
+
+  <div class="dials">
+    <div class="card"><h3><span class="sw" style="background:var(--red)"></span>Laser engraving</h3><p class="sub">Price of the work per piece, on wood. Metal, glass and stone cost a bit more (the factors are below).</p>
+      <div class="dial"><label for="e0">Smallest job, half an inch</label><small>Where the ladder starts.</small><output id="e0o"></output><input type="range" id="e0" min="4" max="20" step="0.25"></div>
+      <div class="dial"><label for="e1">First step up</label><small>How much more 1 inch costs than half an inch.</small><output id="e1o"></output><input type="range" id="e1" min="0.25" max="5" step="0.25"></div>
+      <div class="dial"><label for="e2">Each step grows by</label><small>Every half inch adds this much more than the last step did. Zero makes it a straight line; more makes big work carry more.</small><output id="e2o"></output><input type="range" id="e2" min="0" max="1.5" step="0.05"></div>
+      <div class="dial"><label for="es">Setup, once per order</label><small>Artwork prep. Not per piece.</small><output id="eso"></output><input type="range" id="es" min="0" max="75" step="5"></div>
+    </div>
+    <div class="card"><h3><span class="sw" style="background:var(--blue)"></span>UV printing</h3><p class="sub">Same idea, full color.</p>
+      <div class="dial"><label for="u0">Smallest job, half an inch</label><small>Where the ladder starts.</small><output id="u0o"></output><input type="range" id="u0" min="4" max="24" step="0.25"></div>
+      <div class="dial"><label for="u1">First step up</label><small>How much more 1 inch costs than half an inch.</small><output id="u1o"></output><input type="range" id="u1" min="0.25" max="5" step="0.25"></div>
+      <div class="dial"><label for="u2">Each step grows by</label><small>Every half inch adds this much more than the last step did.</small><output id="u2o"></output><input type="range" id="u2" min="0" max="1.5" step="0.05"></div>
+      <div class="dial"><label for="us">Setup, once per order</label><small>Color separation takes longer.</small><output id="uso"></output><input type="range" id="us" min="0" max="75" step="5"></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>Quantity and rush</h3>
+    <div class="dials" style="gap:0 24px">
+      <div class="dial"><label for="q">Biggest quantity discount</label><small>At 100 pieces or more. Smaller orders get a share of it: 6+ a fifth, 12+ two fifths, 25+ three fifths, 50+ four fifths. Off the work only, never the item.</small><output id="qo"></output><input type="range" id="q" min="0" max="40" step="1"></div>
+      <div class="dial"><label for="r">Rush</label><small>Added to the work when they need it in under 3 business days.</small><output id="ro"></output><input type="range" id="r" min="0" max="100" step="5"></div>
+    </div>
+  </div>
+
+  <h2>The whole list</h2>
+  <p class="sub">Per piece for the work, by the longest side of the artwork, on wood. Hover or tap a bar for the exact number.</p>
+  <div class="card chart" id="chartcard"><div class="legend"><span><i class="sw" style="background:var(--red)"></i>Laser engraving</span><span><i class="sw" style="background:var(--blue)"></i>UV printing</span><button type="button" class="chip" id="tbltoggle" style="margin-left:auto;padding:5px 12px;font-size:13px">Show as a table</button></div><div id="chart"></div><div class="tip" id="tip"></div><div id="tbl" hidden></div></div>
+
+  <h2>What real jobs would cost</h2>
+  <p class="sub">Six orders the shop actually gets, priced with the dials above. The margin is what is left after the blank, labor at $22 an hour and consumables. Green clears the 55% target that keeps rent, payroll and marketing covered.</p>
+  <div class="jobs" id="jobs"></div>
+
+  <h2>The items we supply</h2>
+  <p class="sub">What the customer pays for the blank and what it costs us. Change either; the jobs above follow.</p>
+  <div class="card"><div class="ihead"><span>Item</span><span>Price</span><span>Our cost</span></div><div class="items" id="items"></div>
+    <p class="note" style="margin:14px 0 0">Material factors on the work: wood ×1.00, leather ×1.10, acrylic ×1.10, metal ×1.25, glass ×1.35, stone ×1.40. Customer&rsquo;s own item adds $3 handling per piece. Shop minimum $25. Sales tax is added at checkout.</p></div>
+</main>
+<div class="send"><a id="mail" href="#">Send to Jake</a><button type="button" class="ghost" id="copy">Copy a link to these numbers</button><span id="sendnote">Your numbers are saved on this device as you go.</span></div>
+
+<script>
+(function(){
+  var $=function(s){return document.querySelector(s);};
+  var money=function(c){return '$'+(c/100).toFixed(2);}, money0=function(c){return '$'+Math.round(c/100).toLocaleString('en-US');};
+  var r25=function(c){return Math.max(0,Math.round(c/25)*25);};
+  var MATS={wood:1,leather:1.1,acrylic:1.1,metal:1.25,glass:1.35,stone:1.4};
+  var SVC={engrave:{min:4,inch:2,cons:8},uv:{min:3,inch:1.5,cons:35}}, LABOR=2200, TARGET=0.55;
+  var PRESETS={current:{e0:8,e1:1.5,e2:0.5,es:25,u0:10,u1:1.75,u2:0.5,us:35,q:25,r:50}, soft:{e0:6,e1:1,e2:0.25,es:15,u0:8,u1:1.25,u2:0.25,us:25,q:30,r:25}, premium:{e0:12,e1:2,e2:0.75,es:35,u0:15,u1:2.5,u2:0.75,us:45,q:20,r:50}};
+  var ITEMS=[{k:'tumbler',n:'20 oz tumbler',m:'metal',p:2200,c:900,max:3.5},{k:'bottle',n:'Water bottle',m:'metal',p:2400,c:1000,max:3},{k:'pint',n:'Pint glass',m:'glass',p:900,c:300,max:3},{k:'board',n:'Cutting board',m:'wood',p:3200,c:1400,max:8},{k:'plaque',n:'Wood plaque',m:'wood',p:2800,c:1100,max:7},{k:'tag',n:'Metal tag or plate',m:'metal',p:600,c:150,max:2.5},{k:'patch',n:'Leather patch or wallet',m:'leather',p:1400,c:500,max:2.5}];
+  var JOBS=[{t:'1 tumbler, 3 in engraved',k:'tumbler',s:'engrave',i:3,q:1},{t:'12 tumblers, 3 in engraved, a team order',k:'tumbler',s:'engrave',i:3,q:12},{t:'1 cutting board, 6 in engraved, a wedding gift',k:'board',s:'engrave',i:6,q:1},{t:'24 pint glasses, 2 in UV printed, a bar',k:'pint',s:'uv',i:2,q:24},{t:'100 metal tags, 1 in engraved',k:'tag',s:'engrave',i:1,q:100},{t:'1 leather wallet, 2 in engraved',k:'patch',s:'engrave',i:2,q:1}];
+  var D={}; var KEYS=['e0','e1','e2','es','u0','u1','u2','us','q','r'];
+  function load(){ var st=null; try{ if(location.hash.length>1) st=JSON.parse(decodeURIComponent(location.hash.slice(1))); else st=JSON.parse(localStorage.getItem('hd_pricelab')||'null'); }catch(e){}
+    var src=(st&&st.d)||PRESETS.current; KEYS.forEach(function(k){ D[k]=+src[k]; }); if(st&&st.items) ITEMS.forEach(function(it){ if(st.items[it.k]){ it.p=+st.items[it.k].p; it.c=+st.items[it.k].c; } }); }
+  function save(){ var st={d:D,items:{}}; ITEMS.forEach(function(it){ st.items[it.k]={p:it.p,c:it.c}; }); try{ localStorage.setItem('hd_pricelab',JSON.stringify(st)); }catch(e){} history.replaceState(null,'','#'+encodeURIComponent(JSON.stringify(st))); }
+  function ladder(start,gap,grow){ var out=[],p=start*100; for(var i=0;i<16;i++){ out.push(r25(p)); p+=gap*100+i*grow*100; } return out; }
+  function sizes(){ var e=ladder(D.e0,D.e1,D.e2), u=ladder(D.u0,D.u1,D.u2); return e.map(function(v,i){ return {inches:(i+1)/2,engrave:v,uv:u[i]}; }); }
+  function breakFor(q){ var f=q>=100?1:q>=50?0.8:q>=25?0.6:q>=12?0.4:q>=6?0.2:0; return Math.round(D.q*f); }
+  function price(job){ var it=ITEMS.filter(function(x){return x.k===job.k;})[0]; var S=sizes()[job.i*2-1]; var work=r25(S[job.s]*MATS[it.m]); var off=breakFor(job.q); var after=r25(work*(1-off/100));
+    var setup=(job.s==='uv'?D.us:D.es)*100; var sub=after*job.q+it.p*job.q+setup; var top=Math.max(0,2500-sub); sub+=top;
+    var minutes=SVC[job.s].min+SVC[job.s].inch*job.i; var cost=(it.c+Math.round(LABOR*minutes/60)+SVC[job.s].cons)*job.q; var margin=(sub-cost)/sub;
+    return {work:work,after:after,off:off,setup:setup,sub:sub,per:sub/job.q,cost:cost,margin:margin,item:it}; }
+
+  function renderDials(){ KEYS.forEach(function(k){ var el=document.getElementById(k); el.value=D[k]; var o=document.getElementById(k+'o'); o.textContent=(k==='q'||k==='r')?D[k]+'%':'$'+D[k].toFixed(2); });
+    document.querySelectorAll('[data-preset]').forEach(function(b){ var p=PRESETS[b.dataset.preset]; b.classList.toggle('on', KEYS.every(function(k){return +p[k]===+D[k];})); }); }
+  function renderChart(){ var S=sizes(); var W=720,H=300,P={l:44,r:12,t:12,b:34}; var max=Math.max.apply(null,S.map(function(s){return Math.max(s.engrave,s.uv);}))*1.08; var iw=(W-P.l-P.r)/16, bw=Math.min(16,(iw-8)/2);
+    var y=function(v){return P.t+(H-P.t-P.b)*(1-v/max);}; var g='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Price per piece by artwork size">';
+    for(var t=0;t<=4;t++){ var v=max/4*t; g+='<line x1="'+P.l+'" x2="'+(W-P.r)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="#E4E0D8"/><text x="'+(P.l-6)+'" y="'+(y(v)+4)+'" text-anchor="end" font-size="11" fill="#545B63">'+money0(v)+'</text>'; }
+    S.forEach(function(s,i){ var x=P.l+i*iw+(iw-2*bw-2)/2; var label=(i%3===0||i===15);
+      g+='<rect data-i="'+i+'" data-s="engrave" x="'+x+'" y="'+y(s.engrave)+'" width="'+bw+'" height="'+(y(0)-y(s.engrave))+'" rx="3" fill="#C8372A"/>';
+      g+='<rect data-i="'+i+'" data-s="uv" x="'+(x+bw+2)+'" y="'+y(s.uv)+'" width="'+bw+'" height="'+(y(0)-y(s.uv))+'" rx="3" fill="#1F6FB2"/>';
+      g+='<text x="'+(x+bw+1)+'" y="'+(H-P.b+16)+'" text-anchor="middle" font-size="11" fill="#545B63">'+s.inches+'"</text>';
+      if(label) g+='<text x="'+(x+bw+1)+'" y="'+(y(Math.max(s.engrave,s.uv))-5)+'" text-anchor="middle" font-size="11" font-weight="700" fill="#15191E">'+money0(s.uv)+'</text>'; });
+    g+='<line x1="'+P.l+'" x2="'+(W-P.r)+'" y1="'+y(0)+'" y2="'+y(0)+'" stroke="#15191E" stroke-width="1"/></svg>'; $('#chart').innerHTML=g;
+    $('#tbl').innerHTML='<table class="tbl"><tr><th>Artwork</th><th class="n">Engraving</th><th class="n">UV print</th><th class="n">Step up</th></tr>'+S.map(function(s,i){ return '<tr><td>'+s.inches+' in</td><td class="n">'+money(s.engrave)+'</td><td class="n">'+money(s.uv)+'</td><td class="n" style="color:#545B63">'+(i?money(s.engrave-S[i-1].engrave)+' / '+money(s.uv-S[i-1].uv):'')+'</td></tr>'; }).join('')+'</table>'; }
+  function renderJobs(){ $('#jobs').innerHTML=JOBS.map(function(j){ var p=price(j); var cls=p.margin>=TARGET?'good':p.margin>=0.4?'warn':'bad'; var ico=cls==='good'?'&#10003;':cls==='warn'?'&#9651;':'&#10007;';
+      return '<div class="job"><div class="t">'+j.t+'</div><div class="big">'+money(p.sub)+'</div><div class="row"><span>'+(j.q>1?money(p.per)+' each':'before tax')+'</span><span>'+(p.off?p.off+'% off the work':'')+'</span></div><div class="row"><span>Work '+money(p.after)+' × '+j.q+'</span><span>Item '+money(p.item.p)+' × '+j.q+'</span></div><div class="row"><span>Setup '+money(p.setup)+'</span><span>Costs us '+money(p.cost)+'</span></div><span class="pill '+cls+'">'+ico+' '+Math.round(p.margin*100)+'% margin'+(cls==='good'?'':cls==='warn'?', under target':', too thin')+'</span></div>'; }).join(''); }
+  function renderItems(){ $('#items').innerHTML=ITEMS.map(function(it){ return '<div class="item"><b>'+it.n+'</b><input type="number" step="0.25" min="0" data-k="'+it.k+'" data-f="p" value="'+(it.p/100).toFixed(2)+'"><input type="number" step="0.25" min="0" data-k="'+it.k+'" data-f="c" value="'+(it.c/100).toFixed(2)+'"><small>'+it.m+', artwork up to '+it.max+' in</small></div>'; }).join(''); }
+  function renderSend(){ var S=sizes(); var lines=['HD Laser prices from the price lab','',
+      'Engraving: starts $'+D.e0.toFixed(2)+' at 0.5 in, first step $'+D.e1.toFixed(2)+', grows $'+D.e2.toFixed(2)+' per step, setup $'+D.es,
+      'UV print: starts $'+D.u0.toFixed(2)+' at 0.5 in, first step $'+D.u1.toFixed(2)+', grows $'+D.u2.toFixed(2)+' per step, setup $'+D.us,
+      'Quantity discount up to '+D.q+'% at 100+. Rush +'+D.r+'%.','',
+      'Ladder (engraving / UV):', S.map(function(s){return s.inches+' in '+money(s.engrave)+' / '+money(s.uv);}).join('\n'),'',
+      'Items (price / our cost):', ITEMS.map(function(it){return it.n+' '+money(it.p)+' / '+money(it.c);}).join('\n'),'',
+      'Link with these numbers: '+location.href];
+    $('#mail').href='mailto:jakehessplans@gmail.com?subject='+encodeURIComponent('HD Laser prices from the price lab')+'&body='+encodeURIComponent(lines.join('\n')); }
+  function render(){ renderDials(); renderChart(); renderJobs(); renderSend(); save(); }
+
+  document.addEventListener('input',function(e){ var t=e.target; if(t.matches('input[type=range]')){ D[t.id]=+t.value; render(); return; } var it=t.closest('input[data-k]'); if(it){ var o=ITEMS.filter(function(x){return x.k===it.dataset.k;})[0]; o[it.dataset.f]=Math.round((+it.value||0)*100); renderJobs(); renderSend(); save(); } });
+  document.addEventListener('click',function(e){ var b=e.target.closest('[data-preset]'); if(b){ var p=PRESETS[b.dataset.preset]; KEYS.forEach(function(k){D[k]=+p[k];}); render(); return; }
+    if(e.target.id==='tbltoggle'){ var t=$('#tbl'); t.hidden=!t.hidden; $('#chart').hidden=!t.hidden; e.target.textContent=t.hidden?'Show as a table':'Show as a chart'; return; }
+    if(e.target.id==='copy'){ var done=function(){ $('#sendnote').textContent='Link copied. Paste it to Jake and he sees exactly these numbers.'; }; if(navigator.clipboard){ navigator.clipboard.writeText(location.href).then(done,function(){ prompt('Copy this link',location.href); }); } else prompt('Copy this link',location.href); } });
+  var tip=$('#tip'); $('#chartcard').addEventListener('mousemove',function(e){ var r=e.target.closest('rect[data-i]'); if(!r){ tip.style.display='none'; return; } var s=sizes()[+r.dataset.i]; var box=$('#chartcard').getBoundingClientRect(); tip.textContent=s.inches+' in '+(r.dataset.s==='uv'?'UV print':'engraving')+': '+money(s[r.dataset.s])+' per piece on wood'; tip.style.display='block'; tip.style.left=(e.clientX-box.left)+'px'; tip.style.top=(e.clientY-box.top)+'px'; });
+  $('#chartcard').addEventListener('mouseleave',function(){ tip.style.display='none'; });
+  $('#chartcard').addEventListener('click',function(e){ var r=e.target.closest('rect[data-i]'); if(!r) return; var s=sizes()[+r.dataset.i]; var box=$('#chartcard').getBoundingClientRect(); tip.textContent=s.inches+' in '+(r.dataset.s==='uv'?'UV print':'engraving')+': '+money(s[r.dataset.s])+' per piece on wood'; tip.style.display='block'; tip.style.left=(e.clientX-box.left)+'px'; tip.style.top=(e.clientY-box.top)+'px'; });
+
+  load(); renderItems(); render();
+})();
+</script>
+</body>
+</html>
