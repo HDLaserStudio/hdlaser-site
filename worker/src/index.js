@@ -2588,10 +2588,11 @@ async function saveWholeBook(env, body) {
     if (src.removed) continue;
     p.name = String(src.name || p.name).trim().slice(0, 60);
     if (src.material && next.materials.some((m) => m.key === src.material)) p.material = src.material;
+    if (p.key === "own") { keep.push(p); continue; } // the customer's own item has no blank price or cost; only its handling fee, saved below
     const bl = int(src.blank_cents, 0, 10000000), co = int(src.cost_cents, 0, 10000000); if (bl == null || co == null) errors.push(`${p.name}: price or cost`); else { p.blank_cents = bl; p.cost_cents = co; }
     const mx = Math.round(Number(src.max_inches) * 2) / 2; if (mx >= 0.5 && mx <= next.max_inches) p.max_inches = mx;
     keep.push(p); }
-  if (keep.length) next.products = keep;
+  if (keep.length) { if (!keep.some((p) => p.key === "own")) { const own = next.products.find((p) => p.key === "own"); if (own) keep.push(own); } next.products = keep; }
   // quantity breaks, rush, handling, minimum
   if (Array.isArray(b.qty_breaks)) { const qb = b.qty_breaks.map((x) => ({ min: int(x.min, 1, 100000), off_pct: int(x.off_pct, 0, 90) })).filter((x) => x.min != null && x.off_pct != null).sort((x, y) => x.min - y.min); if (!qb.length || qb[0].min !== 1) qb.unshift({ min: 1, off_pct: 0 }); next.qty_breaks = qb.filter((x, i, a) => i === 0 || x.min !== a[i - 1].min); }
   if (b.rush_pct != null) next.rush_pct = int(b.rush_pct, 0, 300) ?? next.rush_pct;
