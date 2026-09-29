@@ -2274,6 +2274,8 @@ function quoteSpec(book, spec) {
   const qty = parseInt(spec.qty, 10);
   if (!(qty >= 1 && qty <= 500)) return { error: "Quantity must be 1 to 500" };
   const rush = !!spec.rush;
+  const sides = product.key === "garment" ? (["front", "back", "both"].includes(String(spec.sides)) ? String(spec.sides) : "front") : null;
+  const prints = sides === "both" ? 2 : 1; // front and back are two prints, each priced by size
   const size = book.sizes.find((s) => s.inches === inches);
   if (!size) return { error: "Size not on the price list" };
   const workUnit = r25(size[service.key + "_cents"] * material.factor);
@@ -2281,20 +2283,20 @@ function quoteSpec(book, spec) {
   const workUnitAfter = r25(workUnit * (1 - brk.off_pct / 100));
   const handlingUnit = product.key === "own" ? book.own_item_handling_cents : 0;
   const blankUnit = product.blank_cents || 0;
-  const work = workUnitAfter * qty, blank = blankUnit * qty, handling = handlingUnit * qty;
+  const work = workUnitAfter * qty * prints, blank = blankUnit * qty, handling = handlingUnit * qty;
   const rushCents = rush ? r25(work * book.rush_pct / 100) : 0;
   const setup = service.setup_cents;
   let subtotal = work + blank + handling + rushCents + setup;
   const minimumTopUp = Math.max(0, book.min_order_cents - subtotal); subtotal += minimumTopUp;
   const nextBreak = [...book.qty_breaks].sort((a, b) => a.min - b.min).find((b) => b.min > qty);
-  return { product, material, service, inches, qty, rush, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_cents: (workUnit - workUnitAfter) * qty,
+  return { product, material, service, inches, qty, rush, sides, prints, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_cents: (workUnit - workUnitAfter) * qty,
     blank_unit_cents: blankUnit, handling_unit_cents: handlingUnit, work_cents: work, blank_cents: blank, handling_cents: handling, rush_cents: rushCents, setup_cents: setup, minimum_top_up_cents: minimumTopUp, subtotal_cents: subtotal,
     next_break: nextBreak ? { min: nextBreak.min, off_pct: nextBreak.off_pct } : null,
-    summary: `${qty} × ${lcName(service.name)}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.key === "garment" ? "customer's own garment" : product.name.toLowerCase()}${rush ? ", rush" : ""}` };
+    summary: `${qty} × ${lcName(service.name)}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.key === "garment" ? "customer's own garment" : product.name.toLowerCase()}${sides ? ", " + (sides === "both" ? "front and back" : sides) : ""}${rush ? ", rush" : ""}` };
 }
 // The exact words the customer initials. Rendered identically on the order page; the copy stored with the order is this one.
 function attestText(q, name) {
-  return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what I have specified here: ${lcName(q.service.name)} on ${q.product.key === "own" ? "my own " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "my own garment" : "a " + q.product.name.toLowerCase()}, artwork ${q.inches} inches on its longest side, quantity ${q.qty}. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
+  return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what I have specified here: ${lcName(q.service.name)} on ${q.product.key === "own" ? "my own " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "my own garment" : "a " + q.product.name.toLowerCase()}, artwork ${q.inches} inches on its longest side${q.sides ? " on the " + (q.sides === "both" ? "front and the back" : q.sides) : ""}, quantity ${q.qty}. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
 }
 // lower-case a service name for a sentence, keeping acronyms: "UV printing", "DTF printing", "laser engraving"
 function lcName(n) { return String(n).replace(/\b[A-Z][a-z]+\b/g, (w) => w.toLowerCase()); }
@@ -2333,7 +2335,7 @@ async function orderCheckout(request, env, cors) {
   let logo = null; const L = b.logo || {};
   if (L.data && /^data:(image\/(png|jpeg|webp|svg\+xml));base64,[A-Za-z0-9+/=]+$/.test(String(L.data)) && String(L.data).length <= 950000) logo = { name: String(L.name || "logo").slice(0, 120), type: String(L.data).slice(5, String(L.data).indexOf(";")), data: String(L.data) };
 
-  const lineItems = [{ name: `${q.service.name}, ${q.inches} in on ${q.product.key === "own" ? "customer's " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "customer's own garment" : q.product.name.toLowerCase()}${q.discount_pct ? ` (${q.discount_pct}% quantity discount)` : ""}`, quantity: String(q.qty), base_price_money: { amount: q.work_unit_after_cents, currency: "USD" } }];
+  const lineItems = [{ name: `${q.service.name}, ${q.inches} in on ${q.product.key === "own" ? "customer's " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "customer's own garment" : q.product.name.toLowerCase()}${q.sides ? ", " + (q.sides === "both" ? "front and back" : q.sides) : ""}${q.discount_pct ? ` (${q.discount_pct}% quantity discount)` : ""}`, quantity: String(q.qty * q.prints), base_price_money: { amount: q.work_unit_after_cents, currency: "USD" } }];
   if (q.blank_unit_cents) lineItems.push({ name: q.product.name, quantity: String(q.qty), base_price_money: { amount: q.blank_unit_cents, currency: "USD" } });
   if (q.handling_unit_cents) lineItems.push({ name: "Customer-supplied item handling", quantity: String(q.qty), base_price_money: { amount: q.handling_unit_cents, currency: "USD" } });
   lineItems.push({ name: `${q.service.name} setup (artwork prep, one time)`, quantity: "1", base_price_money: { amount: q.setup_cents, currency: "USD" } });
@@ -2352,7 +2354,7 @@ async function orderCheckout(request, env, cors) {
     linkOk = res.ok && !!data.payment_link;
     if (!linkOk) console.error("Square error", res.status, JSON.stringify(data).slice(0, 800));
   }
-  const spec = { product: q.product.key, material: q.material.key, service: q.service.key, inches: q.inches, qty: q.qty, rush: q.rush, summary: q.summary, work_unit_cents: q.work_unit_cents, work_unit_after_cents: q.work_unit_after_cents, discount_pct: q.discount_pct, blank_unit_cents: q.blank_unit_cents, handling_unit_cents: q.handling_unit_cents, setup_cents: q.setup_cents, rush_cents: q.rush_cents, minimum_top_up_cents: q.minimum_top_up_cents, subtotal_cents: q.subtotal_cents, tax_cents: tax, book_version: book.version, book_updated_at: book.updated_at || null };
+  const spec = { product: q.product.key, material: q.material.key, service: q.service.key, inches: q.inches, qty: q.qty, rush: q.rush, sides: q.sides, prints: q.prints, summary: q.summary, work_unit_cents: q.work_unit_cents, work_unit_after_cents: q.work_unit_after_cents, discount_pct: q.discount_pct, blank_unit_cents: q.blank_unit_cents, handling_unit_cents: q.handling_unit_cents, setup_cents: q.setup_cents, rush_cents: q.rush_cents, minimum_top_up_cents: q.minimum_top_up_cents, subtotal_cents: q.subtotal_cents, tax_cents: tax, book_version: book.version, book_updated_at: book.updated_at || null };
   if (env.DB) {
     let assetId = null;
     if (logo) { const ins = await env.DB.prepare(`INSERT INTO order_assets (ref, created_at, name, type, bytes, data) VALUES (?,?,?,?,?,?)`).bind(ref, now, logo.name, logo.type, Math.round(logo.data.length * 0.75), logo.data).run(); assetId = ins.meta && ins.meta.last_row_id; }
@@ -2368,7 +2370,7 @@ async function orderCheckout(request, env, cors) {
   // tell the shop and the customer straight away; payment confirmation follows from the Square webhook
   const $ = (n) => "$" + (n / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const who = c.business ? `${c.business} (${name})` : name;
-  const breakdown = [`${q.qty} × ${lcName(q.service.name)} ${q.inches} in @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", `Setup ${$(q.setup_cents)}`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
+  const breakdown = [`${q.qty * q.prints} × ${lcName(q.service.name)} ${q.inches} in${q.sides ? " (" + (q.sides === "both" ? "front and back" : q.sides) + ")" : ""} @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", `Setup ${$(q.setup_cents)}`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
   if (env.RESEND_API_KEY) {
     await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
 `New order ${ref} from hdlaser.net${takenBy ? " (taken at the counter by " + takenBy + ")" : ""}
