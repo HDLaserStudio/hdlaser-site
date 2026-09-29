@@ -416,7 +416,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var svc = qs.get('service'); if (BOOK.services.some(function(x){return x.key===svc;})) S.service = svc;
     renderAll(); if (window.hdTrack) hdTrack('order_view'); }
   if (!BASE) { $('#loaderr').textContent = 'Online ordering isn’t switched on yet. Use the quote form or call (858) 373-9866.'; $('#loaderr').hidden = false; }
-  else fetch(BASE + '/pricing').then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }).then(boot).catch(function(){ $('#loaderr').innerHTML = 'Prices didn’t load. Refresh in a moment, or <a href="/quote/">ask for a quote</a> and we’ll price it by hand.'; $('#loaderr').hidden = false; });
+  else fetch(BASE + '/pricing?t=' + Date.now(), { cache: 'no-store' }).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }).then(boot).catch(function(){ $('#loaderr').innerHTML = 'Prices didn’t load. Refresh in a moment, or <a href="/quote/">ask for a quote</a> and we’ll price it by hand.'; $('#loaderr').hidden = false; });
 })();
 </script>
 </body>

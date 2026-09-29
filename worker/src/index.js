@@ -110,7 +110,7 @@ export default {
       if (path === "/event" && request.method === "POST") return requireOrigin(cors) || recordEvent(request, env, cors);
       if (path === "/submit" && request.method === "POST") return requireOrigin(cors) || submitInquiry(request, env, cors);
       if (path === "/resale" && request.method === "POST") return requireOrigin(cors) || recordResale(request, env, cors);
-      if (path === "/pricing") return json({ book: publicBook(await priceBook(env)), tax_rate: parseFloat(env.TAX_RATE || "0.0775") || 0, attest_version: ATTEST_VERSION }, 200, { ...cors, "Cache-Control": "public, max-age=120" });
+      if (path === "/pricing") return json({ book: publicBook(await priceBook(env)), tax_rate: parseFloat(env.TAX_RATE || "0.0775") || 0, attest_version: ATTEST_VERSION }, 200, { ...cors, "Cache-Control": "no-store" });
       if (path === "/order/checkout" && request.method === "POST") return requireOrigin(cors) || orderCheckout(request, env, cors);
       // ---- Boards n' Beans coffee counter (order ahead, pay through Square, the bar gets a text) ----
       if (path === "/coffee/menu") return json({ menu: COFFEE.menu, milks: COFFEE.milks, extras: COFFEE.extras, shop: COFFEE.shop }, 200, { ...cors, "Cache-Control": "public, max-age=300" });
