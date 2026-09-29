@@ -2638,14 +2638,14 @@ input.n{text-align:right}input:focus{outline:3px solid #F2B63D;outline-offset:1p
 
 <h2>Setup, rush, minimum</h2>
 <div class="card"><table id="services"></table><p class="small" style="margin:8px 0 0">Minutes and consumables are what a piece costs us; they feed the margin check, not the customer price.</p>
-<table style="margin-top:10px"><tr><th>Rush, % added to the work</th><th>Customer's own item, handling per piece ($)</th><th>Shop minimum per order ($)</th></tr><tr><td><input class="n" type="number" id="rush" step="5" min="0"></td><td><input class="n" type="number" id="own" step="0.25" min="0"></td><td><input class="n" type="number" id="min" step="1" min="0"></td></tr></table></div>
+<table style="margin-top:10px"><tr><th>Rush, % added to the work</th><th>Shop minimum per order ($)</th></tr><tr><td><input class="n" type="number" id="rush" step="5" min="0"></td><td><input class="n" type="number" id="min" step="1" min="0"></td></tr></table></div>
 
 <h2>Materials</h2>
 <p class="sub">The work price is multiplied by the factor. Tick which finishes we offer on each.</p>
 <div class="card"><table id="materials"></table></div>
 
 <h2>Items we supply</h2>
-<p class="sub">Price is what the customer pays for the blank; cost is what it costs us. Add a row for a new item; it gets a plain drawing on the order page until Jake draws it.</p>
+<p class="sub">Price is what the customer pays for the blank; cost is what it costs us. The last row is the customer&rsquo;s own item: no blank, just the work and a handling fee. Add a row for a new item; it gets a plain drawing on the order page until Jake draws it.</p>
 <div class="card"><table id="products"></table><p style="margin:10px 0 0"><button class="act" id="addp" type="button">Add an item</button></p></div>
 
 <h2>Quantity discounts</h2>
@@ -2661,9 +2661,10 @@ function render(){
   $('#f-svc').innerHTML=B.services.map(s=>'<option value="'+s.key+'">'+esc(s.name)+'</option>').join('');
   $('#sizes').innerHTML='<tr><th>Artwork, longest side</th>'+B.services.map(s=>'<th>'+esc(s.name)+' ($)</th>').join('')+'</tr>'+B.sizes.map(z=>'<tr><td><b>'+z.inches+' in</b></td>'+B.services.map(s=>'<td><input class="n" type="number" step="0.25" min="0" data-size="'+z.inches+'" data-svc="'+s.key+'" value="'+d2(z[s.key+'_cents'])+'"></td>').join('')+'</tr>').join('');
   $('#services').innerHTML='<tr><th>Finish</th><th>Setup, once per order ($)</th><th>Minutes per piece</th><th>Extra minutes per inch</th><th>Consumables per piece ($)</th></tr>'+B.services.map(s=>'<tr><td><b>'+esc(s.name)+'</b></td><td><input class="n" type="number" step="1" min="0" data-svc="'+s.key+'" data-f="setup_cents" value="'+d2(s.setup_cents)+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="min_per_piece" value="'+s.min_per_piece+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="per_inch" value="'+s.per_inch+'"></td><td><input class="n" type="number" step="0.05" min="0" data-svc="'+s.key+'" data-f="consumable_cents" value="'+d2(s.consumable_cents)+'"></td></tr>').join('');
-  $('#rush').value=B.rush_pct; $('#own').value=d2(B.own_item_handling_cents); $('#min').value=d2(B.min_order_cents);
+  $('#rush').value=B.rush_pct; $('#min').value=d2(B.min_order_cents);
   $('#materials').innerHTML='<tr><th>Material</th><th>Factor</th><th>Offered</th></tr>'+B.materials.map(m=>'<tr><td><b>'+esc(m.name)+'</b></td><td><input class="n" type="number" step="0.05" min="0.1" data-mat="'+m.key+'" data-f="factor" value="'+m.factor+'"></td><td>'+B.services.map(s=>'<label class="chk"><input type="checkbox" data-mat="'+m.key+'" data-svc="'+s.key+'" '+(m.services.includes(s.key)?'checked':'')+'>'+esc(s.name)+'</label>').join('')+'</td></tr>').join('');
-  $('#products').innerHTML='<tr><th>Item</th><th>Material</th><th>Customer pays ($)</th><th>Costs us ($)</th><th>Largest artwork (in)</th><th></th></tr>'+B.products.filter(p=>p.key!=='own').map(p=>prow(p)).join('');
+  $('#products').innerHTML='<tr><th>Item</th><th>Material</th><th>Customer pays ($)</th><th>Costs us ($)</th><th>Largest artwork (in)</th><th></th></tr>'+B.products.filter(p=>p.key!=='own').map(p=>prow(p)).join('')
+    +'<tr><td><b>Something I\u2019ll bring in</b><div class="small">customer\u2019s own item, any material</div></td><td class="small">customer picks</td><td><div class="small">the work \u00d7 material factor, plus handling per piece:</div><input class="n" type="number" id="own" step="0.25" min="0" value="'+d2(B.own_item_handling_cents)+'"></td><td class="small">nothing, they supply it</td><td class="small">up to '+B.max_inches+' in</td><td></td></tr>';
   $('#qty').innerHTML='<tr><th>From this many pieces</th><th>% off the work</th><th></th></tr>'+B.qty_breaks.map((q,i)=>'<tr data-q><td><input class="n" type="number" step="1" min="1" data-qf="min" value="'+q.min+'"'+(i===0?' readonly':'')+'></td><td><input class="n" type="number" step="1" min="0" max="90" data-qf="off_pct" value="'+q.off_pct+'"></td><td>'+(i===0?'':'<button class="rm" type="button" data-rmq>remove</button>')+'</td></tr>').join('');
   document.querySelectorAll('input').forEach(i=>{ i.dataset.orig=i.type==='checkbox'?String(i.checked):i.value; });
 }
