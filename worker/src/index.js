@@ -28,6 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
+const WORKER_VERSION = "2026-09-29 v6"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -103,7 +104,7 @@ export default {
     const path = url.pathname.replace(/\/+$/, "") || "/";
     try {
       await ensureSchema(env);
-      if (path === "/health") return json({ ok: true, env: env.SQUARE_ENV, db: !!env.DB }, 200, cors);
+      if (path === "/health") return json({ ok: true, version: WORKER_VERSION, env: env.SQUARE_ENV, db: !!env.DB }, 200, cors);
 
       // ---- public, site-facing ----
       if (path === "/checkout" && request.method === "POST") return requireOrigin(cors) || checkout(request, env, cors);
@@ -2627,7 +2628,7 @@ input.n{text-align:right}input:focus{outline:3px solid #F2B63D;outline-offset:1p
 .rm{color:var(--redd);background:none;border:0;cursor:pointer;font:inherit;font-size:13px}
 @media (max-width:700px){main{padding:12px}input[type=number]{width:82px}}
 </style></head><body>
-<header><h1>HD Laser prices</h1><div><a class="act" href="/admin/money" style="text-decoration:none;color:inherit">Money page</a> <a class="act" href="https://hdlaser.net/order/" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">See the order page</a></div></header>
+<header><h1>HD Laser prices <span class="small" style="font-weight:400">worker ${WORKER_VERSION}</span></h1><div><a class="act" href="/admin/money" style="text-decoration:none;color:inherit">Money page</a> <a class="act" href="https://hdlaser.net/order/" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">See the order page</a></div></header>
 <main>
 <p class="sub" style="font-size:16px">Everything the order page charges, on one screen. Change any number, then press <b>Save all prices</b> at the bottom. Changed cells turn yellow until saved. Nothing goes live until you save.</p>
 <div id="err" class="sub" style="color:var(--red);font-weight:700"></div>
