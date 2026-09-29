@@ -17,6 +17,7 @@
 //   POST /resale              resale permit info from the thank-you page
 //   POST /webhooks/square     Square webhook (payment.*, refund.*), verified with the signature key
 //   GET  /pricing              the price book the order builder uses (public); POST /order/checkout places a priced custom order
+//   GET  /admin/prices         every price on one screen with one Save (Basic auth); POST /api/pricing/book/all saves it
 //   /api/pricing*             price book, weekly pricing review suggestions (approve/deny), edit history (Basic auth)
 //   GET  /health
 //   GET  /admin               KPI dashboard (Basic auth, password = ADMIN_KEY)
@@ -142,6 +143,8 @@ export default {
         const am = path.match(/^\/api\/assets\/(\d+)$/);
         if (am) return assetResponse(env, +am[1]);
         if (path === "/admin/money") return new Response(moneyHtml(env), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+        if (path === "/admin/prices") return new Response(pricesHtml(env), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+        if (path === "/api/pricing/book/all" && request.method === "POST") { const r = await saveWholeBook(env, await request.json()); return json(r, r.ok ? 200 : 400); }
         if (path === "/api/money/yoy") return json(await yearOverYear(env), 200, { "Cache-Control": "no-store" });
         if (path === "/api/money/trends") return json(await trends(env), 200, { "Cache-Control": "no-store" });
         if (path === "/api/money/trends.csv") return trendsCsv(await trends(env));
@@ -1868,7 +1871,7 @@ svg text{font-size:11px;fill:var(--muted)}
 </div>
 <div class="card" style="margin-top:14px"><h3>Uncategorized <span class="pill" id="uncpill">0</span></h3><p class="small">Pick a category. Tick "rule" to apply it to everything with the same name, now and in future imports.</p><div id="unc"></div></div>
 
-<h2>Price list <span class="small">what the order page charges; edit a number and press Enter to change it</span></h2>
+<h2>Price list <a class="act dark" href="/admin/prices" style="text-decoration:none;font-size:13px;margin-left:8px">Edit all prices on one screen</a> <span class="small">or edit a number here and press Enter</span></h2>
 <div class="grid" id="pricelist"></div>
 <div class="card" style="margin-top:14px"><h3>Pricing review</h3><p class="small" id="reviewmeta"></p><p><button class="act dark" id="runreview">Run the pricing review now</button> <button class="act" id="reloadbook">Load the price list from the code</button> <span class="small" id="reviewmsg"></span></p><p class="small">It runs by itself every Monday and looks at four things: the size ladder keeps climbing by a little more each half inch; every item clears the target margin after the blank, labor and consumables; sizes and items that get priced often but rarely bought (or bought far more than average); and materials taking a bigger share of sales than they used to. Suggestions land in the red box at the top. Decided ones are listed below.</p><div id="decided"></div></div>
 
@@ -2560,4 +2563,129 @@ async function assetResponse(env, id) {
   if (!a) return json({ error: "Not found" }, 404);
   const comma = a.data.indexOf(","); const bin = Uint8Array.from(atob(a.data.slice(comma + 1)), (c) => c.charCodeAt(0));
   return new Response(bin, { headers: { "Content-Type": a.type, "Content-Disposition": `inline; filename="${a.ref}-${a.name.replace(/[^\w.-]/g, "_")}"`, "Cache-Control": "private, max-age=3600" } });
+}
+
+// ---------------------------------------------------------------- the prices page: every price on one screen, one Save
+async function saveWholeBook(env, body) {
+  const cur = await priceBook(env); const b = body && body.book; if (!b || typeof b !== "object") return { ok: false, error: "No price list sent" };
+  const int = (v, lo, hi) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : null; };
+  const next = JSON.parse(JSON.stringify(cur)); const errors = [];
+  // services: setup and cost inputs; keys fixed
+  for (const s of next.services) { const src = (b.services || []).find((x) => x.key === s.key); if (!src) continue;
+    const setup = int(src.setup_cents, 0, 100000); if (setup == null) errors.push(`${s.name}: setup`); else s.setup_cents = setup;
+    if (src.min_per_piece != null) s.min_per_piece = Math.max(0, Number(src.min_per_piece) || 0); if (src.per_inch != null) s.per_inch = Math.max(0, Number(src.per_inch) || 0); if (src.consumable_cents != null) s.consumable_cents = int(src.consumable_cents, 0, 100000) || 0; }
+  // sizes
+  for (const row of next.sizes) { const src = (b.sizes || []).find((x) => Number(x.inches) === row.inches); if (!src) continue;
+    for (const s of next.services) { const c = s.key + "_cents"; if (src[c] == null) continue; const v = int(src[c], 0, 1000000); if (v == null) errors.push(`${row.inches} in ${s.name}`); else row[c] = v; } }
+  // materials
+  for (const m of next.materials) { const src = (b.materials || []).find((x) => x.key === m.key); if (!src) continue;
+    const f = Number(src.factor); if (!(f >= 0.1 && f <= 10)) errors.push(`${m.name}: factor`); else m.factor = Math.round(f * 100) / 100;
+    if (Array.isArray(src.services)) m.services = src.services.filter((k) => next.services.some((s) => s.key === k)); }
+  // products: edit existing by key, add new ones (generic drawing), drop ones marked removed
+  const keep = [];
+  for (const src of (b.products || [])) { let p = next.products.find((x) => x.key === src.key);
+    if (!p) { const key = String(src.key || src.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30); if (!key || !String(src.name || "").trim()) continue; p = { key, name: "", material: "wood", blank_cents: 0, cost_cents: 0, max_inches: next.max_inches, w_in: 8, h_in: 8, shape: "own", photo: null }; }
+    if (src.removed) continue;
+    p.name = String(src.name || p.name).trim().slice(0, 60);
+    if (src.material && next.materials.some((m) => m.key === src.material)) p.material = src.material;
+    const bl = int(src.blank_cents, 0, 10000000), co = int(src.cost_cents, 0, 10000000); if (bl == null || co == null) errors.push(`${p.name}: price or cost`); else { p.blank_cents = bl; p.cost_cents = co; }
+    const mx = Math.round(Number(src.max_inches) * 2) / 2; if (mx >= 0.5 && mx <= next.max_inches) p.max_inches = mx;
+    keep.push(p); }
+  if (keep.length) next.products = keep;
+  // quantity breaks, rush, handling, minimum
+  if (Array.isArray(b.qty_breaks)) { const qb = b.qty_breaks.map((x) => ({ min: int(x.min, 1, 100000), off_pct: int(x.off_pct, 0, 90) })).filter((x) => x.min != null && x.off_pct != null).sort((x, y) => x.min - y.min); if (!qb.length || qb[0].min !== 1) qb.unshift({ min: 1, off_pct: 0 }); next.qty_breaks = qb.filter((x, i, a) => i === 0 || x.min !== a[i - 1].min); }
+  if (b.rush_pct != null) next.rush_pct = int(b.rush_pct, 0, 300) ?? next.rush_pct;
+  if (b.own_item_handling_cents != null) next.own_item_handling_cents = int(b.own_item_handling_cents, 0, 100000) ?? next.own_item_handling_cents;
+  if (b.min_order_cents != null) next.min_order_cents = int(b.min_order_cents, 0, 1000000) ?? next.min_order_cents;
+  if (errors.length) return { ok: false, error: "Check these: " + errors.join(", ") };
+  // history: one row per changed price
+  const now = new Date().toISOString(); const stmts = []; const note = String(body.note || "edited on the prices page").slice(0, 200);
+  for (const row of next.sizes) for (const s of next.services) { const c = s.key + "_cents"; const before = cur.sizes.find((x) => x.inches === row.inches); const from = before ? before[c] : null; if (from !== row[c]) stmts.push(env.DB.prepare(`INSERT INTO price_history (ts, target, from_cents, to_cents, source, suggestion_id, note) VALUES (?,?,?,?,?,?,?)`).bind(now, JSON.stringify({ type: "size", service: s.key, inches: row.inches }), from, row[c], "manual", null, note)); }
+  for (const p of next.products) for (const f of ["blank_cents", "cost_cents"]) { const before = cur.products.find((x) => x.key === p.key); const from = before ? before[f] : null; if (from !== p[f]) stmts.push(env.DB.prepare(`INSERT INTO price_history (ts, target, from_cents, to_cents, source, suggestion_id, note) VALUES (?,?,?,?,?,?,?)`).bind(now, JSON.stringify({ type: "product", key: p.key, field: f }), from, p[f], "manual", null, note)); }
+  await saveBook(env, next);
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  return { ok: true, changed: stmts.length, book: next };
+}
+
+function pricesHtml(env) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HD Laser prices</title>
+<style>
+:root{--bg:#F6F4EF;--ink:#15191E;--muted:#545B63;--red:#C8372A;--redd:#A32C21;--line:#E4E0D8;--green:#2F6B4F}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 Figtree,"Helvetica Neue",Arial,sans-serif;padding-bottom:110px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line);background:#fff}
+h1{font-size:22px;margin:0}h2{font-size:18px;margin:28px 0 4px}main{max-width:1100px;margin:0 auto;padding:16px 20px}
+.sub{color:var(--muted);margin:0 0 12px;line-height:1.45}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:5px 6px;border-bottom:1px solid #EDE8DF;vertical-align:middle;white-space:nowrap}th{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+input[type=number],input[type=text],select{font:inherit;font-size:15px;padding:7px 8px;border:1px solid #C9C2B5;border-radius:8px;width:96px;background:#fff}input[type=text]{width:200px}select{width:auto}
+input.n{text-align:right}input:focus{outline:3px solid #F2B63D;outline-offset:1px}input.changed{background:#FBF3D6;border-color:#E2B84F}
+.act{font:inherit;padding:8px 14px;border:1px solid var(--line);background:#fff;border-radius:999px;cursor:pointer}.act.dark{background:var(--ink);color:#fff;border-color:var(--ink)}.act.red{background:var(--red);color:#fff;border-color:var(--red);font-weight:700;font-size:16px;padding:12px 24px}
+.fill{display:flex;gap:10px;flex-wrap:wrap;align-items:end;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 12px}.fill label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--ink);color:#fff;padding:14px 20px;display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;z-index:5}.bar .msg{font-size:14px;color:#C9CED4}.bar .msg.ok{color:#9BD3B0}.bar .msg.bad{color:#F5B5AD}
+.small{font-size:12px;color:var(--muted)}.chk{display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-size:13px}.chk input{width:18px;height:18px}
+.rm{color:var(--redd);background:none;border:0;cursor:pointer;font:inherit;font-size:13px}
+@media (max-width:700px){main{padding:12px}input[type=number]{width:82px}}
+</style></head><body>
+<header><h1>HD Laser prices</h1><div><a class="act" href="/admin/money" style="text-decoration:none;color:inherit">Money page</a> <a class="act" href="https://hdlaser.net/order/" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">See the order page</a></div></header>
+<main>
+<p class="sub" style="font-size:16px">Everything the order page charges, on one screen. Change any number, then press <b>Save all prices</b> at the bottom. Changed cells turn yellow until saved. Nothing goes live until you save.</p>
+<div id="err" class="sub" style="color:var(--red);font-weight:700"></div>
+
+<h2>Per piece, by artwork size</h2>
+<p class="sub">The work only, on wood (other materials multiply it, see below). Type into any cell, or fill a whole column from three numbers.</p>
+<div class="fill"><label>Column<select id="f-svc"></select></label><label>Price at 0.5 in ($)<input type="number" id="f-start" step="0.25" value="8"></label><label>First step up ($)<input type="number" id="f-gap" step="0.25" value="1.50"></label><label>Each step grows by ($)<input type="number" id="f-grow" step="0.05" value="0.50"></label><button class="act dark" id="f-go" type="button">Fill the column</button><span class="small">Each half inch adds the first step, plus the growth for every step before it. Bigger work carries more.</span></div>
+<div class="card"><table id="sizes"></table></div>
+
+<h2>Setup, rush, minimum</h2>
+<div class="card"><table id="services"></table><p class="small" style="margin:8px 0 0">Minutes and consumables are what a piece costs us; they feed the margin check, not the customer price.</p>
+<table style="margin-top:10px"><tr><th>Rush, % added to the work</th><th>Customer's own item, handling per piece ($)</th><th>Shop minimum per order ($)</th></tr><tr><td><input class="n" type="number" id="rush" step="5" min="0"></td><td><input class="n" type="number" id="own" step="0.25" min="0"></td><td><input class="n" type="number" id="min" step="1" min="0"></td></tr></table></div>
+
+<h2>Materials</h2>
+<p class="sub">The work price is multiplied by the factor. Tick which finishes we offer on each.</p>
+<div class="card"><table id="materials"></table></div>
+
+<h2>Items we supply</h2>
+<p class="sub">Price is what the customer pays for the blank; cost is what it costs us. Add a row for a new item; it gets a plain drawing on the order page until Jake draws it.</p>
+<div class="card"><table id="products"></table><p style="margin:10px 0 0"><button class="act" id="addp" type="button">Add an item</button></p></div>
+
+<h2>Quantity discounts</h2>
+<p class="sub">Percentage off the work, not the item, from this many pieces.</p>
+<div class="card"><table id="qty"></table><p style="margin:10px 0 0"><button class="act" id="addq" type="button">Add a break</button></p></div>
+</main>
+<div class="bar"><button class="act red" id="save" type="button">Save all prices</button><button class="act" id="reset" type="button" style="background:transparent;color:#fff;border-color:#fff">Undo my changes</button><span class="msg" id="msg">Loaded.</span></div>
+<script>
+const $=s=>document.querySelector(s), esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const d2=c=>((c||0)/100).toFixed(2); let B=null;
+async function load(){ const r=await fetch('/api/pricing'); if(!r.ok){ $('#err').textContent='Could not load: '+r.status; return; } const P=await r.json(); B=P.book; render(); $('#msg').textContent='Loaded. '+(B.updated_at?'Last saved '+new Date(B.updated_at).toLocaleString()+'.':'Using the starting numbers from the code.'); $('#msg').className='msg'; }
+function render(){
+  $('#f-svc').innerHTML=B.services.map(s=>'<option value="'+s.key+'">'+esc(s.name)+'</option>').join('');
+  $('#sizes').innerHTML='<tr><th>Artwork, longest side</th>'+B.services.map(s=>'<th>'+esc(s.name)+' ($)</th>').join('')+'</tr>'+B.sizes.map(z=>'<tr><td><b>'+z.inches+' in</b></td>'+B.services.map(s=>'<td><input class="n" type="number" step="0.25" min="0" data-size="'+z.inches+'" data-svc="'+s.key+'" value="'+d2(z[s.key+'_cents'])+'"></td>').join('')+'</tr>').join('');
+  $('#services').innerHTML='<tr><th>Finish</th><th>Setup, once per order ($)</th><th>Minutes per piece</th><th>Extra minutes per inch</th><th>Consumables per piece ($)</th></tr>'+B.services.map(s=>'<tr><td><b>'+esc(s.name)+'</b></td><td><input class="n" type="number" step="1" min="0" data-svc="'+s.key+'" data-f="setup_cents" value="'+d2(s.setup_cents)+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="min_per_piece" value="'+s.min_per_piece+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="per_inch" value="'+s.per_inch+'"></td><td><input class="n" type="number" step="0.05" min="0" data-svc="'+s.key+'" data-f="consumable_cents" value="'+d2(s.consumable_cents)+'"></td></tr>').join('');
+  $('#rush').value=B.rush_pct; $('#own').value=d2(B.own_item_handling_cents); $('#min').value=d2(B.min_order_cents);
+  $('#materials').innerHTML='<tr><th>Material</th><th>Factor</th><th>Offered</th></tr>'+B.materials.map(m=>'<tr><td><b>'+esc(m.name)+'</b></td><td><input class="n" type="number" step="0.05" min="0.1" data-mat="'+m.key+'" data-f="factor" value="'+m.factor+'"></td><td>'+B.services.map(s=>'<label class="chk"><input type="checkbox" data-mat="'+m.key+'" data-svc="'+s.key+'" '+(m.services.includes(s.key)?'checked':'')+'>'+esc(s.name)+'</label>').join('')+'</td></tr>').join('');
+  $('#products').innerHTML='<tr><th>Item</th><th>Material</th><th>Customer pays ($)</th><th>Costs us ($)</th><th>Largest artwork (in)</th><th></th></tr>'+B.products.filter(p=>p.key!=='own').map(p=>prow(p)).join('');
+  $('#qty').innerHTML='<tr><th>From this many pieces</th><th>% off the work</th><th></th></tr>'+B.qty_breaks.map((q,i)=>'<tr data-q><td><input class="n" type="number" step="1" min="1" data-qf="min" value="'+q.min+'"'+(i===0?' readonly':'')+'></td><td><input class="n" type="number" step="1" min="0" max="90" data-qf="off_pct" value="'+q.off_pct+'"></td><td>'+(i===0?'':'<button class="rm" type="button" data-rmq>remove</button>')+'</td></tr>').join('');
+  document.querySelectorAll('input').forEach(i=>{ i.dataset.orig=i.type==='checkbox'?String(i.checked):i.value; });
+}
+function prow(p){ return '<tr data-p="'+esc(p.key)+'"><td><input type="text" data-pf="name" value="'+esc(p.name)+'"></td><td><select data-pf="material">'+B.materials.map(m=>'<option value="'+m.key+'"'+(m.key===p.material?' selected':'')+'>'+esc(m.name)+'</option>').join('')+'</select></td><td><input class="n" type="number" step="0.25" min="0" data-pf="blank_cents" value="'+d2(p.blank_cents)+'"></td><td><input class="n" type="number" step="0.25" min="0" data-pf="cost_cents" value="'+d2(p.cost_cents)+'"></td><td><input class="n" type="number" step="0.5" min="0.5" max="'+B.max_inches+'" data-pf="max_inches" value="'+p.max_inches+'"></td><td><button class="rm" type="button" data-rmp>remove</button></td></tr>'; }
+document.addEventListener('input',e=>{ const i=e.target; if(i.matches('input')&&i.dataset.orig!=null) i.classList.toggle('changed',(i.type==='checkbox'?String(i.checked):i.value)!==i.dataset.orig); });
+$('#f-go').onclick=()=>{ const svc=$('#f-svc').value; let p=(+$('#f-start').value||0)*100; const gap=(+$('#f-gap').value||0)*100, grow=(+$('#f-grow').value||0)*100; document.querySelectorAll('input[data-size][data-svc="'+svc+'"]').forEach((inp,i)=>{ inp.value=d2(Math.round(p/25)*25); inp.dispatchEvent(new Event('input',{bubbles:true})); p+=gap+i*grow; }); $('#msg').textContent='Column filled. Press Save all prices to make it live.'; $('#msg').className='msg'; };
+$('#addp').onclick=()=>{ const key='item-'+Date.now().toString(36); const tr=document.createElement('tr'); tr.dataset.p=key; tr.dataset.new='1'; tr.innerHTML=prow({key,name:'',material:B.materials[0].key,blank_cents:0,cost_cents:0,max_inches:4}).replace(/^<tr[^>]*>|<\\/tr>$/g,''); $('#products').appendChild(tr); tr.querySelector('input').focus(); };
+$('#addq').onclick=()=>{ const tr=document.createElement('tr'); tr.dataset.q='1'; tr.innerHTML='<td><input class="n" type="number" step="1" min="2" data-qf="min" value=""></td><td><input class="n" type="number" step="1" min="0" max="90" data-qf="off_pct" value=""></td><td><button class="rm" type="button" data-rmq>remove</button></td>'; $('#qty').appendChild(tr); tr.querySelector('input').focus(); };
+document.addEventListener('click',e=>{ if(e.target.matches('[data-rmp]')){ const tr=e.target.closest('tr'); if(tr.dataset.new) tr.remove(); else { tr.dataset.removed='1'; tr.style.opacity='.4'; e.target.textContent='removed, save to confirm'; } } if(e.target.matches('[data-rmq]')) e.target.closest('tr').remove(); });
+function collect(){ const book={services:[],sizes:[],materials:[],products:[],qty_breaks:[]};
+  B.services.forEach(s=>{ const g=f=>document.querySelector('input[data-svc="'+s.key+'"][data-f="'+f+'"]').value; book.services.push({key:s.key,setup_cents:Math.round(+g('setup_cents')*100),min_per_piece:+g('min_per_piece'),per_inch:+g('per_inch'),consumable_cents:Math.round(+g('consumable_cents')*100)}); });
+  B.sizes.forEach(z=>{ const row={inches:z.inches}; B.services.forEach(s=>{ row[s.key+'_cents']=Math.round(+document.querySelector('input[data-size="'+z.inches+'"][data-svc="'+s.key+'"]').value*100); }); book.sizes.push(row); });
+  B.materials.forEach(m=>{ book.materials.push({key:m.key,factor:+document.querySelector('input[data-mat="'+m.key+'"][data-f="factor"]').value,services:[...document.querySelectorAll('input[type=checkbox][data-mat="'+m.key+'"]')].filter(c=>c.checked).map(c=>c.dataset.svc)}); });
+  document.querySelectorAll('#products tr[data-p]').forEach(tr=>{ const g=f=>tr.querySelector('[data-pf="'+f+'"]').value; book.products.push({key:tr.dataset.p,name:g('name'),material:g('material'),blank_cents:Math.round(+g('blank_cents')*100),cost_cents:Math.round(+g('cost_cents')*100),max_inches:+g('max_inches'),removed:!!tr.dataset.removed}); });
+  book.products.push({key:'own'});
+  document.querySelectorAll('#qty tr[data-q]').forEach(tr=>{ const mn=+tr.querySelector('[data-qf="min"]').value, off=+tr.querySelector('[data-qf="off_pct"]').value; if(mn>=1) book.qty_breaks.push({min:mn,off_pct:off}); });
+  book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); return book; }
+$('#save').onclick=async()=>{ const b=$('#save'); b.disabled=true; $('#msg').textContent='Saving\\u2026'; $('#msg').className='msg';
+  try{ const r=await fetch('/api/pricing/book/all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({book:collect(),note:'edited on the prices page'})}); const j=await r.json(); if(!j.ok) throw new Error(j.error||'Save failed'); B=j.book; render(); $('#msg').textContent='Saved. '+j.changed+' price'+(j.changed===1?'':'s')+' changed. The order page uses these now.'; $('#msg').className='msg ok'; }
+  catch(e){ $('#msg').textContent=e.message; $('#msg').className='msg bad'; } b.disabled=false; };
+$('#reset').onclick=()=>{ render(); $('#msg').textContent='Back to the last saved numbers.'; $('#msg').className='msg'; };
+window.addEventListener('beforeunload',e=>{ if(document.querySelector('input.changed')){ e.preventDefault(); e.returnValue=''; } });
+load();
+</script></body></html>`;
 }

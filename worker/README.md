@@ -105,6 +105,8 @@ Every order starts on the same page, whether the customer does it at home or an 
 
 **DTF printing.** A third service in the price book, priced as print + press per piece by artwork size, on the customer's own shirts, hoodies, hats or totes (up to 12 in). No garment price is baked in; if the shop sources blanks for an order, that is quoted separately. Its ladder starts lower and climbs gently ($3.50 at half an inch, about $16 for a full 11 in front), setup $10. Tune it on the money page like everything else.
 
+**Editing prices.** `/admin/prices` shows every number on one screen (size ladder per finish, setup, rush, minimum, material factors, items, quantity breaks) with one Save button and a "fill the column" helper that sets a whole ladder from three numbers. Changed cells turn yellow until saved; every changed price is logged.
+
 **Price book.** Lives in D1 (`meta.price_book`), seeded from `DEFAULT_BOOK` in the worker. Edit any number on the money page (press Enter); every change is logged to `price_history`.
 
 **Pricing review.** Runs every Monday before the digest (and from the button on the money page). It only suggests: the owner approves or denies each item in the red box at the top of `/admin/money`, and each one explains why. Rules: the size ladder must climb by a little more each half inch; every item must clear the target margin after blank, labor and consumables; sizes or items priced often but rarely bought (or bought far above average) in the last 90 days; materials taking a bigger share of sales than the year before. Approving applies the change to the book immediately.
