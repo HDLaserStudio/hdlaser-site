@@ -163,6 +163,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
 
   // Samples: photos already on the website, grouped the way customers ask for them
   var CATS=[
+    {k:'apparel',n:'Apparel, DTF printing',cover:'dtf-tshirt.jpg',f:['dtf-tshirt','dtf-hats','dtf-sneaker','dtf-tote']},
     {k:'tumblers',n:'Tumblers',cover:'corp-crest-tumbler.jpg',f:['corp-crest-tumbler','corp-cell-rice-tumbler','corp-oktoberfest-tumbler','corporate-conway-yeti','corp-fritolay-yetis','engrave-red-tumbler-poster','team-detectives-tumblers','drink-monogram-tumblers','hero-laser-tumbler-poster']},
     {k:'bottles',n:'Bottles',cover:'corp-ucsd-bottle.jpg',f:['corp-ucsd-bottle','corp-dhs-bottle','corp-hummingbird-bottle','corp-prevost-bottle','corp-target-bottles','drink-mina-bottle','engrave-name-bottles','engrave-white-bottle-poster','team-name-bottles','wed-21st-bottle','award-regionals-bottles']},
     {k:'cups',n:'Coffee shop cups',cover:'bnb-cups-printed-group.jpg',f:['bnb-cups-printed-group','bnb-cup-printed-closeup','bnb-cups-engraved','team-letter-shot-cups','cup-cream','cup-black','cup-navy','cup-pink','cup-bikini-pink','cup-yellow','cup-orange','cup-purple','cup-light-green','cup-army-green','cup-light-blue','cup-dark-gray']},
@@ -175,7 +176,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
     {k:'cutting',n:'Laser cutting',cover:'cutting-layered-flag.jpg',f:['cutting-layered-flag','cutting-flag-full','cutting-goldfish','cutting-hamsa','cutting-sea-turtle','cutting-tree-of-life','cutting-vajra-ornament']},
     {k:'gifts',n:'Gifts & weddings',cover:'gift-watch-box.jpg',f:['gift-watch-box','gift-cigar-humidor','gift-cribbage','gift-heart-box','gift-waterman-pen','tech-airpods','engrave-birth-frame','engrave-led-lamp','wed-bridal-shoe','wed-date-blocks','gift-champagne']}
   ];
-  var cap=function(f){ return f.replace(/-poster$/,'').replace(/^(corp|corporate|award|gift|wed|engrave|cutting|drink|team|tech|wood|uv|bnb|cup|hero-laser)-/,'').replace(/-/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();}); };
+  var cap=function(f){ return f.replace(/-poster$/,'').replace(/^(corp|corporate|award|gift|wed|engrave|cutting|drink|team|tech|wood|uv|bnb|cup|dtf|hero-laser)-/,'').replace(/-/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();}); };
   function view(name,arg){
     var v=$('#view'); $('#home').hidden=true; v.hidden=false; window.scrollTo(0,0);
     if(name==='samples'&&!arg){ v.innerHTML='<div class="panel"><button class="back" data-home>&#8592; Hub</button><h2>Samples</h2><p style="margin:0 0 16px;color:#545B63">Tap a category. Tap a photo to fill the screen.</p><div class="cats">'+CATS.map(function(c){ return '<button type="button" class="cat" data-cat="'+c.k+'"><img src="/assets/'+c.cover+'" alt=""><i>'+c.f.length+'</i><span>'+esc(c.n)+'</span></button>'; }).join('')+'</div></div>'; return; }
