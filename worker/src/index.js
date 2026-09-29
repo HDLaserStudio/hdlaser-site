@@ -2106,9 +2106,13 @@ async function plaidSync(env, onlyItem, maxPages = 4) {
         for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100)); // one round trip per 100 rows, cursor last
       }
       if (more) out.more = true;
-      const b = await plaid(env, "/accounts/balance/get", { access_token: it.access_token });
+      // Balance is billed per request; transactions are billed per account per month. Refresh balances once a day
+      // (or on a manual/new-link sync), not on every hourly tick.
+      let lastBal = null; try { lastBal = JSON.parse(it.balances || "{}")._at || null; } catch {}
+      const balanceDue = !!onlyItem || !lastBal || (Date.now() - new Date(lastBal)) > 20 * 3600000;
+      const b = balanceDue ? await plaid(env, "/accounts/balance/get", { access_token: it.access_token }) : { ok: false, skipped: true };
       if (b.ok) {
-        const bal = {}; let checking = 0, any = false;
+        const bal = { _at: new Date().toISOString() }; let checking = 0, any = false;
         for (const a of b.data.accounts || []) { bal[a.account_id] = { name: a.name, mask: a.mask, type: a.type, subtype: a.subtype, current: Math.round((a.balances.current || 0) * 100), available: a.balances.available == null ? null : Math.round(a.balances.available * 100) }; if (a.type === "depository") { checking += Math.round((a.balances.available != null ? a.balances.available : a.balances.current || 0) * 100); any = true; } }
         await env.DB.prepare(`UPDATE plaid_items SET balances = ? WHERE item_id = ?`).bind(JSON.stringify(bal), it.item_id).run();
         if (any) await saveFinSettings(env, { cash_balance_cents: await totalDepository(env), cash_as_of: new Date().toISOString().slice(0, 10) });
@@ -2123,13 +2127,13 @@ async function totalDepository(env) {
   const items = (await env.DB.prepare(`SELECT accounts, balances FROM plaid_items`).all()).results; let sum = 0;
   for (const it of items) {
     const personal = new Set(JSON.parse(it.accounts || "[]").filter((a) => a.personal).map((a) => a.id));
-    for (const [id, a] of Object.entries(JSON.parse(it.balances || "{}"))) if (a.type === "depository" && !personal.has(id)) sum += a.available != null ? a.available : a.current;
+    for (const [id, a] of Object.entries(JSON.parse(it.balances || "{}"))) if (id !== "_at" && a.type === "depository" && !personal.has(id)) sum += a.available != null ? a.available : a.current;
   }
   return sum;
 }
 async function plaidItems(env) {
   const items = (await env.DB.prepare(`SELECT item_id, institution, accounts, balances, status, last_error, synced_at, created_at FROM plaid_items ORDER BY created_at`).all()).results;
-  return items.map((it) => ({ ...it, accounts: JSON.parse(it.accounts || "[]"), balances: Object.values(JSON.parse(it.balances || "{}")) }));
+  return items.map((it) => ({ ...it, accounts: JSON.parse(it.accounts || "[]"), balances: Object.entries(JSON.parse(it.balances || "{}")).filter(([k]) => k !== "_at").map(([, v]) => v), balances_at: (() => { try { return JSON.parse(it.balances || "{}")._at || null; } catch { return null; } })() }));
 }
 // Mark one account at a bank as personal (kept out of the business P&L) or business. Re-files the transactions already
 // imported from that account, except ones the owner categorized by hand.
