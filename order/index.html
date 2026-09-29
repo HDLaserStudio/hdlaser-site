@@ -136,7 +136,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
 
   <section class="step" id="s-size">
     <h2><span class="n">3</span>How big is the artwork?</h2>
-    <p class="sub">Measured on the longest side of your logo or text. Slide it and watch the preview. A left-chest logo is about 3 in; a full front print is 10 to 12 in.</p>
+    <p class="sub">Measured on the longest side of your logo or text. Slide it and watch the preview. On a garment, a left-chest logo is about 3 in and a full front print is 10 to 12 in.</p>
     <div class="sizerow">
       <div class="readout"><span id="inches">2</span> in<small id="ppu"></small></div>
       <input type="range" id="size" min="0.5" max="4" step="0.5" value="2" aria-label="Artwork size in inches">
@@ -282,7 +282,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
 
   // ---- render
   function renderProducts(){
-    $('#products').innerHTML = BOOK.products.map(function(p){ var pm = BOOK.materials.filter(function(x){return x.key===p.material;})[0]; var from = p.key==='own' || !pm ? null : unitFor(p.key, null, pm.services[0], 0.5) + p.blank_cents; return '<button type="button" class="tile'+(S.product===p.key?' on':'')+'" data-p="'+p.key+'">'+thumb(p)+'<b>'+esc(p.name)+'</b><small>'+(from!=null ? 'from '+money0(from) : 'we price the work only')+'</small></button>'; }).join('');
+    $('#products').innerHTML = BOOK.products.map(function(p){ var pm = BOOK.materials.filter(function(x){return x.key===p.material;})[0]; var from = p.key==='own' || !pm ? null : unitFor(p.key, null, pm.services[0], 0.5) + p.blank_cents; return '<button type="button" class="tile'+(S.product===p.key?' on':'')+'" data-p="'+p.key+'">'+thumb(p)+'<b>'+esc(p.name)+'</b><small>'+(p.key==='garment' ? 'print and press, from '+money0(from) : from!=null ? 'from '+money0(from) : 'we price the work only')+'</small></button>'; }).join('');
     var own = S.product==='own'; $('#materials').hidden = !own;
     if (own) $('#matchips').innerHTML = BOOK.materials.map(function(m){ return '<button type="button" class="chip'+(S.material===m.key?' on':'')+'" data-m="'+m.key+'">'+esc(m.name)+'</button>'; }).join('');
   }
@@ -302,7 +302,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var box = $('#preview');
     if (!p) { box.querySelector('svg').outerHTML = shapeSvg(BOOK.products[0], SAMPLE, 2, 'engrave'); $('#cap').innerHTML = 'Pick an item to see the preview.'; return; }
     box.querySelector('svg').outerHTML = shapeSvg(p, S.logo || SAMPLE, S.inches, S.service==='engrave' || !S.service ? 'engrave' : 'uv');
-    $('#cap').innerHTML = (S.logo ? '<b>Your logo</b>' : '<b>Our logo as a stand-in.</b> Yours goes here') + ' at <b>'+S.inches+' in</b> on the '+esc(p.name.toLowerCase())+(S.service ? ', '+(S.service==='engrave'?'engraved':'full color') : '')+'. Drawn to scale.';
+    $('#cap').innerHTML = (S.logo ? '<b>Your logo</b>' : '<b>Our logo as a stand-in.</b> Yours goes here') + ' at <b>'+S.inches+' in</b> on '+(p.key==='garment' ? 'your garment (shirt shown; same price on hoodies, hats and totes)' : 'the '+esc(p.name.toLowerCase()))+(S.service ? ', '+(S.service==='engrave'?'engraved':'full color') : '')+'. Drawn to scale.';
   }
   function renderSummary(){
     var q = quote(); var dl = $('#lines');
@@ -320,7 +320,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   function renderWords(){
     var q = quote(); var name = $('#name').value.trim() || 'I';
     if (!q) { $('#words').innerHTML = 'Finish steps 1 to 4 and your confirmation appears here.'; return; }
-    var item = q.product.key==='own' ? 'my own '+q.material.name.toLowerCase()+' item' : 'a '+q.product.name.toLowerCase();
+    var item = q.product.key==='own' ? 'my own '+q.material.name.toLowerCase()+' item' : q.product.key==='garment' ? 'my own garment' : 'a '+q.product.name.toLowerCase();
     $('#words').innerHTML = 'I, <b>'+esc(name==='I'?'(your name)':name)+'</b>, have checked this order myself. HD Laser Studio will make exactly what I have specified here: <b>'+esc(lcName(q.service.name))+'</b> on <b>'+esc(item)+'</b>, artwork <b>'+S.inches+' inches</b> on its longest side, quantity <b>'+q.qty+'</b>. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, <b>any redo or replacement is at my expense.</b>';
   }
   function lcName(n){ return String(n).replace(/\b[A-Z][a-z]+\b/g, function(w){ return w.toLowerCase(); }); }
