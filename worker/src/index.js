@@ -889,6 +889,7 @@ const PRODUCTS = [
   { key: "cup_printed", name: "Logo cups, UV printed", setup: 30, each: 3 },
   { key: "tumbler", name: "Tumbler or bottle engraving", setup: 10, each: 12 },
   { key: "uv_small", name: "UV print, small item", setup: 10, each: 8 },
+  { key: "dtf", name: "DTF print on apparel", setup: 15, each: 4 },
   { key: "award", name: "Plaque, award or trophy", setup: 15, each: 25 },
   { key: "board", name: "Cutting board or wood engraving", setup: 10, each: 20 },
   { key: "glass", name: "Glassware engraving", setup: 10, each: 10 },
@@ -1946,7 +1947,7 @@ async function loadPricing(){ const r=await fetch('/api/pricing'); if(!r.ok) ret
   $('#pricefoot').innerHTML=P.pending.length+' waiting. <button id="rr2">Run the review again</button>';
   $('#reviewmeta').textContent=(P.last_review?'Last review '+new Date(P.last_review).toLocaleString():'The review has not run yet.')+' \u00b7 target margin '+Math.round(P.target_margin*100)+'%';
   const soldOf=(svc,inch)=>{ const r=P.sold.find(x=>x.service===svc&&x.inches===inch); return r?r.n:0; };
-  const sizes='<div class="card"><h3>Per piece by artwork size <span class="small">longest side; \u00d7 material factor</span></h3><table><tr><th>Size</th><th class="num">Engraving</th><th class="num">UV print</th><th class="num">Sold</th></tr>'+B.sizes.map(z=>'<tr><td>'+z.inches+' in</td><td class="num"><input data-t=\\''+JSON.stringify({type:'size',service:'engrave',inches:z.inches})+'\\' value="'+(z.engrave_cents/100).toFixed(2)+'"></td><td class="num"><input data-t=\\''+JSON.stringify({type:'size',service:'uv',inches:z.inches})+'\\' value="'+(z.uv_cents/100).toFixed(2)+'"></td><td class="num small">'+(soldOf('engrave',z.inches)+soldOf('uv',z.inches))+'</td></tr>').join('')+'</table></div>';
+  const svcs=B.services; const sizes='<div class="card"><h3>Per piece by artwork size <span class="small">longest side; \u00d7 material factor</span></h3><table><tr><th>Size</th>'+svcs.map(v=>'<th class="num">'+esc(v.name)+'</th>').join('')+'<th class="num">Sold</th></tr>'+B.sizes.map(z=>'<tr><td>'+z.inches+' in</td>'+svcs.map(v=>'<td class="num"><input data-t=\''+JSON.stringify({type:'size',service:v.key,inches:z.inches})+'\' value="'+((z[v.key+'_cents']||0)/100).toFixed(2)+'"></td>').join('')+'<td class="num small">'+svcs.reduce((n,v)=>n+soldOf(v.key,z.inches),0)+'</td></tr>').join('')+'</table></div>';
   const items='<div class="card"><h3>Items we supply</h3><table><tr><th>Item</th><th>Material</th><th class="num">Price</th><th class="num">Our cost</th><th class="num">Max art</th></tr>'+B.products.filter(p=>p.key!=='own').map(p=>'<tr><td>'+esc(p.name)+'</td><td class="small">'+esc(p.material)+'</td><td class="num"><input data-t=\\''+JSON.stringify({type:'product',key:p.key,field:'blank_cents'})+'\\' value="'+(p.blank_cents/100).toFixed(2)+'"></td><td class="num"><input data-t=\\''+JSON.stringify({type:'product',key:p.key,field:'cost_cents'})+'\\' value="'+((p.cost_cents||0)/100).toFixed(2)+'"></td><td class="num small">'+p.max_inches+' in</td></tr>').join('')+'</table><p class="small" style="margin-top:8px">Materials: '+B.materials.map(m=>esc(m.name)+' \u00d7'+m.factor).join(', ')+'. Quantity: '+B.qty_breaks.filter(b=>b.off_pct).map(b=>b.min+'+ '+b.off_pct+'% off the work').join(', ')+'. Setup '+B.services.map(s=>esc(s.name)+' '+cents(s.setup_cents)).join(', ')+'. Rush +'+B.rush_pct+'%. Own item handling '+cents(B.own_item_handling_cents)+' each. Minimum order '+cents(B.min_order_cents)+'.</p></div>';
   $('#pricelist').innerHTML=sizes+items;
   $('#decided').innerHTML=(P.decided.length?'<table>'+P.decided.map(d=>'<tr><td class="small">'+new Date(d.decided_at).toLocaleDateString()+'</td><td>'+esc(d.label)+'</td><td class="num">'+cents(d.current_cents)+' \u2192 '+cents(d.proposed_cents)+'</td><td><span class="pill '+(d.status==='approved'?'good':'over')+'">'+d.status+'</span></td><td class="small">'+esc(d.note||'')+'</td></tr>').join('')+'</table>':'<p class="small">No decisions yet.</p>')
@@ -2200,12 +2201,13 @@ const DEFAULT_BOOK = {
   services: [
     { key: "engrave", name: "Laser engraving", blurb: "Etched into the surface. Permanent, one tone.", setup_cents: 2500, min_per_piece: 4, per_inch: 2, consumable_cents: 8 },
     { key: "uv", name: "UV printing", blurb: "Full color, printed onto the surface.", setup_cents: 3500, min_per_piece: 3, per_inch: 1.5, consumable_cents: 35 },
+    { key: "dtf", name: "DTF printing", blurb: "Full color pressed onto fabric. Shirts, hoodies, hats, totes.", setup_cents: 1000, min_per_piece: 3, per_inch: 0.5, consumable_cents: 60 },
   ],
   // Price per piece by the artwork's longest side, in half-inch steps. Each step up costs a little more than the step
   // before it (first_gap, then +gap_growth every step), so the bigger the engraving the more it carries, and the next
   // size up always looks like a small jump. sizes[] is generated from these once, then edited cell by cell.
-  ladders: { engrave: { start_cents: 800, first_gap_cents: 150, gap_growth_cents: 50 }, uv: { start_cents: 1000, first_gap_cents: 175, gap_growth_cents: 50 } },
-  max_inches: 8,
+  ladders: { engrave: { start_cents: 800, first_gap_cents: 150, gap_growth_cents: 50 }, uv: { start_cents: 1000, first_gap_cents: 175, gap_growth_cents: 50 }, dtf: { start_cents: 350, first_gap_cents: 30, gap_growth_cents: 3 } },
+  max_inches: 12,
   sizes: [],
   materials: [
     { key: "wood", name: "Wood", factor: 1, services: ["engrave", "uv"] },
@@ -2214,6 +2216,7 @@ const DEFAULT_BOOK = {
     { key: "leather", name: "Leather", factor: 1.1, services: ["engrave"] },
     { key: "acrylic", name: "Acrylic or plastic", factor: 1.1, services: ["engrave", "uv"] },
     { key: "stone", name: "Stone or slate", factor: 1.4, services: ["engrave"] },
+    { key: "fabric", name: "Fabric", factor: 1, services: ["dtf"] },
   ],
   // blank_cents is what the customer pays for the item when we supply it; cost_cents is what it costs us (never shown).
   products: [
@@ -2224,7 +2227,11 @@ const DEFAULT_BOOK = {
     { key: "plaque", name: "Wood plaque", material: "wood", blank_cents: 2800, cost_cents: 1100, max_inches: 7, w_in: 8, h_in: 10, shape: "plaque", photo: "/assets/engrave-tree-plaque.jpg" },
     { key: "tag", name: "Metal tag or plate", material: "metal", blank_cents: 600, cost_cents: 150, max_inches: 2.5, w_in: 3, h_in: 2, shape: "tag", photo: "/assets/engrave-anodized-tags.jpg" },
     { key: "patch", name: "Leather patch or wallet", material: "leather", blank_cents: 1400, cost_cents: 500, max_inches: 2.5, w_in: 3.5, h_in: 2.5, shape: "patch", photo: "/assets/uv-mandala-wallet.jpg" },
-    { key: "own", name: "Something I'll bring in", material: null, blank_cents: 0, cost_cents: 0, max_inches: 8, w_in: 8, h_in: 8, shape: "own", photo: null },
+    { key: "tshirt", name: "T-shirt", material: "fabric", blank_cents: 1200, cost_cents: 400, max_inches: 12, w_in: 20, h_in: 27, shape: "shirt", photo: null },
+    { key: "hoodie", name: "Hoodie", material: "fabric", blank_cents: 2800, cost_cents: 1400, max_inches: 12, w_in: 22, h_in: 29, shape: "hoodie", photo: null },
+    { key: "tote", name: "Tote bag", material: "fabric", blank_cents: 900, cost_cents: 350, max_inches: 10, w_in: 15, h_in: 20, shape: "tote", photo: null },
+    { key: "cap", name: "Hat", material: "fabric", blank_cents: 1400, cost_cents: 500, max_inches: 3, w_in: 10, h_in: 6, shape: "cap", photo: null },
+    { key: "own", name: "Something I'll bring in", material: null, blank_cents: 0, cost_cents: 0, max_inches: 12, w_in: 8, h_in: 8, shape: "own", photo: null },
   ],
   qty_breaks: [{ min: 1, off_pct: 0 }, { min: 6, off_pct: 5 }, { min: 12, off_pct: 10 }, { min: 25, off_pct: 15 }, { min: 50, off_pct: 20 }, { min: 100, off_pct: 25 }],
   rush_pct: 50,                       // added to the work portion when they need it in under 3 business days
@@ -2232,7 +2239,7 @@ const DEFAULT_BOOK = {
   min_order_cents: 2500,
 };
 function ladderPrices(l, steps) { const out = []; let p = l.start_cents; for (let i = 0; i < steps; i++) { out.push(Math.round(p / 25) * 25); p += l.first_gap_cents + i * l.gap_growth_cents; } return out; }
-function buildSizes(book) { const n = Math.round(book.max_inches / 0.5); const e = ladderPrices(book.ladders.engrave, n), u = ladderPrices(book.ladders.uv, n); return Array.from({ length: n }, (_, i) => ({ inches: (i + 1) / 2, engrave_cents: e[i], uv_cents: u[i] })); }
+function buildSizes(book) { const n = Math.round(book.max_inches / 0.5); const cols = Object.fromEntries(Object.entries(book.ladders).map(([k, l]) => [k, ladderPrices(l, n)])); return Array.from({ length: n }, (_, i) => { const row = { inches: (i + 1) / 2 }; for (const k of Object.keys(cols)) row[k + "_cents"] = cols[k][i]; return row; }); }
 DEFAULT_BOOK.sizes = buildSizes(DEFAULT_BOOK);
 
 async function priceBook(env) {
@@ -2240,7 +2247,13 @@ async function priceBook(env) {
   if (!row) return JSON.parse(JSON.stringify(DEFAULT_BOOK));
   let s = {}; try { s = JSON.parse(row.v); } catch {}
   const book = { ...JSON.parse(JSON.stringify(DEFAULT_BOOK)), ...s };
-  if (!Array.isArray(book.sizes) || !book.sizes.length) book.sizes = buildSizes(book);
+  // anything the code has added since the book was saved (a new service, material, item or size) joins the saved book; saved prices win
+  for (const k of ["services", "materials", "products"]) { const have = new Set((book[k] || []).map((x) => x.key)); for (const d of DEFAULT_BOOK[k]) if (!have.has(d.key)) book[k].push(JSON.parse(JSON.stringify(d))); }
+  book.ladders = { ...DEFAULT_BOOK.ladders, ...(s.ladders || {}) }; book.max_inches = Math.max(book.max_inches || 0, DEFAULT_BOOK.max_inches);
+  if (!Array.isArray(book.sizes)) book.sizes = [];
+  const fresh = buildSizes(book);
+  for (const f of fresh) { let row = book.sizes.find((x) => x.inches === f.inches); if (!row) { row = { inches: f.inches }; book.sizes.push(row); } for (const svc of book.services) { const c = svc.key + "_cents"; if (row[c] == null) row[c] = f[c]; } }
+  book.sizes.sort((a, b) => a.inches - b.inches);
   return book;
 }
 async function saveBook(env, book) { book.updated_at = new Date().toISOString(); await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('price_book', ?)`).bind(JSON.stringify(book)).run(); return book; }
@@ -2279,12 +2292,14 @@ function quoteSpec(book, spec) {
   return { product, material, service, inches, qty, rush, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_cents: (workUnit - workUnitAfter) * qty,
     blank_unit_cents: blankUnit, handling_unit_cents: handlingUnit, work_cents: work, blank_cents: blank, handling_cents: handling, rush_cents: rushCents, setup_cents: setup, minimum_top_up_cents: minimumTopUp, subtotal_cents: subtotal,
     next_break: nextBreak ? { min: nextBreak.min, off_pct: nextBreak.off_pct } : null,
-    summary: `${qty} × ${service.name.toLowerCase()}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.name.toLowerCase()}${rush ? ", rush" : ""}` };
+    summary: `${qty} × ${lcName(service.name)}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.name.toLowerCase()}${rush ? ", rush" : ""}` };
 }
 // The exact words the customer initials. Rendered identically on the order page; the copy stored with the order is this one.
 function attestText(q, name) {
-  return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what I have specified here: ${q.service.name.toLowerCase()} on ${q.product.key === "own" ? "my own " + q.material.name.toLowerCase() + " item" : "a " + q.product.name.toLowerCase()}, artwork ${q.inches} inches on its longest side, quantity ${q.qty}. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
+  return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what I have specified here: ${lcName(q.service.name)} on ${q.product.key === "own" ? "my own " + q.material.name.toLowerCase() + " item" : "a " + q.product.name.toLowerCase()}, artwork ${q.inches} inches on its longest side, quantity ${q.qty}. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
 }
+// lower-case a service name for a sentence, keeping acronyms: "UV printing", "DTF printing", "laser engraving"
+function lcName(n) { return String(n).replace(/\b[A-Z][a-z]+\b/g, (w) => w.toLowerCase()); }
 function initialsFor(name) { const w = String(name || "").trim().split(/\s+/).filter(Boolean); if (!w.length) return ""; return (w[0][0] + (w.length > 1 ? w[w.length - 1][0] : "")).toUpperCase(); }
 
 async function orderCheckout(request, env, cors) {
@@ -2355,7 +2370,7 @@ async function orderCheckout(request, env, cors) {
   // tell the shop and the customer straight away; payment confirmation follows from the Square webhook
   const $ = (n) => "$" + (n / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const who = c.business ? `${c.business} (${name})` : name;
-  const breakdown = [`${q.qty} × ${q.service.name.toLowerCase()} ${q.inches} in @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", `Setup ${$(q.setup_cents)}`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
+  const breakdown = [`${q.qty} × ${lcName(q.service.name)} ${q.inches} in @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", `Setup ${$(q.setup_cents)}`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
   if (env.RESEND_API_KEY) {
     await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
 `New order ${ref} from hdlaser.net${takenBy ? " (taken at the counter by " + takenBy + ")" : ""}
@@ -2536,7 +2551,7 @@ async function editBook(env, body) {
 async function reloadBook(env) {
   const before = await priceBook(env); const book = JSON.parse(JSON.stringify(DEFAULT_BOOK)); await saveBook(env, book);
   let changed = 0; const now = new Date().toISOString();
-  for (const s of book.sizes) for (const svc of ["engrave", "uv"]) { const t = { type: "size", service: svc, inches: s.inches }; const from = readTarget(before, t), to = readTarget(book, t); if (from !== to) { changed++; await env.DB.prepare(`INSERT INTO price_history (ts, target, from_cents, to_cents, source, suggestion_id, note) VALUES (?,?,?,?,?,?,?)`).bind(now, JSON.stringify(t), from, to, "reload", null, "loaded from the code").run(); } }
+  for (const s of book.sizes) for (const svc of book.services.map((x) => x.key)) { const t = { type: "size", service: svc, inches: s.inches }; const from = readTarget(before, t), to = readTarget(book, t); if (from !== to) { changed++; await env.DB.prepare(`INSERT INTO price_history (ts, target, from_cents, to_cents, source, suggestion_id, note) VALUES (?,?,?,?,?,?,?)`).bind(now, JSON.stringify(t), from, to, "reload", null, "loaded from the code").run(); } }
   for (const p of book.products) for (const field of ["blank_cents", "cost_cents"]) { const t = { type: "product", key: p.key, field }; const from = readTarget(before, t), to = readTarget(book, t); if (from !== to) { changed++; await env.DB.prepare(`INSERT INTO price_history (ts, target, from_cents, to_cents, source, suggestion_id, note) VALUES (?,?,?,?,?,?,?)`).bind(now, JSON.stringify(t), from, to, "reload", null, "loaded from the code").run(); } }
   return { ok: true, changed, version: book.version };
 }

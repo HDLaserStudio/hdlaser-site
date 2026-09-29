@@ -52,7 +52,7 @@ h1{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:44px;li
 .chip{border:2px solid var(--line);background:#fff;border-radius:999px;padding:9px 16px;font:inherit;font-weight:700;cursor:pointer;color:var(--ink)}
 .chip.on{border-color:var(--red);background:var(--sel)}
 .chip:disabled{opacity:.45;cursor:not-allowed}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
 .svc{border:2px solid var(--line);border-radius:16px;background:#fff;padding:14px 16px;text-align:left;cursor:pointer;font:inherit;color:var(--ink)}
 .svc b{display:block;font-size:17px;margin-bottom:3px}.svc span{color:var(--muted);font-size:14px;line-height:1.4}
 .svc.on{border-color:var(--red);background:var(--sel)}
@@ -129,14 +129,14 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   </section>
 
   <section class="step" id="s-service">
-    <h2><span class="n">2</span>Engraving or full-color print?</h2>
-    <p class="sub">Engraving is etched into the surface, one tone, forever. UV printing lays down full color.</p>
+    <h2><span class="n">2</span>How should we put it on?</h2>
+    <p class="sub">Engraving is etched into the surface, one tone, forever. UV printing lays full color onto hard goods. DTF presses full color onto fabric.</p>
     <div class="two" id="services"></div>
   </section>
 
   <section class="step" id="s-size">
     <h2><span class="n">3</span>How big is the artwork?</h2>
-    <p class="sub">Measured on the longest side of your logo or text. Slide it and watch the preview.</p>
+    <p class="sub">Measured on the longest side of your logo or text. Slide it and watch the preview. A left-chest logo is about 3 in; a full front print is 10 to 12 in.</p>
     <div class="sizerow">
       <div class="readout"><span id="inches">2</span> in<small id="ppu"></small></div>
       <input type="range" id="size" min="0.5" max="4" step="0.5" value="2" aria-label="Artwork size in inches">
@@ -267,6 +267,10 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     else if (p.shape==='plaque'){ body='<rect x="'+x+'" y="'+y+'" width="'+W+'" height="'+H+'" rx="0.25" fill="url(#wd)" stroke="#6E4A22" stroke-width="0.06"/><rect x="'+(x+0.45)+'" y="'+(y+0.45)+'" width="'+(W-0.9)+'" height="'+(H-0.9)+'" rx="0.1" fill="none" stroke="#8A6234" stroke-width="0.05"/><rect x="'+x+'" y="'+y+'" width="'+W+'" height="'+H+'" rx="0.25" fill="url(#grain)"/>'; tone='#3A2412'; }
     else if (p.shape==='tag'){ body='<rect x="'+x+'" y="'+y+'" width="'+W+'" height="'+H+'" rx="0.3" fill="url(#st)" stroke="#6B737B" stroke-width="0.04"/><circle cx="'+(x+0.35)+'" cy="'+cy+'" r="0.14" fill="#F6F4EF" stroke="#6B737B" stroke-width="0.03"/>'; cx=x+0.55+(W-0.55)/2; tone='#1E2328'; }
     else if (p.shape==='patch'){ body='<rect x="'+x+'" y="'+y+'" width="'+W+'" height="'+H+'" rx="0.35" fill="#9B6A3E" stroke="#6E4623" stroke-width="0.05"/><rect x="'+(x+0.18)+'" y="'+(y+0.18)+'" width="'+(W-0.36)+'" height="'+(H-0.36)+'" rx="0.25" fill="none" stroke="#E9D8B8" stroke-width="0.04" stroke-dasharray="0.12 0.1"/>'; tone='#2F1A08'; }
+    else if (p.shape==='shirt'){ body='<path d="M'+(x+4)+' '+(y+2)+' L'+(x+8)+' '+(y+0.4)+' Q'+(x+10)+' '+(y+2.2)+' '+(x+12)+' '+(y+0.4)+' L'+(x+16)+' '+(y+2)+' L'+(x+20)+' '+(y+6)+' L'+(x+17)+' '+(y+8.5)+' L'+(x+15.5)+' '+(y+7)+' L'+(x+15.5)+' '+(y+H)+' L'+(x+4.5)+' '+(y+H)+' L'+(x+4.5)+' '+(y+7)+' L'+(x+3)+' '+(y+8.5)+' L'+x+' '+(y+6)+' Z" fill="#F7F5F0" stroke="#B9B2A5" stroke-width="0.08"/>'; cx=x+10; cy=y+11.5; tone='#1E2328'; }
+    else if (p.shape==='hoodie'){ body='<path d="M'+(x+5)+' '+(y+3)+' L'+(x+8)+' '+(y+1.5)+' Q'+(x+11)+' '+(y-0.5)+' '+(x+14)+' '+(y+1.5)+' L'+(x+17)+' '+(y+3)+' L'+(x+22)+' '+(y+8)+' L'+(x+19)+' '+(y+10.5)+' L'+(x+17.5)+' '+(y+9)+' L'+(x+17.5)+' '+(y+H)+' L'+(x+4.5)+' '+(y+H)+' L'+(x+4.5)+' '+(y+9)+' L'+(x+3)+' '+(y+10.5)+' L'+x+' '+(y+8)+' Z" fill="#2A2F35"/><path d="M'+(x+8)+' '+(y+1.5)+' Q'+(x+11)+' '+(y+4.6)+' '+(x+14)+' '+(y+1.5)+' Q'+(x+11)+' '+(y-0.8)+' '+(x+8)+' '+(y+1.5)+' Z" fill="#3B4148"/><rect x="'+(x+7)+'" y="'+(y+H-5)+'" width="8" height="4" rx="0.4" fill="#22262B"/>'; cx=x+11; cy=y+12; tone='#F6F4EF'; }
+    else if (p.shape==='tote'){ body='<path d="M'+(x+4)+' '+(y+5)+' Q'+(x+4)+' '+y+' '+(x+7.5)+' '+y+' Q'+(x+11)+' '+y+' '+(x+11)+' '+(y+5)+'" fill="none" stroke="#8A6234" stroke-width="0.5"/><rect x="'+x+'" y="'+(y+5)+'" width="'+W+'" height="'+(H-5)+'" rx="0.4" fill="#E9DFC8" stroke="#B9A98A" stroke-width="0.08"/>'; cy=y+5+(H-5)/2; tone='#3A2412'; }
+    else if (p.shape==='cap'){ body='<path d="M'+(x+1)+' '+(y+4)+' Q'+(x+1)+' '+(y+0.4)+' '+(x+5)+' '+(y+0.4)+' Q'+(x+9)+' '+(y+0.4)+' '+(x+9)+' '+(y+4)+' Z" fill="#2B5F8A"/><path d="M'+x+' '+(y+4)+' Q'+(x+5)+' '+(y+6)+' '+(x+10)+' '+(y+4)+' L'+(x+9)+' '+(y+4.7)+' Q'+(x+5)+' '+(y+6.7)+' '+(x+1)+' '+(y+4.7)+' Z" fill="#234B6E"/><path d="M'+(x+5)+' '+(y+0.4)+' L'+(x+5)+' '+(y+4)+'" stroke="#234B6E" stroke-width="0.06"/>'; cx=x+5; cy=y+2.7; tone='#F6F4EF'; }
     else { body='<rect x="'+x+'" y="'+y+'" width="'+W+'" height="'+H+'" rx="0.6" fill="#fff" stroke="#A9A196" stroke-width="0.06" stroke-dasharray="0.3 0.2"/><text x="'+cx+'" y="'+(y+0.7)+'" text-anchor="middle" font-size="0.42" fill="#A9A196" font-family="Figtree,sans-serif">your item</text>'; tone='#3B4148'; }
     var box = inches, lx = cx-box/2, ly = cy-box/2;
     var img = logoSrc ? '<image href="'+logoSrc+'" x="'+lx+'" y="'+ly+'" width="'+box+'" height="'+box+'" preserveAspectRatio="xMidYMid meet"'+(mode==='engrave' ? ' style="filter:grayscale(1) contrast(1.15) brightness(.3)" opacity=".92"' : '')+'/>' : '';
@@ -274,11 +278,11 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var dim = '<g stroke="#C8372A" stroke-width="0.035" fill="none"><line x1="'+lx+'" y1="'+(ly+box+0.28)+'" x2="'+(lx+box)+'" y2="'+(ly+box+0.28)+'"/><line x1="'+lx+'" y1="'+(ly+box+0.16)+'" x2="'+lx+'" y2="'+(ly+box+0.4)+'"/><line x1="'+(lx+box)+'" y1="'+(ly+box+0.16)+'" x2="'+(lx+box)+'" y2="'+(ly+box+0.4)+'"/></g><text x="'+cx+'" y="'+(ly+box+0.62)+'" text-anchor="middle" font-size="'+Math.max(0.28, Math.min(0.5, W/12))+'" font-weight="700" fill="#C8372A" font-family="Figtree,sans-serif">'+inches+' in</text>';
     return '<svg viewBox="'+vb+'" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" role="img" aria-label="'+esc(p.name)+' with '+inches+' inch artwork">'+defs+body+img+dim+'</svg>';
   }
-  function thumb(p){ return shapeSvg(p, SAMPLE, Math.min(p.max_inches, 2.5), 'engrave').replace(/<g stroke="#C8372A"[\s\S]*?<\/text>/, ''); }
+  function thumb(p){ return shapeSvg(p, SAMPLE, Math.min(p.max_inches, 2.5), p.material==='fabric' ? 'uv' : 'engrave').replace(/<g stroke="#C8372A"[\s\S]*?<\/text>/, ''); }
 
   // ---- render
   function renderProducts(){
-    $('#products').innerHTML = BOOK.products.map(function(p){ var from = p.key==='own' ? null : unitFor(p.key, null, 'engrave', 0.5) + p.blank_cents; return '<button type="button" class="tile'+(S.product===p.key?' on':'')+'" data-p="'+p.key+'">'+thumb(p)+'<b>'+esc(p.name)+'</b><small>'+(from!=null ? 'from '+money0(from) : 'we price the work only')+'</small></button>'; }).join('');
+    $('#products').innerHTML = BOOK.products.map(function(p){ var pm = BOOK.materials.filter(function(x){return x.key===p.material;})[0]; var from = p.key==='own' || !pm ? null : unitFor(p.key, null, pm.services[0], 0.5) + p.blank_cents; return '<button type="button" class="tile'+(S.product===p.key?' on':'')+'" data-p="'+p.key+'">'+thumb(p)+'<b>'+esc(p.name)+'</b><small>'+(from!=null ? 'from '+money0(from) : 'we price the work only')+'</small></button>'; }).join('');
     var own = S.product==='own'; $('#materials').hidden = !own;
     if (own) $('#matchips').innerHTML = BOOK.materials.map(function(m){ return '<button type="button" class="chip'+(S.material===m.key?' on':'')+'" data-m="'+m.key+'">'+esc(m.name)+'</button>'; }).join('');
   }
@@ -297,13 +301,13 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   function renderPreview(){
     var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var box = $('#preview');
     if (!p) { box.querySelector('svg').outerHTML = shapeSvg(BOOK.products[0], SAMPLE, 2, 'engrave'); $('#cap').innerHTML = 'Pick an item to see the preview.'; return; }
-    box.querySelector('svg').outerHTML = shapeSvg(p, S.logo || SAMPLE, S.inches, S.service==='uv' ? 'uv' : 'engrave');
-    $('#cap').innerHTML = (S.logo ? '<b>Your logo</b>' : '<b>Our logo as a stand-in.</b> Yours goes here') + ' at <b>'+S.inches+' in</b> on the '+esc(p.name.toLowerCase())+(S.service ? ', '+(S.service==='uv'?'full color':'engraved') : '')+'. Drawn to scale.';
+    box.querySelector('svg').outerHTML = shapeSvg(p, S.logo || SAMPLE, S.inches, S.service==='engrave' || !S.service ? 'engrave' : 'uv');
+    $('#cap').innerHTML = (S.logo ? '<b>Your logo</b>' : '<b>Our logo as a stand-in.</b> Yours goes here') + ' at <b>'+S.inches+' in</b> on the '+esc(p.name.toLowerCase())+(S.service ? ', '+(S.service==='engrave'?'engraved':'full color') : '')+'. Drawn to scale.';
   }
   function renderSummary(){
     var q = quote(); var dl = $('#lines');
     if (!q) { dl.innerHTML = '<div><dt>Pick the item, the finish and the size.</dt><dd></dd></div>'; $('#bartot').textContent = '$0'; $('#pay').textContent = 'Pay securely'; return; }
-    var rows = [['<b>'+q.qty+' × '+esc(q.service.name.toLowerCase())+'</b>, '+S.inches+' in'+(q.off?' <small>('+q.off+'% off)</small>':''), money(q.work)]];
+    var rows = [['<b>'+q.qty+' × '+esc(lcName(q.service.name))+'</b>, '+S.inches+' in'+(q.off?' <small>('+q.off+'% off)</small>':''), money(q.work)]];
     if (q.blankUnit) rows.push([q.qty+' × '+esc(q.product.name), money(q.blank)]);
     if (q.handUnit) rows.push([q.qty+' × handling your own item', money(q.hand)]);
     rows.push(['Setup, artwork prep <small>(one time)</small>', money(q.setup)]);
@@ -317,8 +321,9 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var q = quote(); var name = $('#name').value.trim() || 'I';
     if (!q) { $('#words').innerHTML = 'Finish steps 1 to 4 and your confirmation appears here.'; return; }
     var item = q.product.key==='own' ? 'my own '+q.material.name.toLowerCase()+' item' : 'a '+q.product.name.toLowerCase();
-    $('#words').innerHTML = 'I, <b>'+esc(name==='I'?'(your name)':name)+'</b>, have checked this order myself. HD Laser Studio will make exactly what I have specified here: <b>'+esc(q.service.name.toLowerCase())+'</b> on <b>'+esc(item)+'</b>, artwork <b>'+S.inches+' inches</b> on its longest side, quantity <b>'+q.qty+'</b>. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, <b>any redo or replacement is at my expense.</b>';
+    $('#words').innerHTML = 'I, <b>'+esc(name==='I'?'(your name)':name)+'</b>, have checked this order myself. HD Laser Studio will make exactly what I have specified here: <b>'+esc(lcName(q.service.name))+'</b> on <b>'+esc(item)+'</b>, artwork <b>'+S.inches+' inches</b> on its longest side, quantity <b>'+q.qty+'</b>. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, <b>any redo or replacement is at my expense.</b>';
   }
+  function lcName(n){ return String(n).replace(/\b[A-Z][a-z]+\b/g, function(w){ return w.toLowerCase(); }); }
   function initialsFor(name){ var w = String(name||'').trim().split(/\s+/).filter(Boolean); if(!w.length) return ''; return (w[0][0] + (w.length>1 ? w[w.length-1][0] : '')).toUpperCase(); }
   function renderInitials(){
     var v = $('#initials').value.toUpperCase().replace(/[^A-Z]/g,''); $('#initials').value = v;
@@ -395,7 +400,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   // ---- boot
   function boot(b){ BOOK = b.book; TAX = b.tax_rate || 0; $('#rushpct').textContent = BOOK.rush_pct;
     var pre = qs.get('product'); if (pre && BOOK.products.some(function(p){return p.key===pre;})) { S.product = pre; var pp = BOOK.products.filter(function(p){return p.key===pre;})[0]; S.material = pp.material; }
-    var svc = qs.get('service'); if (svc==='engrave' || svc==='uv') S.service = svc;
+    var svc = qs.get('service'); if (BOOK.services.some(function(x){return x.key===svc;})) S.service = svc;
     renderAll(); if (window.hdTrack) hdTrack('order_view'); }
   if (!BASE) { $('#loaderr').textContent = 'Online ordering isn’t switched on yet. Use the quote form or call (858) 373-9866.'; $('#loaderr').hidden = false; }
   else fetch(BASE + '/pricing').then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }).then(boot).catch(function(){ $('#loaderr').innerHTML = 'Prices didn’t load. Refresh in a moment, or <a href="/quote/">ask for a quote</a> and we’ll price it by hand.'; $('#loaderr').hidden = false; });
