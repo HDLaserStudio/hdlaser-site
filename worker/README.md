@@ -103,7 +103,7 @@ Every order starts on the same page, whether the customer does it at home or an 
 
 **Sizing confirmation.** Before paying, the customer reads a red box that says we make exactly what they specified and that mistakes in size, spelling, artwork or quantity are at their expense, and types their initials. The initials must match the name on the order. The exact wording, initials, time, IP address and browser are stored on the order (`attest_*` columns) with a hash, tied to their name, email and phone. They are restated in the confirmation email and shown on the dashboard.
 
-**DTF printing.** A third service in the price book, on fabric only: T-shirt, hoodie, tote bag and hat as items, own garments welcome, artwork up to 12 in. Its ladder starts lower and climbs gently ($3.50 at half an inch, about $16 for a full 11 in front), setup $10. Tune it on the money page like everything else.
+**DTF printing.** A third service in the price book, priced as print + press per piece by artwork size, on the customer's own shirts, hoodies, hats or totes (up to 12 in). No garment price is baked in; if the shop sources blanks for an order, that is quoted separately. Its ladder starts lower and climbs gently ($3.50 at half an inch, about $16 for a full 11 in front), setup $10. Tune it on the money page like everything else.
 
 **Price book.** Lives in D1 (`meta.price_book`), seeded from `DEFAULT_BOOK` in the worker. Edit any number on the money page (press Enter); every change is logged to `price_history`.
 

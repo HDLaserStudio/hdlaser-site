@@ -2227,10 +2227,8 @@ const DEFAULT_BOOK = {
     { key: "plaque", name: "Wood plaque", material: "wood", blank_cents: 2800, cost_cents: 1100, max_inches: 7, w_in: 8, h_in: 10, shape: "plaque", photo: "/assets/engrave-tree-plaque.jpg" },
     { key: "tag", name: "Metal tag or plate", material: "metal", blank_cents: 600, cost_cents: 150, max_inches: 2.5, w_in: 3, h_in: 2, shape: "tag", photo: "/assets/engrave-anodized-tags.jpg" },
     { key: "patch", name: "Leather patch or wallet", material: "leather", blank_cents: 1400, cost_cents: 500, max_inches: 2.5, w_in: 3.5, h_in: 2.5, shape: "patch", photo: "/assets/uv-mandala-wallet.jpg" },
-    { key: "tshirt", name: "T-shirt", material: "fabric", blank_cents: 1200, cost_cents: 400, max_inches: 12, w_in: 20, h_in: 27, shape: "shirt", photo: null },
-    { key: "hoodie", name: "Hoodie", material: "fabric", blank_cents: 2800, cost_cents: 1400, max_inches: 12, w_in: 22, h_in: 29, shape: "hoodie", photo: null },
-    { key: "tote", name: "Tote bag", material: "fabric", blank_cents: 900, cost_cents: 350, max_inches: 10, w_in: 15, h_in: 20, shape: "tote", photo: null },
-    { key: "cap", name: "Hat", material: "fabric", blank_cents: 1400, cost_cents: 500, max_inches: 3, w_in: 10, h_in: 6, shape: "cap", photo: null },
+    // DTF is priced as print + press only. Customers bring their own shirts, hoodies, hats or totes; no garment price is baked in.
+    { key: "garment", name: "Your own shirt, hoodie, hat or tote", material: "fabric", blank_cents: 0, cost_cents: 0, max_inches: 12, w_in: 20, h_in: 27, shape: "shirt", photo: null },
     { key: "own", name: "Something I'll bring in", material: null, blank_cents: 0, cost_cents: 0, max_inches: 12, w_in: 8, h_in: 8, shape: "own", photo: null },
   ],
   qty_breaks: [{ min: 1, off_pct: 0 }, { min: 6, off_pct: 5 }, { min: 12, off_pct: 10 }, { min: 25, off_pct: 15 }, { min: 50, off_pct: 20 }, { min: 100, off_pct: 25 }],
@@ -2292,11 +2290,11 @@ function quoteSpec(book, spec) {
   return { product, material, service, inches, qty, rush, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_cents: (workUnit - workUnitAfter) * qty,
     blank_unit_cents: blankUnit, handling_unit_cents: handlingUnit, work_cents: work, blank_cents: blank, handling_cents: handling, rush_cents: rushCents, setup_cents: setup, minimum_top_up_cents: minimumTopUp, subtotal_cents: subtotal,
     next_break: nextBreak ? { min: nextBreak.min, off_pct: nextBreak.off_pct } : null,
-    summary: `${qty} × ${lcName(service.name)}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.name.toLowerCase()}${rush ? ", rush" : ""}` };
+    summary: `${qty} × ${lcName(service.name)}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.key === "garment" ? "customer's own garment" : product.name.toLowerCase()}${rush ? ", rush" : ""}` };
 }
 // The exact words the customer initials. Rendered identically on the order page; the copy stored with the order is this one.
 function attestText(q, name) {
-  return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what I have specified here: ${lcName(q.service.name)} on ${q.product.key === "own" ? "my own " + q.material.name.toLowerCase() + " item" : "a " + q.product.name.toLowerCase()}, artwork ${q.inches} inches on its longest side, quantity ${q.qty}. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
+  return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what I have specified here: ${lcName(q.service.name)} on ${q.product.key === "own" ? "my own " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "my own garment" : "a " + q.product.name.toLowerCase()}, artwork ${q.inches} inches on its longest side, quantity ${q.qty}. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
 }
 // lower-case a service name for a sentence, keeping acronyms: "UV printing", "DTF printing", "laser engraving"
 function lcName(n) { return String(n).replace(/\b[A-Z][a-z]+\b/g, (w) => w.toLowerCase()); }
@@ -2335,7 +2333,7 @@ async function orderCheckout(request, env, cors) {
   let logo = null; const L = b.logo || {};
   if (L.data && /^data:(image\/(png|jpeg|webp|svg\+xml));base64,[A-Za-z0-9+/=]+$/.test(String(L.data)) && String(L.data).length <= 950000) logo = { name: String(L.name || "logo").slice(0, 120), type: String(L.data).slice(5, String(L.data).indexOf(";")), data: String(L.data) };
 
-  const lineItems = [{ name: `${q.service.name}, ${q.inches} in on ${q.product.key === "own" ? "customer's " + q.material.name.toLowerCase() + " item" : q.product.name.toLowerCase()}${q.discount_pct ? ` (${q.discount_pct}% quantity discount)` : ""}`, quantity: String(q.qty), base_price_money: { amount: q.work_unit_after_cents, currency: "USD" } }];
+  const lineItems = [{ name: `${q.service.name}, ${q.inches} in on ${q.product.key === "own" ? "customer's " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "customer's own garment" : q.product.name.toLowerCase()}${q.discount_pct ? ` (${q.discount_pct}% quantity discount)` : ""}`, quantity: String(q.qty), base_price_money: { amount: q.work_unit_after_cents, currency: "USD" } }];
   if (q.blank_unit_cents) lineItems.push({ name: q.product.name, quantity: String(q.qty), base_price_money: { amount: q.blank_unit_cents, currency: "USD" } });
   if (q.handling_unit_cents) lineItems.push({ name: "Customer-supplied item handling", quantity: String(q.qty), base_price_money: { amount: q.handling_unit_cents, currency: "USD" } });
   lineItems.push({ name: `${q.service.name} setup (artwork prep, one time)`, quantity: "1", base_price_money: { amount: q.setup_cents, currency: "USD" } });
