@@ -113,6 +113,8 @@ Every order starts on the same page, whether the customer does it at home or an 
 
 **Editing prices.** `/admin/prices` shows every number on one screen (size ladder per finish, setup, rush, minimum, material factors, items, quantity breaks) with one Save button and a "fill the column" helper that sets a whole ladder from three numbers. Changed cells turn yellow until saved; every changed price is logged.
 
+**Starting numbers (Hugh's rules, Oct 2026).** Any artwork up to 2 in is one price: $35 engraving, $40 UV, all in (setup 0, material factors 1, no handling). The ladder climbs from 2.5 in. Text only on a customer's item is $25. DTF is priced by size from $3.50 with a $10 setup. Customer-supplied items carry no sales tax. "Load the starting numbers" on the money page puts these back.
+
 **Price book.** Lives in D1 (`meta.price_book`), seeded from `DEFAULT_BOOK` in the worker. Edit any number on the money page (press Enter); every change is logged to `price_history`.
 
 **Pricing review.** Runs every Monday before the digest (and from the button on the money page). It only suggests: the owner approves or denies each item in the red box at the top of `/admin/money`, and each one explains why. Rules: the size ladder must climb by a little more each half inch; every item must clear the target margin after blank, labor and consumables; sizes or items priced often but rarely bought (or bought far above average) in the last 90 days; materials taking a bigger share of sales than the year before. Approving applies the change to the book immediately.

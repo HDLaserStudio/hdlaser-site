@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-01 v10"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-01 v11"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2203,23 +2203,24 @@ const TARGET_MARGIN = 0.55;          // every piece should clear this after blan
 const DEFAULT_BOOK = {
   version: 1,
   services: [
-    { key: "engrave", name: "Laser engraving", blurb: "Etched into the surface. Permanent, one tone.", setup_cents: 2500, min_per_piece: 4, per_inch: 2, consumable_cents: 8 },
-    { key: "uv", name: "UV printing", blurb: "Full color, printed onto the surface.", setup_cents: 700, min_per_piece: 3, per_inch: 1.5, consumable_cents: 35 },
+    { key: "engrave", name: "Laser engraving", blurb: "Etched into the surface. Permanent, one tone.", setup_cents: 0, min_per_piece: 4, per_inch: 2, consumable_cents: 8 },
+    { key: "uv", name: "UV printing", blurb: "Full color, printed onto the surface.", setup_cents: 0, min_per_piece: 3, per_inch: 1.5, consumable_cents: 35 },
     { key: "dtf", name: "DTF printing", blurb: "Full color pressed onto fabric. Shirts, hoodies, hats, totes.", setup_cents: 1000, min_per_piece: 3, per_inch: 0.5, consumable_cents: 60 },
   ],
   // Price per piece by the artwork's longest side, in half-inch steps. Each step up costs a little more than the step
   // before it (first_gap, then +gap_growth every step), so the bigger the engraving the more it carries, and the next
   // size up always looks like a small jump. sizes[] is generated from these once, then edited cell by cell.
-  ladders: { engrave: { start_cents: 800, first_gap_cents: 150, gap_growth_cents: 50 }, uv: { start_cents: 1000, first_gap_cents: 175, gap_growth_cents: 50 }, dtf: { start_cents: 350, first_gap_cents: 30, gap_growth_cents: 3 } },
+  // flat_to_inches: every size up to this is the starting price (the shop minimum for a small job); the ladder climbs from there.
+  ladders: { engrave: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 300, gap_growth_cents: 50 }, uv: { start_cents: 4000, flat_to_inches: 2, first_gap_cents: 350, gap_growth_cents: 50 }, dtf: { start_cents: 350, flat_to_inches: 0, first_gap_cents: 30, gap_growth_cents: 3 } },
   max_inches: 12,
   sizes: [],
   materials: [
     { key: "wood", name: "Wood", factor: 1, services: ["engrave", "uv"] },
-    { key: "metal", name: "Metal", factor: 1.25, services: ["engrave", "uv"] },
-    { key: "glass", name: "Glass", factor: 1.35, services: ["engrave", "uv"] },
-    { key: "leather", name: "Leather", factor: 1.1, services: ["engrave"] },
-    { key: "acrylic", name: "Acrylic or plastic", factor: 1.1, services: ["engrave", "uv"] },
-    { key: "stone", name: "Stone or slate", factor: 1.4, services: ["engrave"] },
+    { key: "metal", name: "Metal", factor: 1, services: ["engrave", "uv"] },
+    { key: "glass", name: "Glass", factor: 1, services: ["engrave", "uv"] },
+    { key: "leather", name: "Leather", factor: 1, services: ["engrave"] },
+    { key: "acrylic", name: "Acrylic or plastic", factor: 1, services: ["engrave", "uv"] },
+    { key: "stone", name: "Stone or slate", factor: 1, services: ["engrave"] },
     { key: "fabric", name: "Fabric", factor: 1, services: ["dtf"] },
   ],
   // blank_cents is what the customer pays for the item when we supply it; cost_cents is what it costs us (never shown).
@@ -2237,11 +2238,11 @@ const DEFAULT_BOOK = {
   ],
   qty_breaks: [{ min: 1, off_pct: 0 }, { min: 6, off_pct: 5 }, { min: 12, off_pct: 10 }, { min: 25, off_pct: 15 }, { min: 50, off_pct: 20 }, { min: 100, off_pct: 25 }],
   rush_pct: 50,                       // added to the work portion when they need it in under 3 business days
-  own_item_handling_cents: 300,       // per piece on customer-supplied items: inspection, test fit, no replacement stock
+  own_item_handling_cents: 0,       // per piece on customer-supplied items: inspection, test fit, no replacement stock
   min_order_cents: 2500,
   text_only_own_cents: 2500,          // flat per piece: text only (no artwork to digitize) on the customer's own item, any size, engraving or UV. No setup, no handling.
 };
-function ladderPrices(l, steps) { const out = []; let p = l.start_cents; for (let i = 0; i < steps; i++) { out.push(Math.round(p / 25) * 25); p += l.first_gap_cents + i * l.gap_growth_cents; } return out; }
+function ladderPrices(l, steps) { const out = []; let p = l.start_cents, climbs = 0; const flat = Math.round((l.flat_to_inches || 0) * 2); for (let i = 0; i < steps; i++) { out.push(Math.round(p / 25) * 25); if (i + 1 >= flat) { p += l.first_gap_cents + climbs * l.gap_growth_cents; climbs++; } } return out; }
 function buildSizes(book) { const n = Math.round(book.max_inches / 0.5); const cols = Object.fromEntries(Object.entries(book.ladders).map(([k, l]) => [k, ladderPrices(l, n)])); return Array.from({ length: n }, (_, i) => { const row = { inches: (i + 1) / 2 }; for (const k of Object.keys(cols)) row[k + "_cents"] = cols[k][i]; return row; }); }
 DEFAULT_BOOK.sizes = buildSizes(DEFAULT_BOOK);
 
@@ -2645,7 +2646,7 @@ input.n{text-align:right}input:focus{outline:3px solid #F2B63D;outline-offset:1p
 
 <h2>Per piece, by artwork size</h2>
 <p class="sub">The work only, on wood (other materials multiply it, see below). Type into any cell, or fill a whole column from three numbers.</p>
-<div class="fill"><label>Column<select id="f-svc"></select></label><label>Price at 0.5 in ($)<input type="number" id="f-start" step="0.25" value="8"></label><label>First step up ($)<input type="number" id="f-gap" step="0.25" value="1.50"></label><label>Each step grows by ($)<input type="number" id="f-grow" step="0.05" value="0.50"></label><button class="act dark" id="f-go" type="button">Fill the column</button><span class="small">Each half inch adds the first step, plus the growth for every step before it. Bigger work carries more.</span></div>
+<div class="fill"><label>Column<select id="f-svc"></select></label><label>Price at 0.5 in ($)<input type="number" id="f-start" step="0.25" value="35"></label><label>Same price up to (in)<input type="number" id="f-flat" step="0.5" min="0" value="2"></label><label>First step up ($)<input type="number" id="f-gap" step="0.25" value="3"></label><label>Each step grows by ($)<input type="number" id="f-grow" step="0.05" value="0.50"></label><button class="act dark" id="f-go" type="button">Fill the column</button><span class="small">Each half inch adds the first step, plus the growth for every step before it. Bigger work carries more.</span></div>
 <div class="card"><table id="sizes"></table></div>
 
 <h2>Setup, rush, minimum</h2>
@@ -2682,7 +2683,7 @@ function render(){
 }
 function prow(p){ return '<tr data-p="'+esc(p.key)+'"><td><input type="text" data-pf="name" value="'+esc(p.name)+'"></td><td><select data-pf="material">'+B.materials.map(m=>'<option value="'+m.key+'"'+(m.key===p.material?' selected':'')+'>'+esc(m.name)+'</option>').join('')+'</select></td><td><input class="n" type="number" step="0.25" min="0" data-pf="blank_cents" value="'+d2(p.blank_cents)+'"></td><td><input class="n" type="number" step="0.25" min="0" data-pf="cost_cents" value="'+d2(p.cost_cents)+'"></td><td><input class="n" type="number" step="0.5" min="0.5" max="'+B.max_inches+'" data-pf="max_inches" value="'+p.max_inches+'"></td><td><button class="rm" type="button" data-rmp>remove</button></td></tr>'; }
 document.addEventListener('input',e=>{ const i=e.target; if(i.matches('input')&&i.dataset.orig!=null) i.classList.toggle('changed',(i.type==='checkbox'?String(i.checked):i.value)!==i.dataset.orig); });
-$('#f-go').onclick=()=>{ const svc=$('#f-svc').value; let p=(+$('#f-start').value||0)*100; const gap=(+$('#f-gap').value||0)*100, grow=(+$('#f-grow').value||0)*100; document.querySelectorAll('input[data-size][data-svc="'+svc+'"]').forEach((inp,i)=>{ inp.value=d2(Math.round(p/25)*25); inp.dispatchEvent(new Event('input',{bubbles:true})); p+=gap+i*grow; }); $('#msg').textContent='Column filled. Press Save all prices to make it live.'; $('#msg').className='msg'; };
+$('#f-go').onclick=()=>{ const svc=$('#f-svc').value; let p=(+$('#f-start').value||0)*100, climbs=0; const gap=(+$('#f-gap').value||0)*100, grow=(+$('#f-grow').value||0)*100, flat=Math.round((+$('#f-flat').value||0)*2); document.querySelectorAll('input[data-size][data-svc="'+svc+'"]').forEach((inp,i)=>{ inp.value=d2(Math.round(p/25)*25); inp.dispatchEvent(new Event('input',{bubbles:true})); if(i+1>=flat){ p+=gap+climbs*grow; climbs++; } }); $('#msg').textContent='Column filled. Press Save all prices to make it live.'; $('#msg').className='msg'; };
 $('#addp').onclick=()=>{ const key='item-'+Date.now().toString(36); const tr=document.createElement('tr'); tr.dataset.p=key; tr.dataset.new='1'; tr.innerHTML=prow({key,name:'',material:B.materials[0].key,blank_cents:0,cost_cents:0,max_inches:4}).replace(/^<tr[^>]*>|<\\/tr>$/g,''); $('#products').appendChild(tr); tr.querySelector('input').focus(); };
 $('#addq').onclick=()=>{ const tr=document.createElement('tr'); tr.dataset.q='1'; tr.innerHTML='<td><input class="n" type="number" step="1" min="2" data-qf="min" value=""></td><td><input class="n" type="number" step="1" min="0" max="90" data-qf="off_pct" value=""></td><td><button class="rm" type="button" data-rmq>remove</button></td>'; $('#qty').appendChild(tr); tr.querySelector('input').focus(); };
 document.addEventListener('click',e=>{ if(e.target.matches('[data-rmp]')){ const tr=e.target.closest('tr'); if(tr.dataset.new) tr.remove(); else { tr.dataset.removed='1'; tr.style.opacity='.4'; e.target.textContent='removed, save to confirm'; } } if(e.target.matches('[data-rmq]')) e.target.closest('tr').remove(); });
