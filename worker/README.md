@@ -105,6 +105,8 @@ Every order starts on the same page, whether the customer does it at home or an 
 
 **DTF printing.** A third service in the price book, priced as print + press per piece by artwork size, on the customer's own shirts, hoodies, hats or totes (up to 12 in). No garment price is baked in; if the shop sources blanks for an order, that is quoted separately. Its ladder starts lower and climbs gently ($3.50 at half an inch, about $16 for a full 11 in front), setup $10. Tune it on the money page like everything else.
 
+**Artwork and setup.** Step 5 of the order page asks what the artwork is: a new logo (the finish's one-time setup applies), text only (no setup; the text is stored on the order and restated in the signed confirmation and the emails), or a logo we already have on file (no setup; the customer names the business or a past order and staff pull it from `order_assets`). The server enforces the same rule, so the page can't be tricked into skipping setup on a new logo.
+
 **Sales tax.** Charged (TAX_RATE, default 7.75%) only when the shop supplies the item. Customer-supplied items ("Something I'll bring in" and own garments for DTF) are priced as work only with no tax line. Set `TAX_OWN_ITEMS=1` in Cloudflare to tax those too; no code change needed.
 
 **Editing prices.** `/admin/prices` shows every number on one screen (size ladder per finish, setup, rush, minimum, material factors, items, quantity breaks) with one Save button and a "fill the column" helper that sets a whole ladder from three numbers. Changed cells turn yellow until saved; every changed price is logged.
