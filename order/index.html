@@ -262,10 +262,11 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var service = BOOK.services.filter(function(s){return s.key===S.service;})[0]; if(!service || material.services.indexOf(service.key)<0) return null;
     var size = BOOK.sizes.filter(function(s){return s.inches===S.inches;})[0]; if(!size) return null;
     var qty = S.qty;
-    var workUnit = r25(size[service.key+'_cents']*material.factor);
+    var flatText = S.art==='text' && (product.key==='own'||product.key==='garment') && service.key!=='dtf' && (BOOK.text_only_own_cents||0)>0;
+    var workUnit = flatText ? BOOK.text_only_own_cents : r25(size[service.key+'_cents']*material.factor);
     var brk = BOOK.qty_breaks.slice().sort(function(a,b){return b.min-a.min;}).filter(function(b){return qty>=b.min;})[0] || {off_pct:0};
     var workAfter = r25(workUnit*(1-brk.off_pct/100));
-    var handling = product.key==='own' ? BOOK.own_item_handling_cents : 0;
+    var handling = product.key==='own' && !flatText ? BOOK.own_item_handling_cents : 0;
     var prints = product.key==='garment' && S.sides==='both' ? 2 : 1;
     var work = workAfter*qty*prints, blank = (product.blank_cents||0)*qty, hand = handling*qty;
     var rush = S.rush ? r25(work*BOOK.rush_pct/100) : 0;
@@ -273,7 +274,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var subtotal = work+blank+hand+rush+setup; var top = Math.max(0, BOOK.min_order_cents-subtotal); subtotal += top;
     var next = BOOK.qty_breaks.slice().sort(function(a,b){return a.min-b.min;}).filter(function(b){return b.min>qty;})[0] || null;
     var taxable = TAX_OWN || (product.key!=='own' && product.key!=='garment');
-    return { product:product, material:material, service:service, qty:qty, prints:prints, sides:product.key==='garment'?S.sides:null, workUnit:workUnit, workAfter:workAfter, off:brk.off_pct, work:work, blank:blank, blankUnit:product.blank_cents||0, hand:hand, handUnit:handling, rush:rush, setup:setup, art:S.art, top:top, subtotal:subtotal, taxable:taxable, tax:taxable?Math.round(subtotal*TAX):0, next:next };
+    return { product:product, material:material, service:service, qty:qty, prints:prints, sides:product.key==='garment'?S.sides:null, workUnit:workUnit, workAfter:workAfter, off:brk.off_pct, work:work, blank:blank, blankUnit:product.blank_cents||0, hand:hand, handUnit:handling, rush:rush, setup:setup, art:S.art, flatText:flatText, top:top, subtotal:subtotal, taxable:taxable, tax:taxable?Math.round(subtotal*TAX):0, next:next };
   }
   function unitFor(productKey, matKey, svcKey, inches){ var p=BOOK.products.filter(function(x){return x.key===productKey;})[0], m=BOOK.materials.filter(function(x){return x.key===(p.material||matKey);})[0], s=BOOK.sizes.filter(function(x){return x.inches===inches;})[0]; if(!p||!m||!s) return null; return r25(s[svcKey+'_cents']*m.factor); }
 
@@ -339,7 +340,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   function renderSummary(){
     var q = quote(); var dl = $('#lines');
     if (!q) { dl.innerHTML = '<div><dt>Pick the item, the finish and the size.</dt><dd></dd></div>'; $('#bartot').textContent = '$0'; $('#pay').textContent = 'Pay securely'; return; }
-    var rows = [['<b>'+(q.qty*q.prints)+' × '+esc(lcName(q.service.name))+'</b>, '+S.inches+' in'+(q.sides ? ', '+(q.sides==='both'?'front and back':q.sides) : '')+(q.off?' <small>('+q.off+'% off)</small>':''), money(q.work)]];
+    var rows = [['<b>'+(q.qty*q.prints)+' × '+esc(lcName(q.service.name))+'</b>, '+(q.flatText ? 'text only, flat price' : S.inches+' in')+(q.sides ? ', '+(q.sides==='both'?'front and back':q.sides) : '')+(q.off?' <small>('+q.off+'% off)</small>':''), money(q.work)]];
     if (q.blankUnit) rows.push([q.qty+' × '+esc(q.product.name), money(q.blank)]);
     if (q.handUnit) rows.push([q.qty+' × handling your own item', money(q.hand)]);
     rows.push(q.art==='logo' ? ['Setup, artwork prep <small>(one time)</small>', money(q.setup)] : ['Setup', 'none <small>('+(q.art==='text'?'text only':'logo on file')+')</small>']);
