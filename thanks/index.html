@@ -143,7 +143,7 @@ button[type=submit]:hover{background:var(--redd)}
   }
   if (qs.get('paid') === '1') {
     h1.textContent = 'You’re in. Order ' + ref + ' is confirmed.';
-    lead.textContent = custom ? 'Payment received. Your proof is next, and your receipt from Square is on its way to your inbox.' : 'Payment received. Two quick things below and we’ll get your proof started. Your receipt from Square is on its way to your inbox.';
+    lead.textContent = qs.get('counter') === '1' ? 'Paid at the counter. Your proof is next; your receipt is on its way from Square.' : custom ? 'Payment received. Your proof is next, and your receipt from Square is on its way to your inbox.' : 'Payment received. Two quick things below and we’ll get your proof started. Your receipt from Square is on its way to your inbox.';
     document.getElementById('paid').hidden = false;
     if (window.hdTrack) hdTrack('paid_return', ref);
   } else if (qs.get('pay') === 'later') {

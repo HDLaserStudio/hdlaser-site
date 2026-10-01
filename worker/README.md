@@ -83,6 +83,19 @@ Carrier email-to-text (ALERT_TO with an address like `number@vtext.com`) is free
 3. Messaging → Regulatory compliance → **Toll-Free Verification**. Business name HD Laser Studio INC, address, website hdlaser.net, use case "order notifications to the business owner", sample message `HD Laser: PAID $850 by Boards n' Beans (HD-7K2Q). 50 cups. Logo + proof next.`, volume under 100/month, opt-in "internal staff only". Approval usually takes 1–3 business days. Texts to unverified toll-free numbers are blocked, so wait for approval.
 4. In Cloudflare set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` (Secret), `TWILIO_FROM`, `ALERT_SMS_TO`, then Deploy.
 
+## Counter checkout on the Square Terminal
+
+On the shop iPad the hub opens the order page in counter mode (`/order/?via=hub&by=NAME`). After the customer signs step 8, the employee types their PIN and presses **Charge on the Terminal**. The worker creates a Square Terminal checkout for the exact total with the order number as the reference; the Terminal shows the amount, the customer taps, and the page polls `/order/terminal/status` every two seconds until Square reports COMPLETED, then lands on the thank-you page. The order is marked paid, the payment is stored with Square's team member id, and `taken_by_id` holds the employee who entered the PIN. Cancel on the Terminal or on the page puts the order back to pay-later.
+
+Setup, once:
+
+1. Square Dashboard → Devices → Create device code → pair the Terminal. Open the device and copy its id (`device:...`).
+2. Cloudflare → hdlaser-checkout → Settings → Variables: add `SQUARE_TERMINAL_DEVICE_ID` with that id. Deploy.
+3. Square Developer → the app → Webhooks → add the events `terminal.checkout.created` and `terminal.checkout.updated` to the existing subscription (same URL, `/webhooks/square`). The page's polling works without this; the webhook is the backstop if the iPad closes mid-tap.
+4. The access token needs the `PAYMENTS_WRITE` permission (it already has it for payment links).
+
+A Terminal checkout needs an employee PIN; the online card button in counter mode accepts a PIN too so the sale is credited either way.
+
 ## Staff portal (hdlaser.net/staff)
 
 Every employee signs in with their own name and PIN (no shared account). The portal gives them clock in/out, the opening and closing checklists, the prioritized work queue with a same-day capacity counter, a form to log walk-in jobs, and their own weekly numbers. Managers and the owner also get a Team tab with everyone's KPIs, and can add people, reset PINs, set who is on call, and deactivate accounts. The written SOP lives at hdlaser.net/staff/sop/.

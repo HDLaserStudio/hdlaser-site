@@ -219,6 +219,14 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
       <p class="hint" id="inithint">Your initials are your signature on this. We keep them with your order, your name and the time you signed.</p>
     </div>
     <p class="err" id="err" hidden style="margin:14px 0 0"></p>
+    <div id="counter" hidden style="margin-top:18px;padding:16px;border:2px solid var(--ink);border-radius:16px;background:#fff">
+      <div class="f" style="max-width:260px"><label for="staffpin">Employee PIN <small>(<span id="staffname"></span>)</small></label><input id="staffpin" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></div>
+      <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="btn red" id="payterm">Charge on the Terminal</button>
+        <span class="note">The customer taps their card on the Square Terminal. Cash or a card by phone? Use the online button below.</span>
+      </div>
+      <div id="termwait" hidden style="margin-top:14px;padding:14px;border-radius:12px;background:var(--sel)"><b id="termmsg">Waiting for the card on the Terminal…</b><div style="margin-top:10px"><button type="button" class="chip" id="termcancel">Cancel on the Terminal</button></div></div>
+    </div>
     <div style="margin-top:18px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <button type="button" class="btn red" id="pay">Pay securely</button>
       <span class="note">Square handles the card. We never see it.</span>
@@ -247,7 +255,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   var money0 = function(c){ return '$' + Math.round(c/100).toLocaleString('en-US'); };
   var qs = new URLSearchParams(location.search);
   var HUB = qs.get('via') === 'hub', BY = (qs.get('by') || '').slice(0,60);
-  if (HUB) { $('#hubbar').hidden = false; $('#hubwho').textContent = 'Counter order' + (BY ? ' · taken by ' + BY : '') + '. Walk the customer through it; they sign step 8 themselves.'; }
+  if (HUB) { $('#counter').hidden = false; $('#staffname').textContent = BY || 'your name'; $('#pay').textContent = 'Pay by card online instead'; $('#pay').className = 'btn'; $('#hubbar').hidden = false; $('#hubwho').textContent = 'Counter order' + (BY ? ' · taken by ' + BY : '') + '. Walk the customer through it; they sign step 8 themselves.'; }
 
   var SAMPLE = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="220 115 1930 640"><path fill="#C8372A" d="M510 125 L730 125 L636 371 L963 371 L1072 125 L2000 125 C2100 125 2160 210 2130 300 L2010 610 C1970 700 1880 742 1790 742 L1115 742 L1283 341 L1525 341 L1425 595 L1800 595 L1938 272 L1222 272 L1030 742 L808 742 L907 523 L572 523 L483 742 L232 742 Z"/></svg>');
   var BOOK = null, TAX = 0.0775, TAX_OWN = false;
@@ -348,7 +356,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     if (q.top) rows.push(['Shop minimum', money(q.top)]);
     rows.push(q.taxable ? ['Sales tax, est.', money(q.tax)] : ['Sales tax', 'none <small>(your own item)</small>']);
     dl.innerHTML = rows.map(function(r){ return '<div><dt>'+r[0]+'</dt><dd>'+r[1]+'</dd></div>'; }).join('') + '<div class="tot"><dt>Total</dt><dd>'+money(q.subtotal+q.tax)+'</dd></div>';
-    $('#bartot').textContent = money(q.subtotal+q.tax); $('#pay').textContent = 'Pay '+money(q.subtotal+q.tax)+' securely';
+    $('#bartot').textContent = money(q.subtotal+q.tax); $('#pay').textContent = HUB ? 'Pay by card online instead' : 'Pay '+money(q.subtotal+q.tax)+' securely';
   }
   function renderWords(){
     var q = quote(); var name = $('#name').value.trim() || 'I';
@@ -411,7 +419,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   // ---- checkout
   var ref = 'HD-' + Date.now().toString(36).toUpperCase();
   function fail(msg){ var e = $('#err'); e.textContent = msg; e.hidden = false; e.scrollIntoView({behavior:'smooth', block:'center'}); $('#pay').disabled = false; renderSummary(); }
-  $('#pay').onclick = function(){
+  function checkForm(){
     $('#err').hidden = true; var q = quote();
     if (!q) return fail('Finish steps 1 to 4 first: the item, the finish and the size.');
     var name = $('#name').value.trim(), email = $('#email').value.trim(), phone = $('#phone').value.trim();
@@ -420,11 +428,21 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     if (phone.replace(/\D/g,'').length < 10) return fail('We need a phone number for pickup texts (step 7).');
     if (!$('#agree').checked) return fail('Please agree to the Terms of Sale (step 7).');
     if (!renderInitials()) return fail('Type your initials in step 8. That is your sign-off on the size, the artwork and the quantity.');
-    var btn = $('#pay'); btn.disabled = true; btn.textContent = 'Opening secure payment…';
+    return { q:q, name:name, email:email, phone:phone };
+  }
+  function orderBody(v){
+    var name = v.name, email = v.email, phone = v.phone;
     var body = { ref: ref, spec: { product:S.product, material:S.material, service:S.service, inches:S.inches, qty:S.qty, rush:S.rush, sides:S.product==='garment'?S.sides:undefined, art:S.art, text:S.art==='text'?S.text.trim():undefined, art_ref:S.art==='file'?S.artRef.trim():undefined },
       customer: { name:name, business:$('#business').value.trim(), email:email, phone:phone, agreed:true, textConsent:$('#sms').checked },
       notes: $('#notes').value.trim(), needed_by: $('#needed').value || null, attest: { initials: $('#initials').value, version: '2026-09-26' }, taken_by: HUB ? BY : null,
       logo: S.logo ? { name: S.logoName, data: S.logo } : null };
+    if (HUB && $('#staffpin').value) body.staff = { name: BY, pin: $('#staffpin').value };
+    return body;
+  }
+  $('#pay').onclick = function(){
+    var v = checkForm(); if (!v) return;
+    var btn = $('#pay'); btn.disabled = true; btn.textContent = 'Opening secure payment…';
+    var body = orderBody(v);
     fetch(BASE + '/order/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
       .then(function(r){ return r.json().then(function(d){ d._status = r.status; return d; }); })
       .then(function(d){
@@ -433,6 +451,42 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
         fail((d && d.error) || 'Something went wrong. Call us at (858) 373-9866 and we’ll finish it by hand.');
       })
       .catch(function(){ fail('We couldn’t reach the shop’s server. Try again in a minute, or call (858) 373-9866.'); });
+  };
+
+  // ---- counter: charge the Square Terminal and wait for the tap
+  var TERM = null, termTimer = null;
+  function termFail(msg){ clearInterval(termTimer); termTimer = null; $('#termwait').hidden = true; $('#payterm').disabled = false; $('#payterm').textContent = 'Charge on the Terminal'; fail(msg); }
+  $('#payterm').onclick = function(){
+    var v = checkForm(); if (!v) return;
+    if (!/^\d{4,8}$/.test($('#staffpin').value)) return fail('Enter your employee PIN first.');
+    var btn = $('#payterm'); btn.disabled = true; btn.textContent = 'Sending to the Terminal…';
+    var body = orderBody(v); body.pay = 'terminal'; body.staff = { name: BY, pin: $('#staffpin').value };
+    fetch(BASE + '/order/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok || !d.terminal) return termFail((d && d.error) || 'The Terminal did not answer. Is it on and online?');
+        TERM = { ref: d.ref, id: d.terminal }; if (window.hdTrack) hdTrack('payment_started', d.ref);
+        $('#termmsg').textContent = 'Waiting for the card on the Terminal: ' + money(v.q.subtotal + v.q.tax) + '. Hand it to the customer.'; $('#termwait').hidden = false;
+        var polls = 0;
+        termTimer = setInterval(function(){
+          if (++polls > 150) return termFail('The Terminal timed out. Try again.');
+          fetch(BASE + '/order/terminal/status?ref=' + encodeURIComponent(TERM.ref) + '&id=' + encodeURIComponent(TERM.id) + '&t=' + Date.now(), { cache:'no-store' })
+            .then(function(r){ return r.json(); })
+            .then(function(st){
+              if (!st) return;
+              if (st.status === 'COMPLETED' || st.order === 'paid') { clearInterval(termTimer); location.href = '/thanks/?paid=1&kind=custom&counter=1&ref=' + encodeURIComponent(TERM.ref) + (S.logo ? '&logo=1' : ''); return; }
+              if (st.status === 'CANCELED' || st.status === 'CANCEL_REQUESTED') termFail('Canceled on the Terminal' + (st.cancel_reason ? ' (' + st.cancel_reason.toLowerCase().replace(/_/g,' ') + ')' : '') + '. Nothing was charged. Try again or use the online button.');
+              else if (st.status === 'IN_PROGRESS') $('#termmsg').textContent = 'Card presented. Finishing on the Terminal…';
+            }).catch(function(){});
+        }, 2000);
+      })
+      .catch(function(){ termFail('We couldn’t reach the shop’s server. Try again in a minute.'); });
+  };
+  $('#termcancel').onclick = function(){
+    if (!TERM) return; $('#termcancel').disabled = true;
+    fetch(BASE + '/order/terminal/cancel', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(TERM) })
+      .then(function(r){ return r.json(); }).then(function(){ $('#termcancel').disabled = false; termFail('Canceled. Nothing was charged.'); })
+      .catch(function(){ $('#termcancel').disabled = false; });
   };
 
   // on phones the drawing sits right under step 1 instead of at the bottom of the page

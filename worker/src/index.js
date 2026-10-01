@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-01 v11"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-01 v12"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS plaid_items (item_id TEXT PRIMARY KEY, access_token T
 CREATE TABLE IF NOT EXISTS coffee_orders (ref TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, name TEXT, phone TEXT, email TEXT, items TEXT, summary TEXT, total_cents INTEGER, pickup TEXT, note TEXT, text_consent INTEGER DEFAULT 0, square_order_id TEXT, square_payment_id TEXT, paid_at TEXT, paid_cents INTEGER DEFAULT 0, tip_cents INTEGER DEFAULT 0, notified_at TEXT, ready_at TEXT, picked_up_at TEXT);
 CREATE INDEX IF NOT EXISTS coffee_created ON coffee_orders(created_at);`;
 // Columns added after the first release. Each ALTER is tried once and ignored if the column already exists.
-const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0"];
+const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0"];
 
 let migrated = false;
 async function ensureSchema(env) {
@@ -113,6 +113,8 @@ export default {
       if (path === "/resale" && request.method === "POST") return requireOrigin(cors) || recordResale(request, env, cors);
       if (path === "/pricing") return json({ book: publicBook(await priceBook(env)), tax_rate: parseFloat(env.TAX_RATE || "0.0775") || 0, tax_own_items: env.TAX_OWN_ITEMS === "1", attest_version: ATTEST_VERSION }, 200, { ...cors, "Cache-Control": "no-store" });
       if (path === "/order/checkout" && request.method === "POST") return requireOrigin(cors) || orderCheckout(request, env, cors);
+      if (path === "/order/terminal/status") return requireOrigin(cors) || terminalStatus(env, url.searchParams.get("ref"), url.searchParams.get("id"), cors);
+      if (path === "/order/terminal/cancel" && request.method === "POST") return requireOrigin(cors) || terminalCancel(request, env, cors);
       // ---- Boards n' Beans coffee counter (order ahead, pay through Square, the bar gets a text) ----
       if (path === "/coffee/menu") return json({ menu: COFFEE.menu, milks: COFFEE.milks, extras: COFFEE.extras, shop: COFFEE.shop }, 200, { ...cors, "Cache-Control": "public, max-age=300" });
       if (path === "/coffee/checkout" && request.method === "POST") return requireOrigin(cors) || coffeeCheckout(request, env, cors);
@@ -417,6 +419,7 @@ async function squareWebhook(request, env) {
   const type = evt.type || "", obj = (evt.data && evt.data.object) || {};
   if (type.startsWith("payment.") && obj.payment) await upsertPayment(env, obj.payment);
   if (type.startsWith("refund.") && obj.refund) await upsertRefund(env, obj.refund);
+  if (type.startsWith("terminal.checkout.") && obj.checkout) await terminalUpdate(env, obj.checkout);
   return json({ ok: true }, 200);
 }
 
@@ -2316,6 +2319,49 @@ function attestText(q, name) {
 function lcName(n) { return String(n).replace(/\b[A-Z][a-z]+\b/g, (w) => w.toLowerCase()); }
 function initialsFor(name) { const w = String(name || "").trim().split(/\s+/).filter(Boolean); if (!w.length) return ""; return (w[0][0] + (w.length > 1 ? w[w.length - 1][0] : "")).toUpperCase(); }
 
+async function verifyStaff(env, name, pin) {
+  name = String(name || "").trim(); pin = String(pin || "").trim();
+  if (!env.DB || !name || !/^\d{4,8}$/.test(pin)) return null;
+  const p = await env.DB.prepare(`SELECT * FROM staff WHERE lower(name) = lower(?) AND active = 1`).bind(name).first();
+  if (!p || !p.pin_hash || !timingSafeEqual(await pbkdf(pin, p.pin_salt), p.pin_hash)) { await staffLog(env, p && p.id, "pin_failed", "checkout"); return null; }
+  return p;
+}
+// A Terminal checkout finished (webhook or poll): mark the order paid and record the payment so the dashboards see it.
+async function terminalUpdate(env, ck) {
+  if (!env.DB || !ck || !ck.id) return;
+  const o = await env.DB.prepare(`SELECT ref, status, total_cents FROM orders WHERE terminal_checkout_id = ?`).bind(ck.id).first();
+  if (!o) return;
+  if (ck.status === "COMPLETED") {
+    for (const pid of ck.payment_ids || []) {
+      const r = await squareFetch(env, "/v2/payments/" + pid); const d = await r.json().catch(() => ({}));
+      if (r.ok && d.payment) { if (d.payment.order_id && !(await env.DB.prepare(`SELECT 1 FROM orders WHERE square_order_id = ?`).bind(d.payment.order_id).first())) await env.DB.prepare(`UPDATE orders SET square_order_id = ? WHERE ref = ?`).bind(d.payment.order_id, o.ref).run(); await upsertPayment(env, d.payment); }
+    }
+    const after = await env.DB.prepare(`SELECT status FROM orders WHERE ref = ?`).bind(o.ref).first();
+    if (after && after.status !== "paid" && after.status !== "refunded") { await env.DB.prepare(`UPDATE orders SET status = 'paid', paid_at = COALESCE(paid_at, ?), paid_cents = COALESCE(paid_cents, total_cents) WHERE ref = ?`).bind(new Date().toISOString(), o.ref).run(); await notifyPaid(env, o.ref); }
+  } else if (ck.status === "CANCELED" && o.status === "checkout_started") {
+    await env.DB.prepare(`UPDATE orders SET status = 'pay_later' WHERE ref = ?`).bind(o.ref).run();
+  }
+}
+async function terminalStatus(env, ref, id, cors) {
+  if (!env.DB || !ref || !id) return json({ error: "ref and id required" }, 400, cors);
+  const o = await env.DB.prepare(`SELECT ref, status, terminal_checkout_id FROM orders WHERE ref = ? AND terminal_checkout_id = ?`).bind(ref, id).first();
+  if (!o) return json({ error: "Unknown order" }, 404, cors);
+  if (o.status === "paid") return json({ ok: true, status: "COMPLETED", order: "paid" }, 200, { ...cors, "Cache-Control": "no-store" });
+  const r = await squareFetch(env, "/v2/terminals/checkouts/" + id); const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.checkout) return json({ error: squareErr(d) || "Could not read the Terminal" }, 502, cors);
+  await terminalUpdate(env, d.checkout);
+  const after = await env.DB.prepare(`SELECT status FROM orders WHERE ref = ?`).bind(ref).first();
+  return json({ ok: true, status: d.checkout.status, cancel_reason: d.checkout.cancel_reason || null, order: after.status }, 200, { ...cors, "Cache-Control": "no-store" });
+}
+async function terminalCancel(request, env, cors) {
+  let b; try { b = await request.json(); } catch { return json({ error: "Bad JSON" }, 400, cors); }
+  const o = env.DB ? await env.DB.prepare(`SELECT ref FROM orders WHERE ref = ? AND terminal_checkout_id = ?`).bind(String(b.ref || ""), String(b.id || "")).first() : null;
+  if (!o) return json({ error: "Unknown order" }, 404, cors);
+  const r = await squareFetch(env, "/v2/terminals/checkouts/" + b.id + "/cancel", { method: "POST", body: "{}" }); const d = await r.json().catch(() => ({}));
+  if (d.checkout) await terminalUpdate(env, d.checkout);
+  return json({ ok: r.ok, status: d.checkout ? d.checkout.status : null, error: r.ok ? undefined : squareErr(d) }, r.ok ? 200 : 502, cors);
+}
+
 async function orderCheckout(request, env, cors) {
   let b; try { b = await request.json(); } catch { return json({ error: "Bad JSON" }, 400, cors); }
   const ip = request.headers.get("CF-Connecting-IP") || "";
@@ -2341,7 +2387,17 @@ async function orderCheckout(request, env, cors) {
   const hash = await sha256hex([ref, initials, text, now, email].join("|"));
   const notes = String(b.notes || "").trim().slice(0, 2000);
   const neededBy = /^\d{4}-\d{2}-\d{2}$/.test(String(b.needed_by || "")) ? b.needed_by : null;
-  const takenBy = String(b.taken_by || "").trim().slice(0, 60) || null;
+  let takenBy = String(b.taken_by || "").trim().slice(0, 60) || null, takenById = null;
+  const payHow = b.pay === "terminal" ? "terminal" : "link";
+  if (b.staff && (b.staff.pin || payHow === "terminal")) {
+    // counter orders: the employee taking the order proves it with their PIN, so every sale is credited to a person
+    if (rateLimited("pin:" + ip, 12, 600000)) return json({ error: "Too many PIN attempts. Wait 10 minutes." }, 429, cors);
+    const who = await verifyStaff(env, b.staff.name, b.staff.pin);
+    if (!who) return json({ error: "Employee name or PIN doesn't match" }, 401, cors);
+    takenBy = who.name; takenById = who.id;
+  }
+  if (payHow === "terminal" && !takenById) return json({ error: "Enter your employee PIN to charge the Terminal" }, 400, cors);
+  if (payHow === "terminal" && !env.SQUARE_TERMINAL_DEVICE_ID) return json({ error: "The Terminal isn't connected yet (SQUARE_TERMINAL_DEVICE_ID)" }, 503, cors);
   const taxRate = parseFloat(env.TAX_RATE || "0.0775") || 0;
   const tax = (q.taxable || env.TAX_OWN_ITEMS === "1") ? Math.round(q.subtotal_cents * taxRate) : 0;
   const total = q.subtotal_cents + tax;
@@ -2357,8 +2413,16 @@ async function orderCheckout(request, env, cors) {
   if (q.minimum_top_up_cents) lineItems.push({ name: "Shop minimum", quantity: "1", base_price_money: { amount: q.minimum_top_up_cents, currency: "USD" } });
   const order = { location_id: env.SQUARE_LOCATION_ID, reference_id: ref, line_items: lineItems };
   if (tax) order.taxes = [{ uid: "ca-sales-tax", name: "CA sales tax", percentage: String(+(taxRate * 100).toFixed(3)), scope: "ORDER" }];
-  let linkOk = false, data = {};
-  if (env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
+  let linkOk = false, data = {}, terminal = null;
+  if (payHow === "terminal" && env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
+    // the Square Terminal on the counter shows the amount; the customer taps there. Completion arrives by webhook or the page's status poll.
+    const tc = { idempotency_key: `${ref}-t-${Date.now()}`, checkout: { amount_money: { amount: total, currency: "USD" }, reference_id: ref, note: `hdlaser.net ${ref}: ${q.summary}`.slice(0, 250), payment_type: "CARD_PRESENT",
+      device_options: { device_id: env.SQUARE_TERMINAL_DEVICE_ID, skip_receipt_screen: false, collect_signature: false, tip_settings: { allow_tipping: false } } } };
+    const res = await squareFetch(env, "/v2/terminals/checkouts", { method: "POST", body: JSON.stringify(tc) });
+    data = await res.json().catch(() => ({}));
+    if (res.ok && data.checkout) terminal = { id: data.checkout.id, status: data.checkout.status };
+    else { console.error("Terminal error", res.status, JSON.stringify(data).slice(0, 600)); return json({ error: "The Terminal didn't answer: " + (squareErr(data) || res.status) + ". Is it on and online?" }, 502, cors); }
+  } else if (env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
     const payload = { idempotency_key: `${ref}-${Date.now()}`, order,
       checkout_options: { redirect_url: `${env.SITE_URL}/thanks/?paid=1&kind=custom&ref=${encodeURIComponent(ref)}${logo ? "&logo=1" : ""}`, ask_for_shipping_address: false, merchant_support_email: env.SUPPORT_EMAIL, allow_tipping: false },
       pre_populated_data: { buyer_email: email, buyer_phone_number: e164(c.phone) },
@@ -2374,8 +2438,9 @@ async function orderCheckout(request, env, cors) {
     if (logo) { const ins = await env.DB.prepare(`INSERT INTO order_assets (ref, created_at, name, type, bytes, data) VALUES (?,?,?,?,?,?)`).bind(ref, now, logo.name, logo.type, Math.round(logo.data.length * 0.75), logo.data).run(); assetId = ins.meta && ins.meta.last_row_id; }
     await env.DB.batch([
       env.DB.prepare(`INSERT OR REPLACE INTO orders (ref, created_at, status, business, name, email, phone, notes, text_consent, cups, base_price_cents, cups_subtotal_cents, setup_fee_cents, total_cents, deposit_percent, square_order_id, kind, spec, needed_by, rush, taken_by, tax_cents, tax_invoiced_at, attest_initials, attest_text, attest_at, attest_ip, attest_ua, attest_hash, logo_asset_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, linkOk ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, linkOk || terminal ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
         null, q.work_unit_cents, q.subtotal_cents - q.setup_cents, q.setup_cents, total, 100, linkOk ? (data.payment_link.order_id || null) : null, "custom", JSON.stringify(spec), neededBy, q.rush ? 1 : 0, takenBy, tax, tax ? now : null, initials, text, now, ip, ua, hash, assetId),
+      env.DB.prepare(`UPDATE orders SET taken_by_id = ?, terminal_checkout_id = ? WHERE ref = ?`).bind(takenById, terminal ? terminal.id : null, ref),
       env.DB.prepare(`DELETE FROM order_items WHERE ref = ?`).bind(ref),
       env.DB.prepare(`INSERT INTO order_items (ref, product, material, service, inches, qty, work_unit_cents, blank_unit_cents, discount_pct, line_cents) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(ref, q.product.key, q.material.key, q.service.key, q.inches, q.qty, q.work_unit_after_cents, q.blank_unit_cents, q.discount_pct, q.work_cents + q.blank_cents + q.handling_cents),
       env.DB.prepare(`INSERT INTO events (ts, name, session, ref, path, detail) VALUES (?,?,?,?,?,?)`).bind(now, "order_checkout", null, ref, "/order/", JSON.stringify({ product: q.product.key, service: q.service.key, inches: q.inches, qty: q.qty })),
@@ -2398,7 +2463,7 @@ Logo: ${logo ? "attached to the order in the dashboard (" + logo.name + ")" : "n
 Sizing confirmation: initialed "${initials}" at ${now} from ${ip || "unknown IP"}.
 "${text}"
 
-${linkOk ? "They were sent to Square to pay." : "Square did not return a payment link. Send them a Square invoice for " + $(total) + "."}
+${terminal ? "Paying on the Terminal at the counter." : linkOk ? "They were sent to Square to pay." : "Square did not return a payment link. Send them a Square invoice for " + $(total) + "."}
 Dashboard: ${env.WORKER_URL || ""}/admin` });
     const first = name.split(" ")[0] || "there";
     await sendEmail(env, { to: email, subject: `We've got your order ${ref}`, text:
@@ -2410,7 +2475,7 @@ ${q.summary}
 ${breakdown}
 ${neededBy ? "\nNeeded by " + neededBy + "." : ""}
 ${logo ? "Your logo file came through with the order." : "Send your logo or artwork to " + env.SUPPORT_EMAIL + " or text it to (858) 373-9866 (vector AI/EPS/SVG/PDF is best; a clean PNG works)."}
-${linkOk ? "If you completed payment, you're all set." : "Payment didn't go through online, so we'll email you a secure payment link shortly."}
+${terminal ? "You paid at the counter. You're all set." : linkOk ? "If you completed payment, you're all set." : "Payment didn't go through online, so we'll email you a secure payment link shortly."}
 
 What happens next:
 1. Digital proof by email within 1-2 business days.
@@ -2424,7 +2489,8 @@ HD Laser Studio
 759 Turquoise St, Pacific Beach
 (858) 373-9866 · hdlaser.net` });
   }
-  await sendAlert(env, `Order ${ref}: ${who}, ${q.summary}, ${$(total)}. ${linkOk ? "Paying through Square." : "NEEDS A PAYMENT LINK."}`);
+  await sendAlert(env, `Order ${ref}: ${who}, ${q.summary}, ${$(total)}. ${terminal ? "Paying on the Terminal." : linkOk ? "Paying through Square." : "NEEDS A PAYMENT LINK."}`);
+  if (terminal) return json({ ok: true, ref, total: total / 100, terminal: terminal.id, status: terminal.status }, 200, cors);
   if (!linkOk) return json({ ok: true, url: null, ref, total: total / 100, error: env.SQUARE_ACCESS_TOKEN ? squareErr(data) || "Square did not return a checkout link" : "Online payment is not set up" }, 200, cors);
   return json({ ok: true, url: data.payment_link.url, ref, total: total / 100 }, 200, cors);
 }
