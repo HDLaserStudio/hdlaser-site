@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-01 v13"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-01 v14"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -137,7 +137,7 @@ export default {
           return json(await syncSquare(env, days, from, to), 200);
         }
         if (path === "/api/whoami") return json(await whoami(env), 200);
-        if (path === "/api/terminals") return json(await listTerminals(env), 200, { "Cache-Control": "no-store" });
+        if (path === "/api/terminals") return json(await listTerminals(env, url.searchParams.get("create") === "1"), 200, { "Cache-Control": "no-store" });
         if (path === "/api/pricing") return json(await pricingAdmin(env), 200, { "Cache-Control": "no-store" });
         if (path === "/api/pricing/analyze" && request.method === "POST") return json(await analyzePricing(env), 200);
         if (path === "/api/pricing/book" && request.method === "POST") { const r = await editBook(env, await request.json()); return json(r, r.ok ? 200 : 400); }
@@ -505,9 +505,17 @@ async function whoami(env) {
 }
 
 // Lists the Square Terminals signed in to this account with the id to paste into SQUARE_TERMINAL_DEVICE_ID.
-async function listTerminals(env) {
+async function listTerminals(env, create) {
   const out = { configured: env.SQUARE_TERMINAL_DEVICE_ID || null, terminals: [], how: "Copy the id of the Terminal on the counter into Cloudflare as SQUARE_TERMINAL_DEVICE_ID, then Deploy." };
+  if (out.configured && !/^device:/.test(out.configured)) out.warning = "SQUARE_TERMINAL_DEVICE_ID should start with device: (the serial number on the back of the Terminal is not it).";
   try {
+    if (create) {
+      // A Terminal can only be driven by software if it was signed in with a device code. This makes one; type it into the Terminal's sign-in screen.
+      const body = { idempotency_key: "code-" + Date.now(), device_code: { name: "Front counter", product_type: "TERMINAL_API", location_id: env.SQUARE_LOCATION_ID } };
+      const r = await squareFetch(env, "/v2/devices/codes", { method: "POST", body: JSON.stringify(body) }); const d = await r.json().catch(() => ({}));
+      if (r.ok && d.device_code) out.new_code = { code: d.device_code.code, expires_at: d.device_code.pair_by, steps: "On the Terminal: Settings > Sign out. On the sign-in screen tap 'Use a device code' and type this code. Then reload this page without ?create=1 to see its device id." };
+      else out.create_error = r.status + " " + squareErr(d) + " (the app may need the DEVICE_CREDENTIAL_MANAGEMENT permission)";
+    }
     const r = await squareFetch(env, "/v2/devices?limit=50"); const d = await r.json().catch(() => ({}));
     if (r.ok) out.terminals = (d.devices || []).map((x) => ({ id: x.id, name: x.attributes && x.attributes.name, model: x.attributes && x.attributes.model, status: x.status && x.status.category, last_seen: x.attributes && x.attributes.updated_at, location: x.components && (x.components.find((c) => c.type === "APPLICATION") || {}).application_details && null }));
     else out.devices_error = r.status + " " + squareErr(d);
