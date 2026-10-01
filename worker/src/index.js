@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-01 v12"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-01 v13"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -137,6 +137,7 @@ export default {
           return json(await syncSquare(env, days, from, to), 200);
         }
         if (path === "/api/whoami") return json(await whoami(env), 200);
+        if (path === "/api/terminals") return json(await listTerminals(env), 200, { "Cache-Control": "no-store" });
         if (path === "/api/pricing") return json(await pricingAdmin(env), 200, { "Cache-Control": "no-store" });
         if (path === "/api/pricing/analyze" && request.method === "POST") return json(await analyzePricing(env), 200);
         if (path === "/api/pricing/book" && request.method === "POST") { const r = await editBook(env, await request.json()); return json(r, r.ok ? 200 : 400); }
@@ -503,6 +504,21 @@ async function whoami(env) {
   return out;
 }
 
+// Lists the Square Terminals signed in to this account with the id to paste into SQUARE_TERMINAL_DEVICE_ID.
+async function listTerminals(env) {
+  const out = { configured: env.SQUARE_TERMINAL_DEVICE_ID || null, terminals: [], how: "Copy the id of the Terminal on the counter into Cloudflare as SQUARE_TERMINAL_DEVICE_ID, then Deploy." };
+  try {
+    const r = await squareFetch(env, "/v2/devices?limit=50"); const d = await r.json().catch(() => ({}));
+    if (r.ok) out.terminals = (d.devices || []).map((x) => ({ id: x.id, name: x.attributes && x.attributes.name, model: x.attributes && x.attributes.model, status: x.status && x.status.category, last_seen: x.attributes && x.attributes.updated_at, location: x.components && (x.components.find((c) => c.type === "APPLICATION") || {}).application_details && null }));
+    else out.devices_error = r.status + " " + squareErr(d);
+    const c = await squareFetch(env, "/v2/devices/codes?status=PAIRED"); const cd = await c.json().catch(() => ({}));
+    if (c.ok) out.paired_codes = (cd.device_codes || []).map((x) => ({ id: x.device_id, name: x.name, paired_at: x.paired_at }));
+    else out.codes_error = c.status + " " + squareErr(cd);
+    if (!out.terminals.length && out.paired_codes && out.paired_codes.length) out.terminals = out.paired_codes;
+    if (!out.terminals.length) out.hint = "No Terminal is visible to this access token. Either the Terminal is signed in with a login the app can't see, or the token lacks the DEVICES_READ permission (Square Developer, the app, Permissions).";
+  } catch (e) { out.error = "exception: " + (e && e.message || e); }
+  return out;
+}
 function squareErr(data) { return (data && data.errors && data.errors[0] && (data.errors[0].detail || data.errors[0].code)) || ""; }
 
 async function upsertPayment(env, p) {
