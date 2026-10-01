@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-01 v14"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-01 v15"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -506,8 +506,8 @@ async function whoami(env) {
 
 // Lists the Square Terminals signed in to this account with the id to paste into SQUARE_TERMINAL_DEVICE_ID.
 async function listTerminals(env, create) {
-  const out = { configured: env.SQUARE_TERMINAL_DEVICE_ID || null, terminals: [], how: "Copy the id of the Terminal on the counter into Cloudflare as SQUARE_TERMINAL_DEVICE_ID, then Deploy." };
-  if (out.configured && !/^device:/.test(out.configured)) out.warning = "SQUARE_TERMINAL_DEVICE_ID should start with device: (the serial number on the back of the Terminal is not it).";
+  const out = { configured: env.SQUARE_TERMINAL_DEVICE_ID || null, terminals: [], how: "Copy the paired_codes id of the Terminal on the counter into Cloudflare as SQUARE_TERMINAL_DEVICE_ID, then Deploy." };
+  // The Terminal checkout wants the paired device id as Square's pairing record shows it (no "device:" prefix); the Devices list shows it with the prefix.
   try {
     if (create) {
       // A Terminal can only be driven by software if it was signed in with a device code. This makes one; type it into the Terminal's sign-in screen.
@@ -2441,7 +2441,7 @@ async function orderCheckout(request, env, cors) {
   if (payHow === "terminal" && env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
     // the Square Terminal on the counter shows the amount; the customer taps there. Completion arrives by webhook or the page's status poll.
     const tc = { idempotency_key: `${ref}-t-${Date.now()}`, checkout: { amount_money: { amount: total, currency: "USD" }, reference_id: ref, note: `hdlaser.net ${ref}: ${q.summary}`.slice(0, 250), payment_type: "CARD_PRESENT",
-      device_options: { device_id: env.SQUARE_TERMINAL_DEVICE_ID, skip_receipt_screen: false, collect_signature: false, tip_settings: { allow_tipping: false } } } };
+      device_options: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), skip_receipt_screen: false, collect_signature: false, tip_settings: { allow_tipping: false } } } };
     const res = await squareFetch(env, "/v2/terminals/checkouts", { method: "POST", body: JSON.stringify(tc) });
     data = await res.json().catch(() => ({}));
     if (res.ok && data.checkout) terminal = { id: data.checkout.id, status: data.checkout.status };

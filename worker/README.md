@@ -89,7 +89,7 @@ On the shop iPad the hub opens the order page in counter mode (`/order/?via=hub&
 
 Setup, once:
 
-1. Open `/api/terminals` on the worker (admin password). It lists every Terminal signed in to the account with its id (`device:...`). If the list is empty, pair the Terminal from Square Dashboard → Settings → Device management → Device codes → Create, or give the app the DEVICES_READ permission.
+1. Open `/api/terminals?create=1` on the worker (admin password) to get a device code; on the Terminal sign out and sign in with that code. Then `/api/terminals` lists it; use the `paired_codes` id (no `device:` prefix). A Terminal signed in with an email and password cannot be driven by software.
 2. Cloudflare → hdlaser-checkout → Settings → Variables: add `SQUARE_TERMINAL_DEVICE_ID` with that id. Deploy.
 3. Square Developer → the app → Webhooks → add the events `terminal.checkout.created` and `terminal.checkout.updated` to the existing subscription (same URL, `/webhooks/square`). The page's polling works without this; the webhook is the backstop if the iPad closes mid-tap.
 4. The access token needs the `PAYMENTS_WRITE` permission (it already has it for payment links).
