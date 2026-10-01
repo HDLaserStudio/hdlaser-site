@@ -105,6 +105,8 @@ Every order starts on the same page, whether the customer does it at home or an 
 
 **DTF printing.** A third service in the price book, priced as print + press per piece by artwork size, on the customer's own shirts, hoodies, hats or totes (up to 12 in). No garment price is baked in; if the shop sources blanks for an order, that is quoted separately. Its ladder starts lower and climbs gently ($3.50 at half an inch, about $16 for a full 11 in front), setup $10. Tune it on the money page like everything else.
 
+**Sales tax.** Charged (TAX_RATE, default 7.75%) only when the shop supplies the item. Customer-supplied items ("Something I'll bring in" and own garments for DTF) are priced as work only with no tax line. Set `TAX_OWN_ITEMS=1` in Cloudflare to tax those too; no code change needed.
+
 **Editing prices.** `/admin/prices` shows every number on one screen (size ladder per finish, setup, rush, minimum, material factors, items, quantity breaks) with one Save button and a "fill the column" helper that sets a whole ladder from three numbers. Changed cells turn yellow until saved; every changed price is logged.
 
 **Price book.** Lives in D1 (`meta.price_book`), seeded from `DEFAULT_BOOK` in the worker. Edit any number on the money page (press Enter); every change is logged to `price_history`.

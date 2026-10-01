@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-09-29 v7"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-01 v8"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -111,7 +111,7 @@ export default {
       if (path === "/event" && request.method === "POST") return requireOrigin(cors) || recordEvent(request, env, cors);
       if (path === "/submit" && request.method === "POST") return requireOrigin(cors) || submitInquiry(request, env, cors);
       if (path === "/resale" && request.method === "POST") return requireOrigin(cors) || recordResale(request, env, cors);
-      if (path === "/pricing") return json({ book: publicBook(await priceBook(env)), tax_rate: parseFloat(env.TAX_RATE || "0.0775") || 0, attest_version: ATTEST_VERSION }, 200, { ...cors, "Cache-Control": "no-store" });
+      if (path === "/pricing") return json({ book: publicBook(await priceBook(env)), tax_rate: parseFloat(env.TAX_RATE || "0.0775") || 0, tax_own_items: env.TAX_OWN_ITEMS === "1", attest_version: ATTEST_VERSION }, 200, { ...cors, "Cache-Control": "no-store" });
       if (path === "/order/checkout" && request.method === "POST") return requireOrigin(cors) || orderCheckout(request, env, cors);
       // ---- Boards n' Beans coffee counter (order ahead, pay through Square, the bar gets a text) ----
       if (path === "/coffee/menu") return json({ menu: COFFEE.menu, milks: COFFEE.milks, extras: COFFEE.extras, shop: COFFEE.shop }, 200, { ...cors, "Cache-Control": "public, max-age=300" });
@@ -2263,6 +2263,7 @@ function publicBook(book) { return { ...book, products: book.products.map(({ cos
 function r25(c) { return Math.max(0, Math.round(c / 25) * 25); }
 
 // Price one spec against the book. Returns { error } or the full breakdown in cents.
+const OWN_ITEM_KEYS = ["own", "garment"]; // products the customer supplies. Flip TAX_OWN_ITEMS=1 in Cloudflare to tax them anyway.
 function quoteSpec(book, spec) {
   const product = book.products.find((p) => p.key === String(spec.product || ""));
   if (!product) return { error: "Pick what we're putting it on" };
@@ -2293,7 +2294,8 @@ function quoteSpec(book, spec) {
   let subtotal = work + blank + handling + rushCents + setup;
   const minimumTopUp = Math.max(0, book.min_order_cents - subtotal); subtotal += minimumTopUp;
   const nextBreak = [...book.qty_breaks].sort((a, b) => a.min - b.min).find((b) => b.min > qty);
-  return { product, material, service, inches, qty, rush, sides, prints, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_cents: (workUnit - workUnitAfter) * qty,
+  const taxable = !OWN_ITEM_KEYS.includes(product.key); // no sales tax when the customer brings the item; we only sell the work
+  return { product, material, service, inches, qty, rush, sides, prints, taxable, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_cents: (workUnit - workUnitAfter) * qty,
     blank_unit_cents: blankUnit, handling_unit_cents: handlingUnit, work_cents: work, blank_cents: blank, handling_cents: handling, rush_cents: rushCents, setup_cents: setup, minimum_top_up_cents: minimumTopUp, subtotal_cents: subtotal,
     next_break: nextBreak ? { min: nextBreak.min, off_pct: nextBreak.off_pct } : null,
     summary: `${qty} × ${lcName(service.name)}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.key === "garment" ? "customer's own garment" : product.name.toLowerCase()}${sides ? ", " + (sides === "both" ? "front and back" : sides) : ""}${rush ? ", rush" : ""}` };
@@ -2333,7 +2335,7 @@ async function orderCheckout(request, env, cors) {
   const neededBy = /^\d{4}-\d{2}-\d{2}$/.test(String(b.needed_by || "")) ? b.needed_by : null;
   const takenBy = String(b.taken_by || "").trim().slice(0, 60) || null;
   const taxRate = parseFloat(env.TAX_RATE || "0.0775") || 0;
-  const tax = Math.round(q.subtotal_cents * taxRate);
+  const tax = (q.taxable || env.TAX_OWN_ITEMS === "1") ? Math.round(q.subtotal_cents * taxRate) : 0;
   const total = q.subtotal_cents + tax;
   // logo, if they added one: a small data URL kept with the order so nobody has to chase the file
   let logo = null; const L = b.logo || {};
