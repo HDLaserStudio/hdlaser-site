@@ -21,7 +21,7 @@ Commit as `git -c user.name="jake-hess" -c user.email="jakehessplans@gmail.com"`
 
 ## Architecture in one paragraph
 
-Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v25**. Deployed in Cloudflare: **v25** (confirmed Oct 2).
+Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v26** (where-customers-come-from tracking). Deployed in Cloudflare: **v25** (confirmed Oct 2; v26 pending).
 
 ## How the worker gets deployed (nobody automates this yet)
 
@@ -35,7 +35,7 @@ After a change to `DEFAULT_BOOK`, Hugh also presses **Load the starting numbers 
 
 ## Pages and what they do
 
-Public: `/` home (engraving, UV, DTF, cutting sections), `/order/` the single order page every sale starts from, `/quote/` free-text quote form, `/thanks/`, `/terms/`, `/grounds-for-profit/` (coffee-shop cup pitch, old fixed pricing). Private, unlinked, noindex: `/hub/` shop iPad home (name + PIN), `/staff/` portal, `/custom/` custom-price page (built then unlinked at Jake's request; still works), `/pricing-lab/` sandbox dials (does not touch live prices), `/marisa/` salon-room offer, `/partnership/` Jake and Hugh's deal. Worker pages (Basic auth, any username, password ADMIN_KEY): `/admin` sales dashboard, `/admin/money` money page with the red pricing-suggestion box, `/admin/prices` every price on one screen, `/api/terminals` Terminal ids.
+Public: `/` home (engraving, UV, DTF, cutting sections), `/order/` the single order page every sale starts from, `/quote/` free-text quote form, `/thanks/`, `/terms/`, `/grounds-for-profit/` (coffee-shop cup pitch, old fixed pricing), `/holiday/` (holiday business gifts: four packages priced live from `/pricing`, buttons open the order page pre-filled with `&from=holiday`; built Oct 2, still noindex and unlinked until Hugh confirms the items and the December 1 order-by date). Private, unlinked, noindex: `/hub/` shop iPad home (name + PIN), `/staff/` portal, `/custom/` custom-price page (built then unlinked at Jake's request; still works), `/pricing-lab/` sandbox dials (does not touch live prices), `/marisa/` salon-room offer, `/partnership/` Jake and Hugh's deal. Worker pages (Basic auth, any username, password ADMIN_KEY): `/admin` sales dashboard, `/admin/money` money page with the red pricing-suggestion box, `/admin/prices` every price on one screen, `/api/terminals` Terminal ids.
 
 ## The order page, step by step (as a customer sees it)
 
@@ -70,6 +70,14 @@ Public: `/` home (engraving, UV, DTF, cutting sections), `/order/` the single or
 - Receipts: the Terminal offers print/email/text after the tap; thank-you page has "Print receipt on the Terminal"; the hub's **Receipts** tile (v24+) lists the last 30 days of payments with a Print button, and a manager button pulls the past week of register sales from Square.
 - Done Oct 2: live $25 test sale on the iPad (hub, New order, own wood, engraving, text only, Hugh's PIN, Charge on the Terminal, tap card). Page moved to thanks on payment, sale showed in hub Receipts, then refunded in Square. Hub Receipts and "Pull the past week from Square" both work on v25.
 
+## Where customers come from (v26)
+
+- `assets/site-config.js` (now loaded on every public page, `?v=5`) remembers how a visitor first arrived for 90 days in localStorage `hd_src`: a link tag (`?src=` or `utm_source`, `gclid` = Google ads) or the referring site, plus the landing page. A new arrival sends an `arrival` event.
+- The order page and quote form ask "How did you find us?" (optional) and send that answer plus the stored source. The worker saves `channel`, `heard`, `src` on orders (counter orders are "At the counter") and `channel`, `heard` on quote requests. The order page also takes `inches`, `qty` and `art` in the link, and `from=` is saved as `src.via`.
+- `/admin` has a "Where customers come from" section: new visitors, orders, paid, revenue and quotes by channel, by the customer's answer, and by starting page. Channel names come from `SOURCE_TAGS` and `channelOf()` in the worker.
+- Links to hand out, tagged: Google Business Profile website and order links `https://hdlaser.net/?src=google-profile` and `https://hdlaser.net/order/?src=google-profile`; flyers `?src=flyer-<place>`; emails `?src=email-<campaign>`; texts `?src=text`; QR codes `?src=qr-<place>`.
+- The privacy notice in `/terms/` says how this works.
+
 ## Other systems and their state
 
 - **Twilio** toll-free verification for +1 866 502 8303 resubmitted Oct 1, status In Review. Decision email goes to contact@hdlaser.net. Cloudflare has TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, ALERT_SMS_TO. Compliance screenshots at `assets/compliance/`.
@@ -88,13 +96,15 @@ The container cannot reach hdlaser.net or workers.dev. Test the worker by import
 
 1. ~~Deploy v25 and check hub Receipts~~ done Oct 2.
 2. ~~The live $25 Terminal test, refunded~~ done Oct 2.
-3. Add `terminal.checkout.updated` to the Square webhook subscription.
-4. Press "Load the starting numbers" after any pricing change so Hugh's saved book matches the code.
-5. Twilio and Apple decisions arrive by email; forward to the session.
-6. Google Business Profile photos, order link, first post; Search Console indexing.
-7. Compare Square charges to the price matrix once Jake sends the Items Detail CSV export (Transactions, Export).
-8. Pricing gaps: coffee-shop cup tiers still hard-coded; artwork-help charge not priced; per-employee sales-per-hour on the Team tab not built; clock-in tile on the hub not built.
-9. Accountant question: is work on customer-owned items taxable in California? If yes, set TAX_OWN_ITEMS=1.
+3. Deploy v26 (source tracking). Then put the tagged links on the Google Business Profile.
+4. Hugh confirms the holiday packages and the order-by date; then remove noindex from `/holiday/`, link it from the home page, add it to `sitemap.xml`, and email past business customers.
+5. Add `terminal.checkout.updated` to the Square webhook subscription.
+6. Press "Load the starting numbers" after any pricing change so Hugh's saved book matches the code.
+7. Twilio and Apple decisions arrive by email; forward to the session.
+8. Google Business Profile photos, order link, first post; Search Console indexing.
+9. Compare Square charges to the price matrix once Jake sends the Items Detail CSV export (Transactions, Export).
+10. Pricing gaps: coffee-shop cup tiers still hard-coded; artwork-help charge not priced; per-employee sales-per-hour on the Team tab not built; clock-in tile on the hub not built.
+11. Accountant question: is work on customer-owned items taxable in California? If yes, set TAX_OWN_ITEMS=1.
 
 ## Conventions that avoided pain
 

@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-02 v25"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-02 v26"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -37,7 +37,7 @@ const PRICING = {
   minCups: 50,
 };
 const COLORS = ["Pink", "Bikini Pink", "Cream", "Yellow", "Orange", "Purple", "Light Green", "Army Green", "Light Blue", "Navy", "Dark Gray", "Black"];
-const EVENT_NAMES = ["calc_view", "add_line", "checkout_click", "details_submitted", "payment_started", "quote_request", "paid_return", "order_view", "spec_view", "order_attested", "order_checkout"];
+const EVENT_NAMES = ["calc_view", "add_line", "checkout_click", "details_submitted", "payment_started", "quote_request", "paid_return", "order_view", "spec_view", "order_attested", "order_checkout", "arrival"];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS orders (ref TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, business TEXT, name TEXT, email TEXT, phone TEXT, notes TEXT, text_consent INTEGER DEFAULT 0, cups INTEGER, base_price_cents INTEGER, cups_subtotal_cents INTEGER, setup_fee_cents INTEGER, total_cents INTEGER, deposit_percent INTEGER, square_order_id TEXT, square_payment_id TEXT, paid_at TEXT, paid_cents INTEGER DEFAULT 0, fee_cents INTEGER DEFAULT 0, refunded_cents INTEGER DEFAULT 0, resale_permit TEXT, resale_business TEXT, resale_received_at TEXT, logo_received_at TEXT, proof_approved_at TEXT, completed_at TEXT, tax_invoiced_at TEXT, admin_notes TEXT);
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS plaid_items (item_id TEXT PRIMARY KEY, access_token T
 CREATE TABLE IF NOT EXISTS coffee_orders (ref TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, name TEXT, phone TEXT, email TEXT, items TEXT, summary TEXT, total_cents INTEGER, pickup TEXT, note TEXT, text_consent INTEGER DEFAULT 0, square_order_id TEXT, square_payment_id TEXT, paid_at TEXT, paid_cents INTEGER DEFAULT 0, tip_cents INTEGER DEFAULT 0, notified_at TEXT, ready_at TEXT, picked_up_at TEXT);
 CREATE INDEX IF NOT EXISTS coffee_created ON coffee_orders(created_at);`;
 // Columns added after the first release. Each ALTER is tried once and ignored if the column already exists.
-const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0"];
+const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT"];
 
 let migrated = false;
 async function ensureSchema(env) {
@@ -297,6 +297,34 @@ function price(lines) {
   return { lines: priced, count, base, cups, totalCents: (cups + PRICING.setupFee) * 100 };
 }
 
+// ---------------------------------------------------------------- where customers come from
+// The site remembers how a visitor first arrived (assets/site-config.js): a tag from a link we hand out (?src=google-profile,
+// ?src=flyer-cafe) or the site that sent them. This turns that into one plain channel name for the dashboard.
+const SOURCE_TAGS = { "google-profile": "Google Business Profile", gbp: "Google Business Profile", "google-ads": "Google ads", "apple-maps": "Apple Maps", apple: "Apple Maps", instagram: "Instagram", ig: "Instagram", facebook: "Facebook", fb: "Facebook", yelp: "Yelp", nextdoor: "Nextdoor", email: "Email from us", text: "Text from us", sms: "Text from us", flyer: "Flyer", card: "Business card", qr: "QR code", sign: "Shop sign" };
+function cleanSrc(v) {
+  if (!v || typeof v !== "object") return null;
+  const c = (x, n = 60) => String(x || "").toLowerCase().replace(/[^a-z0-9_./-]/g, "").slice(0, n);
+  const o = { tag: c(v.tag, 40), camp: c(v.camp, 40), ref: c(v.ref), landing: c(v.landing, 80) };
+  return o.tag || o.ref || o.landing ? o : null;
+}
+function channelOf(src) {
+  if (!src) return "Unknown";
+  const tag = src.tag || "", ref = src.ref || "";
+  if (tag) { if (SOURCE_TAGS[tag]) return SOURCE_TAGS[tag]; const [base, ...rest] = tag.split("-"); return SOURCE_TAGS[base] ? `${SOURCE_TAGS[base]} (${rest.join(" ")})` : `Link: ${tag}`; }
+  if (!ref) return "Typed in or bookmark";
+  if (/(chatgpt\.com|openai\.com|perplexity\.ai|claude\.ai|copilot\.microsoft\.com|gemini\.google)/.test(ref)) return "AI assistants";
+  if (/(^|\.)google\./.test(ref)) return "Google search";
+  if (/(^|\.)(bing|duckduckgo|yahoo|ecosia|brave)\./.test(ref)) return "Other search engines";
+  if (/instagram\.com$/.test(ref)) return "Instagram";
+  if (/(facebook\.com|fb\.com|fb\.me)$/.test(ref)) return "Facebook";
+  if (/yelp\./.test(ref)) return "Yelp";
+  if (/maps\.apple\.com$/.test(ref)) return "Apple Maps";
+  if (/nextdoor\./.test(ref)) return "Nextdoor";
+  return "Other site: " + ref;
+}
+const HEARD = ["Google search", "Google Maps", "Apple Maps", "Instagram", "Facebook", "Yelp", "A friend or family", "Walked or drove by", "I've ordered before", "Saw your work somewhere", "Flyer or card", "Email or text from you", "Other"];
+function cleanHeard(v) { const h = String(v || "").trim(); return HEARD.includes(h) ? h : null; }
+
 // ---------------------------------------------------------------- events + resale
 async function recordEvent(request, env, cors) {
   if (!env.DB) return json({ ok: false }, 200, cors);
@@ -335,6 +363,7 @@ async function submitInquiry(request, env, cors) {
   for (const [k, v] of Object.entries(b)) { if (k.startsWith("_") || ["email", "Reference", "Payment"].includes(k)) continue; const val = String(v == null ? "" : v).trim().slice(0, 4000); if (val) fields[k] = val; }
   const now = new Date().toISOString();
   const ins = await env.DB.prepare(`INSERT INTO inquiries (created_at, kind, ref, name, business, email, phone, fields) VALUES (?,?,?,?,?,?,?,?)`).bind(now, kind, ref, name, business, email, phone, JSON.stringify(fields)).run();
+  await env.DB.prepare(`UPDATE inquiries SET channel = ?, heard = ? WHERE id = ?`).bind(channelOf(cleanSrc(b._src)), cleanHeard(fields["How did you find us"]), ins.meta && ins.meta.last_row_id).run().catch(() => {});
 
   const who = business ? `${business} (${name})` : name || email;
   const lines = Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join("\n");
@@ -666,7 +695,7 @@ async function kpis(env, from, to) {
     in_production: (await q(`SELECT ref, paid_at, proof_approved_at, business, name, cups FROM orders WHERE status = 'paid' AND proof_approved_at IS NOT NULL AND completed_at IS NULL ORDER BY proof_approved_at ASC LIMIT 50`).all()).results,
   };
   const recent = (await q(`SELECT o.ref, o.created_at, o.paid_at, o.status, o.business, o.name, o.email, o.phone, o.cups, o.total_cents, o.paid_cents, o.fee_cents, o.refunded_cents, o.resale_received_at, o.logo_received_at, o.proof_approved_at, o.completed_at, o.tax_invoiced_at, o.admin_notes,
-      o.kind, o.spec, o.attest_initials, o.attest_at, o.logo_asset_id, o.taken_by, o.needed_by, o.rush,
+      o.kind, o.spec, o.attest_initials, o.attest_at, o.logo_asset_id, o.taken_by, o.needed_by, o.rush, o.channel, o.heard,
       COALESCE((SELECT GROUP_CONCAT(qty || ' x ' || size || 'oz ' || finish || ' ' || color || ' (' || lid || ')', '; ') FROM order_lines l WHERE l.ref = o.ref), (SELECT GROUP_CONCAT(qty || ' x ' || service || ' ' || inches || 'in on ' || product, '; ') FROM order_items i WHERE i.ref = o.ref)) items
       FROM orders o ORDER BY o.created_at DESC LIMIT 100`).all()).results;
   const lastSync = await q(`SELECT v FROM meta WHERE k = 'last_sync'`).first();
@@ -675,13 +704,27 @@ async function kpis(env, from, to) {
   funnel.quote_request = Math.max(funnel.quote_request, inqCount.n);
   const lifetime = await q(`SELECT COUNT(*) orders, COALESCE(SUM(paid_cents - refunded_cents),0) revenue, COALESCE(SUM(cups),0) cups FROM orders WHERE status IN ('paid','refunded')`).first();
 
+  // where customers come from: new visitors (first arrival), orders placed, paid, revenue and quote requests per channel
+  const blank = (k) => ({ k, visitors: 0, orders: 0, paid: 0, revenue_cents: 0, quotes: 0 });
+  const tally = (m, k, f, n = 1) => { (m[k] || (m[k] = blank(k)))[f] += n; };
+  const byChannel = {}, byHeard = {}, byPage = {};
+  for (const r of (await q(`SELECT detail FROM events WHERE name = 'arrival' AND ts >= ? AND ts < ?`, fromIso, toIso).all()).results) { let d = null; try { d = JSON.parse(r.detail || "null"); } catch {} tally(byChannel, channelOf(cleanSrc(d)), "visitors"); }
+  for (const r of (await q(`SELECT channel, heard, src, status, paid_cents, refunded_cents FROM orders WHERE created_at >= ? AND created_at < ? AND status != 'cancelled'`, fromIso, toIso).all()).results) {
+    const paid = r.status === "paid" || r.status === "refunded", rev = paid ? (r.paid_cents || 0) - (r.refunded_cents || 0) : 0;
+    let via = null; try { via = (JSON.parse(r.src || "null") || {}).via || null; } catch {}
+    for (const [m, k] of [[byChannel, r.channel || "Not recorded"], [byHeard, r.heard || "Didn't say"], ...(via ? [[byPage, via]] : [])]) { tally(m, k, "orders"); if (paid) { tally(m, k, "paid"); tally(m, k, "revenue_cents", rev); } }
+  }
+  for (const r of (await q(`SELECT channel, heard FROM inquiries WHERE kind = 'quote' AND created_at >= ? AND created_at < ?`, fromIso, toIso).all()).results) { tally(byChannel, r.channel || "Not recorded", "quotes"); tally(byHeard, r.heard || "Didn't say", "quotes"); }
+  const ranked = (m) => Object.values(m).sort((a, b) => b.revenue_cents - a.revenue_cents || b.orders - a.orders || b.quotes - a.quotes || b.visitors - a.visitors);
+  const sources = { by_channel: ranked(byChannel), by_heard: ranked(byHeard), by_page: ranked(byPage) };
+
   return {
     range: { from: fromIso, to: toIso, prev_from: prevFrom, prev_to: prevTo },
     sales, prev, lifetime,
     product: { by_size: await mix("size"), by_finish: await mix("finish"), by_lid: await mix("lid"), by_color: await mix("color"), tiers },
     funnel,
     financial: { gross_cents: fin.gross, fees_cents: fin.fees, refunded_cents: fin.refunded, net_cents: fin.gross - fin.fees - fin.refunded, payments: fin.n, other_square_gross_cents: fin.other_gross, web_gross_cents: fin.gross - fin.other_gross, tax_rate: taxRate, tax_exposure_orders: taxDue.n, tax_exposure_cents: Math.round(taxDue.base * taxRate), by_card: cards, by_month: months, top_items: topItems },
-    attention, recent, inquiries,
+    attention, recent, inquiries, sources,
     last_sync: lastSync ? lastSync.v : null,
     email_configured: !!env.RESEND_API_KEY,
   };
@@ -780,6 +823,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
 <h2>Financial, all Square payments</h2><div class="tiles" id="fin"></div>
 <div class="grid" id="fin2" style="margin-top:14px"></div>
 <h2>Funnel</h2><div class="tiles" id="funnel"></div>
+<h2>Where customers come from</h2><div class="grid" id="sources"></div>
 <h2>Product mix</h2><div class="grid" id="product"></div>
 <h2>Needs attention</h2><div class="grid" id="attention"></div>
 <h2>Recent orders</h2><div class="card"><table id="orders"></table></div>
@@ -820,6 +864,9 @@ async function load(){
     +(f.top_items.length?'<div class="card"><h3 style="margin:0 0 6px">Top items sold in Square</h3><table><tr><th>Item</th><th class="num">Qty</th><th class="num">Orders</th><th class="num">Revenue</th></tr>'+f.top_items.map(t=>'<tr><td>'+esc(t.k)+'</td><td class="num">'+(+t.qty).toLocaleString()+'</td><td class="num">'+t.orders+'</td><td class="num">'+money(t.revenue)+'</td></tr>').join('')+'</table></div>':'<div class="card"><h3 style="margin:0 0 6px">Top items sold in Square</h3><p class="empty">No itemised Square orders in range. Click "Import 2 years of history" to pull them in.</p></div>');
   const u=k.funnel;
   $('#funnel').innerHTML=tile('Calculator views',u.calc_view,'')+tile('Lines added',u.add_line,'')+tile('Checkout clicks',u.checkout_click,'')+tile('Details submitted',u.details_submitted,'')+tile('Paid',u.paid,'')+tile('Conversion',u.conversion_pct+'%','views to paid')+tile('Quote requests',u.quote_request,'non-cup form');
+  const srcTable=(title,note,rows,label,visitors)=>'<div class="card"><h3 style="margin:0 0 6px">'+title+'</h3><p class="small" style="margin:0 0 8px">'+note+'</p>'+(rows.length?'<table><tr><th>'+label+'</th>'+(visitors?'<th class="num">New visitors</th>':'')+'<th class="num">Orders</th><th class="num">Paid</th><th class="num">Revenue</th><th class="num">Quotes</th></tr>'+rows.map(r=>'<tr><td>'+esc(r.k)+'</td>'+(visitors?'<td class="num">'+r.visitors+'</td>':'')+'<td class="num">'+r.orders+'</td><td class="num">'+r.paid+'</td><td class="num">'+money(r.revenue_cents)+'</td><td class="num">'+r.quotes+'</td></tr>').join('')+'</table>':'<p class="empty">Nothing in this range yet</p>')+'</div>';
+  const so=k.sources||{by_channel:[],by_heard:[],by_page:[]};
+  $('#sources').innerHTML=srcTable('How they arrived','From the link they clicked or the site that sent them. Counter sales show as At the counter.',so.by_channel,'Channel',true)+srcTable('What they told us','Their answer to How did you find us? on the order and quote forms.',so.by_heard,'Answer',false)+(so.by_page.length?srcTable('Orders started from a page','Orders that began on a page like the holiday gifts page.',so.by_page,'Page',false):'');
   $('#product').innerHTML=mixTable('By size',k.product.by_size,'Size')+mixTable('By finish',k.product.by_finish,'Finish')+mixTable('By lid',k.product.by_lid,'Lid')+mixTable('By color',k.product.by_color,'Color')+mixTable('By order size tier',k.product.tiers.map(t=>({k:t.tier,cups:t.cups,revenue:t.revenue})),'Tier');
   const a=k.attention;
   const list=(title,rows,fn)=>'<div class="card"><h3 style="margin:0 0 6px">'+title+' <span class="pill">'+rows.length+'</span></h3>'+(rows.length?'<table>'+rows.map(fn).join('')+'</table>':'<p class="empty">Nothing here</p>')+'</div>';
@@ -828,7 +875,7 @@ async function load(){
     list('Missing logo',a.missing_logo,r=>'<tr><td><b>'+r.ref+'</b><div class="small">paid '+fmtDate(r.paid_at)+'</div></td><td>'+who(r)+'</td><td>'+flag(r.ref,'logo_received_at',0,'Logo received')+'</td></tr>')+
     list('Sales tax to invoice',a.tax_due,r=>'<tr><td><b>'+r.ref+'</b><div class="small">paid '+fmtDate(r.paid_at)+'</div></td><td>'+who(r)+'</td><td class="num">'+money(r.tax_cents)+'<div class="small">on '+money(r.base_cents)+'</div></td><td>'+flag(r.ref,'tax_invoiced_at',0,'Invoiced')+flag(r.ref,'resale_received_at',0,'Cert received')+'</td></tr>')+
     list('In production',a.in_production,r=>'<tr><td><b>'+r.ref+'</b><div class="small">approved '+fmtDate(r.proof_approved_at)+'</div></td><td>'+esc(r.business||r.name)+'<div class="small">'+r.cups+' cups</div></td><td>'+flag(r.ref,'completed_at',0,'Done')+'</td></tr>');
-  $('#orders').innerHTML='<tr><th>Ref</th><th>Customer</th><th>Items</th><th class="num">Total</th><th>Status</th><th>Progress</th></tr>'+k.recent.map(r=>'<tr><td><b>'+r.ref+'</b><div class="small">'+fmtDate(r.created_at)+'</div></td><td>'+who(r)+'</td><td class="small">'+esc(r.items||'')+(r.kind==='custom'?'<div>'+(r.attest_initials?'<span class="pill" style="background:#FBE9E6;color:var(--red)">initialed '+esc(r.attest_initials)+'</span> ':'')+(r.logo_asset_id?'<a href="/api/assets/'+r.logo_asset_id+'" target="_blank">logo file</a> ':'')+(r.taken_by?'at the counter by '+esc(r.taken_by)+' ':'')+(r.needed_by?'· needed by '+esc(r.needed_by):'')+(r.rush?' · <b>RUSH</b>':'')+'</div>':'')+'</td><td class="num">'+money(r.total_cents)+(r.refunded_cents?'<div class="small">refunded '+money(r.refunded_cents)+'</div>':'')+(r.fee_cents?'<div class="small">fee '+money(r.fee_cents)+'</div>':'')+'</td><td><span class="pill '+r.status+'">'+r.status.replace('_',' ')+'</span></td><td>'+flag(r.ref,'logo_received_at',r.logo_received_at,'Logo')+flag(r.ref,'proof_approved_at',r.proof_approved_at,'Proof OK')+flag(r.ref,'completed_at',r.completed_at,'Done')+flag(r.ref,'resale_received_at',r.resale_received_at,'Resale cert')+flag(r.ref,'tax_invoiced_at',r.tax_invoiced_at,'Tax invoiced')+'</td></tr>').join('');
+  $('#orders').innerHTML='<tr><th>Ref</th><th>Customer</th><th>Items</th><th class="num">Total</th><th>Status</th><th>Progress</th></tr>'+k.recent.map(r=>'<tr><td><b>'+r.ref+'</b><div class="small">'+fmtDate(r.created_at)+'</div></td><td>'+who(r)+'</td><td class="small">'+esc(r.items||'')+(r.kind==='custom'?'<div>'+(r.attest_initials?'<span class="pill" style="background:#FBE9E6;color:var(--red)">initialed '+esc(r.attest_initials)+'</span> ':'')+(r.logo_asset_id?'<a href="/api/assets/'+r.logo_asset_id+'" target="_blank">logo file</a> ':'')+(r.taken_by?'at the counter by '+esc(r.taken_by)+' ':'')+(r.channel&&!r.taken_by?'· via '+esc(r.channel)+' ':'')+(r.heard?'· said '+esc(r.heard)+' ':'')+(r.needed_by?'· needed by '+esc(r.needed_by):'')+(r.rush?' · <b>RUSH</b>':'')+'</div>':'')+'</td><td class="num">'+money(r.total_cents)+(r.refunded_cents?'<div class="small">refunded '+money(r.refunded_cents)+'</div>':'')+(r.fee_cents?'<div class="small">fee '+money(r.fee_cents)+'</div>':'')+'</td><td><span class="pill '+r.status+'">'+r.status.replace('_',' ')+'</span></td><td>'+flag(r.ref,'logo_received_at',r.logo_received_at,'Logo')+flag(r.ref,'proof_approved_at',r.proof_approved_at,'Proof OK')+flag(r.ref,'completed_at',r.completed_at,'Done')+flag(r.ref,'resale_received_at',r.resale_received_at,'Resale cert')+flag(r.ref,'tax_invoiced_at',r.tax_invoiced_at,'Tax invoiced')+'</td></tr>').join('');
   loadTeam();
   $('#inq').innerHTML=k.inquiries.length?'<tr><th>When</th><th>Type</th><th>Who</th><th>Details</th><th>Sent</th></tr>'+k.inquiries.map(i=>'<tr><td class="small">'+fmtDate(i.created_at)+'</td><td><span class="pill">'+esc(i.kind)+(i.ref?' '+i.ref:'')+'</span></td><td>'+who(i)+'</td><td class="small">'+esc(Object.entries(i.fields).filter(([k])=>!['Name','Business','Phone','Agreed to Terms of Sale','Terms version','Text message consent'].includes(k)).map(([k,v])=>k+': '+v).join(' · ')).slice(0,400)+'</td><td class="small">'+(i.emailed&1?'shop ✓ ':'')+(i.emailed&2?'customer ✓':'')+'</td></tr>').join(''):'<tr><td class="empty">'+(k.email_configured?'No submissions yet.':'Forms still go through Formspree until RESEND_API_KEY is set on the worker.')+'</td></tr>';
 }
@@ -2491,6 +2538,8 @@ async function orderCheckout(request, env, cors) {
   const neededBy = /^\d{4}-\d{2}-\d{2}$/.test(String(b.needed_by || "")) ? b.needed_by : null;
   let takenBy = String(b.taken_by || "").trim().slice(0, 60) || null, takenById = null;
   const payHow = b.pay === "terminal" ? "terminal" : "link";
+  const src = cleanSrc(b.src), from = String(b.from || "").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 40);
+  if (src && from) src.via = from;
   if (b.staff && (b.staff.pin || payHow === "terminal")) {
     // counter orders: the employee taking the order proves it with their PIN, so every sale is credited to a person
     if (rateLimited("pin:" + ip, 12, 600000)) return json({ error: "Too many PIN attempts. Wait 10 minutes." }, 429, cors);
@@ -2549,6 +2598,7 @@ async function orderCheckout(request, env, cors) {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, linkOk || terminal ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
         null, q.work_unit_cents, q.subtotal_cents - q.setup_cents, q.setup_cents, total, 100, terminal ? terminal.order_id : linkOk ? (data.payment_link.order_id || null) : null, "custom", JSON.stringify(spec), neededBy, q.rush ? 1 : 0, takenBy, tax, tax ? now : null, initials, text, now, ip, ua, hash, assetId),
       env.DB.prepare(`UPDATE orders SET taken_by_id = ?, terminal_checkout_id = ? WHERE ref = ?`).bind(takenById, terminal ? terminal.id : null, ref),
+      env.DB.prepare(`UPDATE orders SET channel = ?, heard = ?, src = ? WHERE ref = ?`).bind(takenBy ? "At the counter" : channelOf(src), cleanHeard(b.heard), src ? JSON.stringify(src) : null, ref),
       env.DB.prepare(`DELETE FROM order_items WHERE ref = ?`).bind(ref),
       env.DB.prepare(`INSERT INTO order_items (ref, product, material, service, inches, qty, work_unit_cents, blank_unit_cents, discount_pct, line_cents) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(ref, q.product.key, q.material.key, q.service.key, q.inches, q.qty, q.work_unit_after_cents, q.blank_unit_cents, q.discount_pct, q.work_cents + q.blank_cents + q.handling_cents),
       env.DB.prepare(`INSERT INTO events (ts, name, session, ref, path, detail) VALUES (?,?,?,?,?,?)`).bind(now, "order_checkout", null, ref, "/order/", JSON.stringify({ product: q.product.key, service: q.service.key, inches: q.inches, qty: q.qty })),

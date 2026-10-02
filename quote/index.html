@@ -159,6 +159,7 @@ button[type=submit]:hover{background:var(--redd)}
         <div class="f"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div>
         <div class="f"><label for="phone">Phone</label><input id="phone" name="Phone" type="tel" autocomplete="tel" required></div>
       </div>
+      <div class="f" style="margin-top:14px;max-width:360px"><label for="heard">How did you find us? <small>(optional)</small></label><select id="heard" name="How did you find us"><option value="">Pick one</option><option>Google search</option><option>Google Maps</option><option>Apple Maps</option><option>Instagram</option><option>Facebook</option><option>Yelp</option><option>A friend or family</option><option>Walked or drove by</option><option>I've ordered before</option><option>Saw your work somewhere</option><option>Flyer or card</option><option>Email or text from you</option><option>Other</option></select></div>
     </fieldset>
 
     <fieldset>
@@ -173,7 +174,7 @@ button[type=submit]:hover{background:var(--redd)}
     <p class="note">Prefer to talk? Call or text <a href="tel:+18583739866">(858) 373-9866</a>, or stop by 759 Turquoise St, Pacific Beach.</p>
   </form>
 </main>
-<script src="/assets/site-config.js?v=4"></script>
+<script src="/assets/site-config.js?v=5"></script>
 <script>
   // Pre-select "Custom cups" when arriving from the Grounds for Profit page (?service=cups)
   var CFG = window.HD_CONFIG || {};
@@ -238,7 +239,7 @@ button[type=submit]:hover{background:var(--redd)}
   form.addEventListener('submit', function (e) {
     if (form.dataset.native) return;            // second pass: plain submit as a fallback
     e.preventDefault(); errBox.hidden = true; btn.disabled = true; btn.textContent = 'Sending…';
-    var fd = new FormData(form), obj = {}; fd.forEach(function (v, k) { obj[k] = v; });
+    var fd = new FormData(form), obj = {}; fd.forEach(function (v, k) { obj[k] = v; }); if (window.hdSource) obj._src = hdSource();
     var viaWorker = CFG.SUBMIT_ENDPOINT ? fetch(CFG.SUBMIT_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) })
       .then(function (r) { if (r.status >= 500) throw new Error('fallback'); return r.json().then(function (d) { if (!r.ok || !d.ok) throw Object.assign(new Error(d.error || 'submit'), { shown: !!d.error }); return d; }); })
       : Promise.reject(new Error('fallback'));

@@ -26,3 +26,26 @@ window.hdTrack = function (name, ref, detail) {
     else { fetch(base + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, keepalive: true }).catch(function () {}); }
   } catch (e) {}
 };
+
+// Where did this visitor come from? Remembers how they first arrived (a tagged link like ?src=google-profile,
+// or the site that sent them) for 90 days, so an order can say "came from the Google profile" or "from the cafe flyer".
+// Kept in this browser only; it goes to the shop with an order or quote request, never anywhere else.
+(function () {
+  var KEY = 'hd_src';
+  function clean(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 40); }
+  function read() { try { var o = JSON.parse(localStorage.getItem(KEY) || 'null'); return o && Date.now() - o.at < 90 * 864e5 ? o : null; } catch (e) { return null; } }
+  window.hdSource = read;
+  try {
+    var p = new URLSearchParams(location.search), here = location.hostname.replace(/^www\./, '');
+    var tag = clean(p.get('src') || p.get('utm_source')) || (p.get('gclid') ? 'google-ads' : '');
+    var ref = ''; try { ref = document.referrer ? new URL(document.referrer).hostname.replace(/^www\./, '') : ''; } catch (e) {}
+    if (ref === here || /workers\.dev$|squareup|square\.link/.test(ref)) ref = '';
+    var old = read(), next = null;
+    if (tag) next = { tag: tag, camp: clean(p.get('utm_campaign')), ref: ref, landing: location.pathname, at: Date.now() };
+    else if (!old || (!old.tag && !old.ref && ref)) next = { tag: '', camp: '', ref: ref, landing: location.pathname, at: Date.now() };
+    if (next && !(old && old.tag === next.tag && old.ref === next.ref)) {
+      localStorage.setItem(KEY, JSON.stringify(next));
+      if (p.get('via') !== 'hub' && window.hdTrack) window.hdTrack('arrival', null, { tag: next.tag, ref: next.ref, landing: next.landing });
+    }
+  } catch (e) {}
+})();

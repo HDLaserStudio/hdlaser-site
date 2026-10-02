@@ -71,7 +71,7 @@ input[type=range]{flex:1 1 220px;accent-color:var(--red);height:40px}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .f{display:flex;flex-direction:column;gap:6px}
 .f label{font-weight:700}.f small{color:var(--muted);font-weight:400}
-input[type=text],input[type=email],input[type=tel],input[type=date],textarea{font:inherit;font-size:16px;padding:13px 14px;border:1px solid var(--field);border-radius:12px;background:#fff;color:var(--ink);width:100%}
+input[type=text],input[type=email],input[type=tel],input[type=date],textarea,select{font:inherit;font-size:16px;padding:13px 14px;border:1px solid var(--field);border-radius:12px;background:#fff;color:var(--ink);width:100%}
 .check{display:flex;gap:12px;align-items:flex-start;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 14px;line-height:1.5}
 .check input{width:22px;height:22px;accent-color:var(--red);flex:none;margin-top:2px}
 .upload{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
@@ -206,6 +206,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
       <div class="f"><label for="phone">Phone</label><input id="phone" type="tel" autocomplete="tel" required></div>
     </div>
     <div class="f" style="margin-top:14px"><label for="notes">Anything we should know? <small>(optional)</small></label><textarea id="notes" rows="3" placeholder="Text to engrave, names, colors, where on the item it goes."></textarea></div>
+    <div class="f" style="margin-top:14px;max-width:360px"><label for="heard">How did you find us? <small>(optional)</small></label><select id="heard"><option value="">Pick one</option><option>Google search</option><option>Google Maps</option><option>Apple Maps</option><option>Instagram</option><option>Facebook</option><option>Yelp</option><option>A friend or family</option><option>Walked or drove by</option><option>I've ordered before</option><option>Saw your work somewhere</option><option>Flyer or card</option><option>Email or text from you</option><option>Other</option></select></div>
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">
       <label class="check"><input type="checkbox" id="agree"><span>I agree to HD Laser&#8217;s <a href="/terms/" target="_blank" rel="noopener">Terms of Sale &amp; Privacy Notice</a>. Custom orders are <b>final once paid</b>. HD Laser may email or call me about my order and future offers; I can unsubscribe at any time.</span></label>
       <label class="check"><input type="checkbox" id="sms"><span><b>Text me order updates.</b> I agree to receive text messages from HD Laser Studio at the number above about this order (proof ready, payment received, ready for pickup). Consent is not a condition of purchase. Msg frequency varies. Msg &amp; data rates may apply. Reply STOP to cancel, HELP for help. We never share your number. <a href="/terms/" target="_blank" rel="noopener">Terms &amp; Privacy</a>.</span></label>
@@ -251,7 +252,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
 </main>
 <div class="bar" id="bar"><div><div style="font-size:12px;color:#9AA3AD">Your total</div><b id="bartot">$0</b></div><a href="#s-confirm">Review &amp; pay</a></div>
 
-<script src="/assets/site-config.js?v=4"></script>
+<script src="/assets/site-config.js?v=5"></script>
 <script>
 (function(){
   var CFG = window.HD_CONFIG || {}, BASE = CFG.WORKER_BASE || '';
@@ -451,6 +452,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var body = { ref: ref, spec: { product:S.product, material:S.material, service:S.service, inches:S.inches, qty:S.qty, rush:S.rush, sides:S.product==='garment'?S.sides:undefined, detail:S.service==='cut'?S.detail:undefined, art:S.art, text:S.art==='text'?S.text.trim():undefined, art_ref:S.art==='file'?S.artRef.trim():undefined },
       customer: { name:name, business:$('#business').value.trim(), email:email, phone:phone, agreed:true, textConsent:$('#sms').checked },
       notes: $('#notes').value.trim(), needed_by: $('#needed').value || null, attest: { initials: $('#initials').value, version: '2026-09-26' }, taken_by: HUB ? BY : null,
+      heard: $('#heard').value || null, src: HUB ? null : (window.hdSource ? hdSource() : null), from: (qs.get('from') || '').slice(0,40) || null,
       logo: S.logo ? { name: S.logoName, data: S.logo } : null };
     if (HUB && $('#staffpin').value) body.staff = { name: BY, pin: $('#staffpin').value };
     return body;
@@ -511,6 +513,9 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   function boot(b){ BOOK = b.book; TAX = b.tax_rate || 0; TAX_OWN = !!b.tax_own_items; $('#rushpct').textContent = BOOK.rush_pct;
     var pre = qs.get('product'); if (pre && BOOK.products.some(function(p){return p.key===pre;})) { S.product = pre; var pp = BOOK.products.filter(function(p){return p.key===pre;})[0]; S.material = pp.material; S.own = pre==='own' || pre==='garment'; var pm = qs.get('material'); if (pre==='own' && pm && BOOK.materials.some(function(m){return m.key===pm;})) S.material = pm; }
     var svc = qs.get('service'); if (BOOK.services.some(function(x){return x.key===svc;})) S.service = svc;
+    var pin = parseFloat(qs.get('inches')); if (pin >= 0.5 && pin <= BOOK.max_inches) S.inches = Math.round(pin*2)/2;
+    var pq = parseInt(qs.get('qty'), 10); if (pq >= 1 && pq <= 500) S.qty = pq;
+    if (qs.get('art') === 'text' || qs.get('art') === 'file') S.art = qs.get('art');
     renderAll(); if (window.hdTrack) hdTrack('order_view'); }
   if (!BASE) { $('#loaderr').textContent = 'Online ordering isn’t switched on yet. Use the quote form or call (858) 373-9866.'; $('#loaderr').hidden = false; }
   else fetch(BASE + '/pricing?t=' + Date.now(), { cache: 'no-store' }).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }).then(boot).catch(function(){ $('#loaderr').innerHTML = 'Prices didn’t load. Refresh in a moment, or <a href="/quote/">ask for a quote</a> and we’ll price it by hand.'; $('#loaderr').hidden = false; });
