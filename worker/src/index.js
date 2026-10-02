@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-02 v19"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-02 v20"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2231,18 +2231,24 @@ const TARGET_MARGIN = 0.55;          // every piece should clear this after blan
 const DEFAULT_BOOK = {
   version: 1,
   services: [
-    { key: "engrave", name: "Laser engraving", blurb: "Etched into the surface. Permanent, one tone.", setup_cents: 0, min_per_piece: 4, per_inch: 2, consumable_cents: 8 },
-    { key: "uv", name: "UV printing", blurb: "Full color, printed onto the surface.", setup_cents: 0, min_per_piece: 3, per_inch: 1.5, consumable_cents: 35 },
-    { key: "dtf", name: "DTF printing", blurb: "Full color pressed onto fabric. Shirts, hoodies, hats, totes.", setup_cents: 1000, min_per_piece: 3, per_inch: 0.5, consumable_cents: 60 },
-    { key: "cut", name: "Laser cutting", blurb: "Cut right through. Shapes, letters, signs from wood, acrylic or leather.", setup_cents: 0, min_per_piece: 4, per_inch: 2.5, consumable_cents: 10 },
+    { key: "engrave", name: "Laser engraving", blurb: "Etched into the surface. Permanent, one tone.", setup_cents: 0, min_per_piece: 4, per_inch: 2, consumable_cents: 8, max_inches: 12 },
+    { key: "uv", name: "UV printing", blurb: "Full color, printed onto the surface.", setup_cents: 0, min_per_piece: 3, per_inch: 1.5, consumable_cents: 35, max_inches: 12 },
+    { key: "dtf", name: "DTF printing", blurb: "Full color pressed onto fabric. Shirts, hoodies, hats, totes.", setup_cents: 1000, min_per_piece: 3, per_inch: 0.5, consumable_cents: 60, max_inches: 12 },
+    { key: "cut", name: "Laser cutting", blurb: "Cut right through. Shapes, letters, signs from wood, acrylic or leather.", setup_cents: 0, min_per_piece: 4, per_inch: 2.5, consumable_cents: 10, max_inches: 28 },
   ],
   // Price per piece by the artwork's longest side, in half-inch steps. Each step up costs a little more than the step
   // before it (first_gap, then +gap_growth every step), so the bigger the engraving the more it carries, and the next
   // size up always looks like a small jump. sizes[] is generated from these once, then edited cell by cell.
   // flat_to_inches: every size up to this is the starting price (the shop minimum for a small job); the ladder climbs from there.
-  ladders: { engrave: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 300, gap_growth_cents: 50 }, uv: { start_cents: 4000, flat_to_inches: 2, first_gap_cents: 350, gap_growth_cents: 50 }, dtf: { start_cents: 350, flat_to_inches: 0, first_gap_cents: 30, gap_growth_cents: 3 }, cut: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 400, gap_growth_cents: 75 } },
-  max_inches: 12,
+  ladders: { engrave: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 300, gap_growth_cents: 50 }, uv: { start_cents: 4000, flat_to_inches: 2, first_gap_cents: 350, gap_growth_cents: 50 }, dtf: { start_cents: 350, flat_to_inches: 0, first_gap_cents: 30, gap_growth_cents: 3 }, cut: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 125, gap_growth_cents: 0 } },
+  max_inches: 28,                     // the cutting bed is 15 x 28 in; engraving and printing stop at each service's max_inches
   sizes: [],
+  // how much of the bed time a cut really takes: a simple outline is the ladder price; detail and intricacy multiply it
+  cut_detail: [
+    { key: "simple", name: "Simple outline", blurb: "One shape, few curves. A sign blank, a coaster, a plain tag.", factor: 1 },
+    { key: "detailed", name: "Detailed", blurb: "Letters, inner cutouts, a logo with several parts.", factor: 1.5 },
+    { key: "intricate", name: "Intricate", blurb: "Lace, fine lettering, hundreds of small cuts. Most of the bed time.", factor: 2 },
+  ],
   materials: [
     { key: "wood", name: "Wood", factor: 1, services: ["engrave", "uv", "cut"] },
     { key: "metal", name: "Metal", factor: 1, services: ["engrave", "uv"] },
@@ -2262,11 +2268,11 @@ const DEFAULT_BOOK = {
     { key: "tag", name: "Metal tag or plate", material: "metal", blank_cents: 600, cost_cents: 150, max_inches: 2.5, w_in: 3, h_in: 2, shape: "tag", photo: "/assets/engrave-anodized-tags.jpg" },
     { key: "patch", name: "Leather patch or wallet", material: "leather", blank_cents: 1400, cost_cents: 500, max_inches: 2.5, w_in: 3.5, h_in: 2.5, shape: "patch", photo: "/assets/uv-mandala-wallet.jpg", services: ["engrave"] },
     // sheet stock we cut shapes from; the size slider is the longest side of the finished piece
-    { key: "woodblank", name: "Cut from our wood", material: "wood", blank_cents: 600, cost_cents: 200, max_inches: 12, w_in: 12, h_in: 12, shape: "board", photo: null, services: ["cut"] },
-    { key: "acrylicblank", name: "Cut from our acrylic", material: "acrylic", blank_cents: 900, cost_cents: 350, max_inches: 12, w_in: 12, h_in: 12, shape: "board", photo: null, services: ["cut"] },
+    { key: "woodblank", name: "Cut from our wood", material: "wood", blank_cents: 600, cost_cents: 200, max_inches: 28, w_in: 28, h_in: 15, shape: "board", photo: null, services: ["cut"] },
+    { key: "acrylicblank", name: "Cut from our acrylic", material: "acrylic", blank_cents: 900, cost_cents: 350, max_inches: 28, w_in: 28, h_in: 15, shape: "board", photo: null, services: ["cut"] },
     // DTF is priced as print + press only. Customers bring their own shirts, hoodies, hats or totes; no garment price is baked in.
     { key: "garment", name: "Your own shirt, hoodie, hat or tote", material: "fabric", blank_cents: 0, cost_cents: 0, max_inches: 12, w_in: 20, h_in: 27, shape: "shirt", photo: null },
-    { key: "own", name: "Something I'll bring in", material: null, blank_cents: 0, cost_cents: 0, max_inches: 12, w_in: 8, h_in: 8, shape: "own", photo: null },
+    { key: "own", name: "Something I'll bring in", material: null, blank_cents: 0, cost_cents: 0, max_inches: 28, w_in: 8, h_in: 8, shape: "own", photo: null },
   ],
   qty_breaks: [{ min: 1, off_pct: 0 }, { min: 6, off_pct: 5 }, { min: 12, off_pct: 10 }, { min: 25, off_pct: 15 }, { min: 50, off_pct: 20 }, { min: 100, off_pct: 25 }],
   rush_pct: 50,                       // added to the work portion when they need it in under 3 business days
@@ -2286,7 +2292,9 @@ async function priceBook(env) {
   // anything the code has added since the book was saved (a new service, material, item or size) joins the saved book; saved prices win
   for (const k of ["services", "materials", "products"]) { const have = new Set((book[k] || []).map((x) => x.key)); for (const d of DEFAULT_BOOK[k]) if (!have.has(d.key)) book[k].push(JSON.parse(JSON.stringify(d))); }
   for (const d of DEFAULT_BOOK.materials) { const m = book.materials.find((x) => x.key === d.key); if (m) for (const svc of d.services) if (!m.services.includes(svc)) m.services.push(svc); }
-  for (const d of DEFAULT_BOOK.products) { const p = book.products.find((x) => x.key === d.key); if (p && d.services && !p.services) p.services = [...d.services]; }
+  for (const d of DEFAULT_BOOK.products) { const p = book.products.find((x) => x.key === d.key); if (p && d.services && !p.services) p.services = [...d.services]; if (p && ["own", "woodblank", "acrylicblank"].includes(d.key) && (p.max_inches || 0) < d.max_inches) { p.max_inches = d.max_inches; p.w_in = d.w_in; p.h_in = d.h_in; } }
+  for (const d of DEFAULT_BOOK.services) { const v = book.services.find((x) => x.key === d.key); if (v && v.max_inches == null) v.max_inches = d.max_inches; }
+  if (!book.cut_detail) book.cut_detail = JSON.parse(JSON.stringify(DEFAULT_BOOK.cut_detail));
   book.ladders = { ...DEFAULT_BOOK.ladders, ...(s.ladders || {}) }; book.max_inches = Math.max(book.max_inches || 0, DEFAULT_BOOK.max_inches); if (book.text_only_own_cents == null) book.text_only_own_cents = DEFAULT_BOOK.text_only_own_cents;
   if (!Array.isArray(book.sizes)) book.sizes = [];
   const fresh = buildSizes(book);
@@ -2310,7 +2318,7 @@ function quoteSpec(book, spec) {
   if (!service) return { error: "Pick engraving, printing or cutting" };
   if (!material.services.includes(service.key) || (product.services && !product.services.includes(service.key))) return { error: `${service.name} isn't available on ${product.key === "own" ? material.name.toLowerCase() : product.name.toLowerCase()}` };
   const inches = Math.round(Number(spec.inches) * 2) / 2;
-  const maxIn = Math.min(product.max_inches || book.max_inches, book.max_inches);
+  const maxIn = Math.min(product.max_inches || book.max_inches, service.max_inches || book.max_inches, book.max_inches);
   if (!(inches >= 0.5 && inches <= maxIn)) return { error: `Size must be between 0.5 and ${maxIn} inches` };
   const qty = parseInt(spec.qty, 10);
   if (!(qty >= 1 && qty <= 500)) return { error: "Quantity must be 1 to 500" };
@@ -2325,7 +2333,8 @@ function quoteSpec(book, spec) {
   const size = book.sizes.find((s) => s.inches === inches);
   if (!size) return { error: "Size not on the price list" };
   const flatText = art === "text" && OWN_ITEM_KEYS.includes(product.key) && service.key !== "dtf" && book.text_only_own_cents > 0; // plain text on their own item: one flat price, any size
-  const workUnit = flatText ? book.text_only_own_cents : r25(size[service.key + "_cents"] * material.factor);
+  const detail = service.key === "cut" ? ((book.cut_detail || []).find((d) => d.key === String(spec.detail)) || (book.cut_detail || [])[0] || { key: "simple", name: "Simple outline", factor: 1 }) : null;
+  const workUnit = flatText ? book.text_only_own_cents : r25(size[service.key + "_cents"] * material.factor * (detail ? detail.factor : 1));
   const brk = [...book.qty_breaks].sort((a, b) => b.min - a.min).find((b) => qty >= b.min) || { off_pct: 0 };
   const workUnitAfter = r25(workUnit * (1 - brk.off_pct / 100));
   const handlingUnit = product.key === "own" && !flatText ? book.own_item_handling_cents : 0;
@@ -2337,15 +2346,15 @@ function quoteSpec(book, spec) {
   const minimumTopUp = Math.max(0, book.min_order_cents - subtotal); subtotal += minimumTopUp;
   const nextBreak = [...book.qty_breaks].sort((a, b) => a.min - b.min).find((b) => b.min > qty);
   const taxable = !OWN_ITEM_KEYS.includes(product.key); // no sales tax when the customer brings the item; we only sell the work
-  return { product, material, service, inches, qty, rush, sides, prints, taxable, art, text, art_ref: artRef, flat_text: flatText, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_cents: (workUnit - workUnitAfter) * qty,
+  return { product, material, service, inches, qty, rush, sides, prints, taxable, art, text, art_ref: artRef, flat_text: flatText, detail: detail ? detail.key : null, detail_name: detail ? detail.name : null, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_cents: (workUnit - workUnitAfter) * qty,
     blank_unit_cents: blankUnit, handling_unit_cents: handlingUnit, work_cents: work, blank_cents: blank, handling_cents: handling, rush_cents: rushCents, setup_cents: setup, minimum_top_up_cents: minimumTopUp, subtotal_cents: subtotal,
     next_break: nextBreak ? { min: nextBreak.min, off_pct: nextBreak.off_pct } : null,
-    summary: `${qty} × ${lcName(service.name)}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.key === "garment" ? "customer's own garment" : product.name.toLowerCase()}${sides ? ", " + (sides === "both" ? "front and back" : sides) : ""}${rush ? ", rush" : ""}${art === "text" ? ", text: \u201c" + text + "\u201d" : art === "file" ? ", logo on file (" + artRef + ")" : ""}` };
+    summary: `${qty} × ${lcName(service.name)}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.key === "garment" ? "customer's own garment" : product.name.toLowerCase()}${sides ? ", " + (sides === "both" ? "front and back" : sides) : ""}${detail ? ", " + detail.name.toLowerCase() : ""}${rush ? ", rush" : ""}${art === "text" ? ", text: \u201c" + text + "\u201d" : art === "file" ? ", logo on file (" + artRef + ")" : ""}` };
 }
 // The exact words the customer initials. Rendered identically on the order page; the copy stored with the order is this one.
 function attestText(q, name) {
   if (q.custom) return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what we agreed at the counter: ${q.product.name}, quantity ${q.qty}, at ${"$" + (q.work_unit_cents / 100).toFixed(2)} each. I understand that engraving and printing are permanent and cannot be undone. If what I asked for turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
-  return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what I have specified here: ${lcName(q.service.name)} on ${q.product.key === "own" ? "my own " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "my own garment" : "a " + q.product.name.toLowerCase()}, artwork ${q.inches} inches on its longest side${q.sides ? " on the " + (q.sides === "both" ? "front and the back" : q.sides) : ""}, quantity ${q.qty}${q.art === "text" ? ", reading exactly: \u201c" + q.text + "\u201d" : q.art === "file" ? ", using the logo we have on file for " + q.art_ref : ""}. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
+  return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what I have specified here: ${lcName(q.service.name)} on ${q.product.key === "own" ? "my own " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "my own garment" : "a " + q.product.name.toLowerCase()}, artwork ${q.inches} inches on its longest side${q.detail_name ? ", " + q.detail_name.toLowerCase() + " cut" : ""}${q.sides ? " on the " + (q.sides === "both" ? "front and the back" : q.sides) : ""}, quantity ${q.qty}${q.art === "text" ? ", reading exactly: \u201c" + q.text + "\u201d" : q.art === "file" ? ", using the logo we have on file for " + q.art_ref : ""}. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
 }
 // lower-case a service name for a sentence, keeping acronyms: "UV printing", "DTF printing", "laser engraving"
 function lcName(n) { return String(n).replace(/\b[A-Z][a-z]+\b/g, (w) => w.toLowerCase()); }
@@ -2725,6 +2734,7 @@ async function saveWholeBook(env, body) {
   if (b.own_item_handling_cents != null) next.own_item_handling_cents = int(b.own_item_handling_cents, 0, 100000) ?? next.own_item_handling_cents;
   if (b.min_order_cents != null) next.min_order_cents = int(b.min_order_cents, 0, 1000000) ?? next.min_order_cents;
   if (b.text_only_own_cents != null) next.text_only_own_cents = int(b.text_only_own_cents, 0, 1000000) ?? next.text_only_own_cents;
+  for (const d of next.cut_detail || []) { const src = (b.cut_detail || []).find((x) => x.key === d.key); if (!src) continue; const f = Number(src.factor); if (Number.isFinite(f) && f >= 0.25 && f <= 10) d.factor = f; else errors.push(`${d.name}: factor`); }
   if (errors.length) return { ok: false, error: "Check these: " + errors.join(", ") };
   // history: one row per changed price
   const now = new Date().toISOString(); const stmts = []; const note = String(body.note || "edited on the prices page").slice(0, 200);
@@ -2766,7 +2776,7 @@ input.n{text-align:right}input:focus{outline:3px solid #F2B63D;outline-offset:1p
 
 <h2>Setup, rush, minimum</h2>
 <div class="card"><table id="services"></table><p class="small" style="margin:8px 0 0">Minutes and consumables are what a piece costs us; they feed the margin check, not the customer price.</p>
-<table style="margin-top:10px"><tr><th>Rush, % added to the work</th><th>Shop minimum per order ($)</th><th>Text only on their own item, flat per piece ($)</th></tr><tr><td><input class="n" type="number" id="rush" step="5" min="0"></td><td><input class="n" type="number" id="min" step="1" min="0"></td><td><input class="n" type="number" id="textown" step="1" min="0"></td></tr></table><p class="small">Text only on a customer's own item (engraving or UV, any size) is this one price per piece: no setup, no handling. Set it to 0 to price text by size like everything else.</p></div>
+<table style="margin-top:10px"><tr><th>Rush, % added to the work</th><th>Shop minimum per order ($)</th><th>Text only on their own item, flat per piece ($)</th></tr><tr><td><input class="n" type="number" id="rush" step="5" min="0"></td><td><input class="n" type="number" id="min" step="1" min="0"></td><td><input class="n" type="number" id="textown" step="1" min="0"></td></tr></table><table style="margin-top:10px" id="cutdetail"></table><p class="small">Laser cutting: the size column is the price of a simple outline cut by the longest side of the piece (the bed is 15 \u00d7 28 in). Detailed and intricate cuts multiply it by these factors.</p><p class="small">Text only on a customer's own item (engraving or UV, any size) is this one price per piece: no setup, no handling. Set it to 0 to price text by size like everything else.</p></div>
 
 <h2>Materials</h2>
 <p class="sub">The work price is multiplied by the factor. Tick which finishes we offer on each.</p>
@@ -2790,6 +2800,7 @@ function render(){
   $('#sizes').innerHTML='<tr><th>Artwork, longest side</th>'+B.services.map(s=>'<th>'+esc(s.name)+' ($)</th>').join('')+'</tr>'+B.sizes.map(z=>'<tr><td><b>'+z.inches+' in</b></td>'+B.services.map(s=>'<td><input class="n" type="number" step="0.25" min="0" data-size="'+z.inches+'" data-svc="'+s.key+'" value="'+d2(z[s.key+'_cents'])+'"></td>').join('')+'</tr>').join('');
   $('#services').innerHTML='<tr><th>Finish</th><th>Setup, once per order, new logo only ($)</th><th>Minutes per piece</th><th>Extra minutes per inch</th><th>Consumables per piece ($)</th></tr>'+B.services.map(s=>'<tr><td><b>'+esc(s.name)+'</b></td><td><input class="n" type="number" step="1" min="0" data-svc="'+s.key+'" data-f="setup_cents" value="'+d2(s.setup_cents)+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="min_per_piece" value="'+s.min_per_piece+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="per_inch" value="'+s.per_inch+'"></td><td><input class="n" type="number" step="0.05" min="0" data-svc="'+s.key+'" data-f="consumable_cents" value="'+d2(s.consumable_cents)+'"></td></tr>').join('');
   $('#rush').value=B.rush_pct; $('#min').value=d2(B.min_order_cents); $('#textown').value=d2(B.text_only_own_cents||0);
+  $('#cutdetail').innerHTML='<tr>'+(B.cut_detail||[]).map(d=>'<th>'+esc(d.name)+' cut, \u00d7</th>').join('')+'</tr><tr>'+(B.cut_detail||[]).map(d=>'<td><input class="n" type="number" step="0.1" min="0.25" data-cd="'+d.key+'" value="'+d.factor+'"></td>').join('')+'</tr>';
   $('#materials').innerHTML='<tr><th>Material</th><th>Factor</th><th>Offered</th></tr>'+B.materials.map(m=>'<tr><td><b>'+esc(m.name)+'</b></td><td><input class="n" type="number" step="0.05" min="0.1" data-mat="'+m.key+'" data-f="factor" value="'+m.factor+'"></td><td>'+B.services.map(s=>'<label class="chk"><input type="checkbox" data-mat="'+m.key+'" data-svc="'+s.key+'" '+(m.services.includes(s.key)?'checked':'')+'>'+esc(s.name)+'</label>').join('')+'</td></tr>').join('');
   $('#products').innerHTML='<tr><th>Item</th><th>Material</th><th>Customer pays ($)</th><th>Costs us ($)</th><th>Largest artwork (in)</th><th></th></tr>'+B.products.filter(p=>p.key!=='own').map(p=>prow(p)).join('')
     +'<tr><td><b>Something I\u2019ll bring in</b><div class="small">customer\u2019s own item, any material</div></td><td class="small">customer picks</td><td><div class="small">the work \u00d7 material factor, plus handling per piece:</div><input class="n" type="number" id="own" step="0.25" min="0" value="'+d2(B.own_item_handling_cents)+'"></td><td class="small">nothing, they supply it</td><td class="small">up to '+B.max_inches+' in</td><td></td></tr>';
@@ -2809,7 +2820,7 @@ function collect(){ const book={services:[],sizes:[],materials:[],products:[],qt
   document.querySelectorAll('#products tr[data-p]').forEach(tr=>{ const g=f=>tr.querySelector('[data-pf="'+f+'"]').value; book.products.push({key:tr.dataset.p,name:g('name'),material:g('material'),blank_cents:Math.round(+g('blank_cents')*100),cost_cents:Math.round(+g('cost_cents')*100),max_inches:+g('max_inches'),removed:!!tr.dataset.removed}); });
   book.products.push({key:'own'});
   document.querySelectorAll('#qty tr[data-q]').forEach(tr=>{ const mn=+tr.querySelector('[data-qf="min"]').value, off=+tr.querySelector('[data-qf="off_pct"]').value; if(mn>=1) book.qty_breaks.push({min:mn,off_pct:off}); });
-  book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); book.text_only_own_cents=Math.round(+$('#textown').value*100); return book; }
+  book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); book.text_only_own_cents=Math.round(+$('#textown').value*100); book.cut_detail=[...document.querySelectorAll('input[data-cd]')].map(i=>({key:i.dataset.cd,factor:+i.value})); return book; }
 $('#save').onclick=async()=>{ const b=$('#save'); b.disabled=true; $('#msg').textContent='Saving\\u2026'; $('#msg').className='msg';
   try{ const r=await fetch('/api/pricing/book/all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({book:collect(),note:'edited on the prices page'})}); const j=await r.json(); if(!j.ok) throw new Error(j.error||'Save failed'); B=j.book; render(); $('#msg').textContent='Saved. '+j.changed+' price'+(j.changed===1?'':'s')+' changed. The order page uses these now.'; $('#msg').className='msg ok'; }
   catch(e){ $('#msg').textContent=e.message; $('#msg').className='msg bad'; } b.disabled=false; };

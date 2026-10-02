@@ -148,8 +148,14 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     </div>
   </section>
 
+  <section class="step" id="s-detail" hidden>
+    <h2><span class="n">&#10022;</span>How detailed is the cut?</h2>
+    <p class="sub">Cutting is priced by the longest side of the piece and how much of the bed time it takes. Our bed is 15 &times; 28 in.</p>
+    <div class="two" id="details"></div>
+  </section>
+
   <section class="step" id="s-size">
-    <h2><span class="n">3</span>How big is the artwork?</h2>
+    <h2><span class="n">3</span><span id="sizeh">How big is the artwork?</span></h2>
     <p class="sub">Measured on the longest side of your logo or text. Slide it and watch the preview. On a garment, a left-chest logo is about 3 in and a full front print is 10 to 12 in.</p>
     <div class="sizerow">
       <div class="readout"><span id="inches">2</span> in<small id="ppu"></small></div>
@@ -259,7 +265,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
 
   var SAMPLE = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="220 115 1930 640"><path fill="#C8372A" d="M510 125 L730 125 L636 371 L963 371 L1072 125 L2000 125 C2100 125 2160 210 2130 300 L2010 610 C1970 700 1880 742 1790 742 L1115 742 L1283 341 L1525 341 L1425 595 L1800 595 L1938 272 L1222 272 L1030 742 L808 742 L907 523 L572 523 L483 742 L232 742 Z"/></svg>');
   var BOOK = null, TAX = 0.0775, TAX_OWN = false;
-  var S = { own:null, product:null, material:null, service:null, inches:2, qty:1, rush:false, sides:'front', art:'logo', text:'', artRef:'', logo:null, logoName:'' };
+  var S = { own:null, product:null, material:null, service:null, detail:'simple', inches:2, qty:1, rush:false, sides:'front', art:'logo', text:'', artRef:'', logo:null, logoName:'' };
 
   // ---- the same arithmetic the worker uses; the worker re-prices at checkout, so the page can never undercharge
   function r25(c){ return Math.max(0, Math.round(c/25)*25); }
@@ -271,7 +277,8 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var size = BOOK.sizes.filter(function(s){return s.inches===S.inches;})[0]; if(!size) return null;
     var qty = S.qty;
     var flatText = S.art==='text' && (product.key==='own'||product.key==='garment') && service.key!=='dtf' && (BOOK.text_only_own_cents||0)>0;
-    var workUnit = flatText ? BOOK.text_only_own_cents : r25(size[service.key+'_cents']*material.factor);
+    var det = service.key==='cut' ? ((BOOK.cut_detail||[]).filter(function(d){return d.key===S.detail;})[0] || (BOOK.cut_detail||[])[0] || {key:'simple',name:'Simple outline',factor:1}) : null;
+    var workUnit = flatText ? BOOK.text_only_own_cents : r25(size[service.key+'_cents']*material.factor*(det?det.factor:1));
     var brk = BOOK.qty_breaks.slice().sort(function(a,b){return b.min-a.min;}).filter(function(b){return qty>=b.min;})[0] || {off_pct:0};
     var workAfter = r25(workUnit*(1-brk.off_pct/100));
     var handling = product.key==='own' && !flatText ? BOOK.own_item_handling_cents : 0;
@@ -282,7 +289,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var subtotal = work+blank+hand+rush+setup; var top = Math.max(0, BOOK.min_order_cents-subtotal); subtotal += top;
     var next = BOOK.qty_breaks.slice().sort(function(a,b){return a.min-b.min;}).filter(function(b){return b.min>qty;})[0] || null;
     var taxable = TAX_OWN || (product.key!=='own' && product.key!=='garment');
-    return { product:product, material:material, service:service, qty:qty, prints:prints, sides:product.key==='garment'?S.sides:null, workUnit:workUnit, workAfter:workAfter, off:brk.off_pct, work:work, blank:blank, blankUnit:product.blank_cents||0, hand:hand, handUnit:handling, rush:rush, setup:setup, art:S.art, flatText:flatText, top:top, subtotal:subtotal, taxable:taxable, tax:taxable?Math.round(subtotal*TAX):0, next:next };
+    return { product:product, material:material, service:service, qty:qty, prints:prints, sides:product.key==='garment'?S.sides:null, workUnit:workUnit, workAfter:workAfter, off:brk.off_pct, work:work, blank:blank, blankUnit:product.blank_cents||0, hand:hand, handUnit:handling, rush:rush, setup:setup, art:S.art, flatText:flatText, detail:det, top:top, subtotal:subtotal, taxable:taxable, tax:taxable?Math.round(subtotal*TAX):0, next:next };
   }
   function unitFor(productKey, matKey, svcKey, inches){ var p=BOOK.products.filter(function(x){return x.key===productKey;})[0], m=BOOK.materials.filter(function(x){return x.key===(p.material||matKey);})[0], s=BOOK.sizes.filter(function(x){return x.inches===inches;})[0]; if(!p||!m||!s) return null; return r25(s[svcKey+'_cents']*m.factor); }
 
@@ -333,7 +340,8 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     $('#services').innerHTML = BOOK.services.map(function(s){ var ok = (!m || m.services.indexOf(s.key)>=0) && (!p || !p.services || p.services.indexOf(s.key)>=0); return '<button type="button" class="svc'+(S.service===s.key?' on':'')+'" data-s="'+s.key+'"'+(ok?'':' disabled')+'><b>'+esc(s.name)+'</b><span>'+esc(s.blurb)+(ok?'':' Not on '+esc(m.name.toLowerCase())+'.')+'</span></button>'; }).join('');
   }
   function renderSize(){
-    var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var max = p ? Math.min(p.max_inches, BOOK.max_inches) : BOOK.max_inches;
+    var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var sv = BOOK.services.filter(function(x){return x.key===S.service;})[0]; var max = Math.min(p ? p.max_inches : BOOK.max_inches, sv && sv.max_inches ? sv.max_inches : BOOK.max_inches, BOOK.max_inches);
+    $('#sizeh').textContent = S.service==='cut' ? 'How big is the piece?' : 'How big is the artwork?';
     var r = $('#size'); r.max = max; if (S.inches>max) S.inches = max; r.value = S.inches; $('#inches').textContent = S.inches;
     var q = quote(); var m = p ? BOOK.materials.filter(function(x){return x.key===(p.material||S.material);})[0] : null;
     if (q) { $('#ppu').textContent = money(q.workUnit)+' per piece for the work'; var up = S.inches+0.5<=max ? unitFor(S.product, S.material, S.service, S.inches+0.5) : null; $('#nudge').innerHTML = up!=null ? 'Half an inch bigger is <b>'+money(up-q.workUnit)+' more</b> per piece. Bigger reads better from across the room.' : 'That is as big as this item takes. Need larger? <a href="/quote/">Ask for a quote.</a>'; }
@@ -349,7 +357,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   function renderSummary(){
     var q = quote(); var dl = $('#lines');
     if (!q) { dl.innerHTML = '<div><dt>Pick the item, the finish and the size.</dt><dd></dd></div>'; $('#bartot').textContent = '$0'; $('#pay').textContent = 'Pay securely'; return; }
-    var rows = [['<b>'+(q.qty*q.prints)+' × '+esc(lcName(q.service.name))+'</b>, '+(q.flatText ? 'text only, flat price' : S.inches+' in')+(q.sides ? ', '+(q.sides==='both'?'front and back':q.sides) : '')+(q.off?' <small>('+q.off+'% off)</small>':''), money(q.work)]];
+    var rows = [['<b>'+(q.qty*q.prints)+' × '+esc(lcName(q.service.name))+'</b>, '+(q.flatText ? 'text only, flat price' : S.inches+' in')+(q.detail ? ', '+esc(q.detail.name.toLowerCase()) : '')+(q.sides ? ', '+(q.sides==='both'?'front and back':q.sides) : '')+(q.off?' <small>('+q.off+'% off)</small>':''), money(q.work)]];
     if (q.blankUnit) rows.push([q.qty+' × '+esc(q.product.name), money(q.blank)]);
     if (q.handUnit) rows.push([q.qty+' × handling your own item', money(q.hand)]);
     if (q.art==='logo') { if (q.setup) rows.push(['Setup, artwork prep <small>(one time)</small>', money(q.setup)]); } else rows.push(['Setup', 'none <small>('+(q.art==='text'?'text only':'logo on file')+')</small>']);
@@ -363,7 +371,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var q = quote(); var name = $('#name').value.trim() || 'I';
     if (!q) { $('#words').innerHTML = 'Finish steps 1 to 4 and your confirmation appears here.'; return; }
     var item = q.product.key==='own' ? 'my own '+q.material.name.toLowerCase()+' item' : q.product.key==='garment' ? 'my own garment' : 'a '+q.product.name.toLowerCase();
-    $('#words').innerHTML = 'I, <b>'+esc(name==='I'?'(your name)':name)+'</b>, have checked this order myself. HD Laser Studio will make exactly what I have specified here: <b>'+esc(lcName(q.service.name))+'</b> on <b>'+esc(item)+'</b>, artwork <b>'+S.inches+' inches</b> on its longest side'+(q.sides ? ' on the <b>'+(q.sides==='both'?'front and the back':q.sides)+'</b>' : '')+', quantity <b>'+q.qty+'</b>'+(S.art==='text' ? ', reading exactly: <b>&#8220;'+esc(S.text.trim()||'(type the text in step 5)')+'&#8221;</b>' : S.art==='file' ? ', using the logo we have on file for <b>'+esc(S.artRef.trim()||'(say which in step 5)')+'</b>' : '')+'. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, <b>any redo or replacement is at my expense.</b>';
+    $('#words').innerHTML = 'I, <b>'+esc(name==='I'?'(your name)':name)+'</b>, have checked this order myself. HD Laser Studio will make exactly what I have specified here: <b>'+esc(lcName(q.service.name))+'</b> on <b>'+esc(item)+'</b>, artwork <b>'+S.inches+' inches</b> on its longest side'+(q.detail ? ', <b>'+esc(q.detail.name.toLowerCase())+' cut</b>' : '')+(q.sides ? ' on the <b>'+(q.sides==='both'?'front and the back':q.sides)+'</b>' : '')+', quantity <b>'+q.qty+'</b>'+(S.art==='text' ? ', reading exactly: <b>&#8220;'+esc(S.text.trim()||'(type the text in step 5)')+'&#8221;</b>' : S.art==='file' ? ', using the logo we have on file for <b>'+esc(S.artRef.trim()||'(say which in step 5)')+'</b>' : '')+'. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, <b>any redo or replacement is at my expense.</b>';
   }
   function lcName(n){ return String(n).replace(/\b[A-Z][a-z]+\b/g, function(w){ return w.toLowerCase(); }); }
   function initialsFor(name){ var w = String(name||'').trim().split(/\s+/).filter(Boolean); if(!w.length) return ''; return (w[0][0] + (w.length>1 ? w[w.length-1][0] : '')).toUpperCase(); }
@@ -379,6 +387,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   var lastSpec = '', specTimer = null, seen = {};
   function renderArt(){ document.querySelectorAll('[data-art]').forEach(function(b){ b.classList.toggle('on', b.dataset.art===S.art); }); $('#artText').hidden = S.art!=='text'; $('#artFile').hidden = S.art!=='file'; $('#artUpload').hidden = S.art!=='logo'; $('#artUploadNote').hidden = S.art!=='logo'; }
   function renderAll(){ renderArt();
+    var cutting = S.service==='cut'; document.getElementById('s-detail').hidden = !cutting; if (cutting) $('#details').innerHTML = (BOOK.cut_detail||[]).map(function(d){ return '<button type="button" class="svc'+(S.detail===d.key?' on':'')+'" data-detail="'+d.key+'"><b>'+esc(d.name)+'</b><span>'+esc(d.blurb||'')+(d.factor!==1?' \u00d7'+d.factor:'')+'</span></button>'; }).join('');
     var garment = S.product==='garment'; document.getElementById('s-sides').hidden = !garment; document.querySelectorAll('[data-side]').forEach(function(b){ b.classList.toggle('on', b.dataset.side===S.sides); });
     renderProducts(); renderServices(); renderSize(); renderQty(); renderPreview(); renderSummary(); renderWords(); renderInitials();
     ['s-product','s-service','s-size','s-qty'].forEach(function(id, i){ var ok = [S.product && (S.product!=='own' || S.material), S.service, S.service && S.product, S.service && S.product][i]; document.getElementById(id).classList.toggle('done', !!ok); });
@@ -394,6 +403,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var s = e.target.closest('[data-s]'); if (s && !s.disabled) { S.service = s.dataset.s; renderAll(); return; }
     var ar = e.target.closest('[data-art]'); if (ar) { S.art = ar.dataset.art; renderAll(); return; }
     var sd = e.target.closest('[data-side]'); if (sd) { S.sides = sd.dataset.side; renderAll(); return; }
+    var dd = e.target.closest('[data-detail]'); if (dd) { S.detail = dd.dataset.detail; renderAll(); return; }
   });
   $('#size').addEventListener('input', function(){ S.inches = Math.round(+this.value*2)/2; renderAll(); });
   $('#minus').onclick = function(){ S.qty = Math.max(1, S.qty-1); renderAll(); };
@@ -433,7 +443,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   }
   function orderBody(v){
     var name = v.name, email = v.email, phone = v.phone;
-    var body = { ref: ref, spec: { product:S.product, material:S.material, service:S.service, inches:S.inches, qty:S.qty, rush:S.rush, sides:S.product==='garment'?S.sides:undefined, art:S.art, text:S.art==='text'?S.text.trim():undefined, art_ref:S.art==='file'?S.artRef.trim():undefined },
+    var body = { ref: ref, spec: { product:S.product, material:S.material, service:S.service, inches:S.inches, qty:S.qty, rush:S.rush, sides:S.product==='garment'?S.sides:undefined, detail:S.service==='cut'?S.detail:undefined, art:S.art, text:S.art==='text'?S.text.trim():undefined, art_ref:S.art==='file'?S.artRef.trim():undefined },
       customer: { name:name, business:$('#business').value.trim(), email:email, phone:phone, agreed:true, textConsent:$('#sms').checked },
       notes: $('#notes').value.trim(), needed_by: $('#needed').value || null, attest: { initials: $('#initials').value, version: '2026-09-26' }, taken_by: HUB ? BY : null,
       logo: S.logo ? { name: S.logoName, data: S.logo } : null };
