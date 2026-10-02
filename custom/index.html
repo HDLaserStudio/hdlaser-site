@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Custom price | HD Laser Studio</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&amp;family=Figtree:wght@400;500;700;800&amp;family=Caveat:wght@600&amp;display=swap">
+<style>
+:root{--bg:#F6F4EF;--ink:#15191E;--muted:#545B63;--red:#C8372A;--redd:#A32C21;--line:#E4E0D8;--field:#A9A196;--sel:#FBE9E6;--gold:#F2B63D;--green:#2F6B4F}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Figtree,"Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
+a{color:var(--redd)}
+:focus-visible{outline:3px solid var(--red);outline-offset:2px}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:18px 24px;border-bottom:1px solid var(--line);max-width:1200px;margin:0 auto}
+.brand{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--ink);font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-weight:800;letter-spacing:2px;font-size:17px}
+.call{font-weight:700;color:var(--ink);text-decoration:none;white-space:nowrap}
+.hubbar{background:var(--ink);color:#F3F4F6;font-size:14px;padding:8px 24px;display:flex;justify-content:space-between;gap:12px;align-items:center}
+.hubbar a{color:var(--gold);font-weight:700;text-decoration:none}
+main{max-width:1200px;margin:0 auto;padding:28px 24px 120px;display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:36px;align-items:start}
+h1{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:44px;line-height:1.05;margin:0 0 8px}
+.lead{margin:0 0 26px;font-size:18px;line-height:1.5;color:var(--muted);max-width:640px}
+.step{background:#fff;border:1px solid var(--line);border-radius:22px;padding:24px;margin-bottom:16px}
+.step h2{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:24px;margin:0 0 4px;display:flex;align-items:center;gap:12px}
+.step h2 .n{flex:none;width:32px;height:32px;border-radius:50%;background:var(--ink);color:#fff;font-size:15px;display:grid;place-items:center;font-family:Figtree,sans-serif}
+.step.done h2 .n{background:var(--green)}
+.step .sub{margin:0 0 16px;color:var(--muted);line-height:1.45}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.tile{position:relative;border:2px solid var(--line);border-radius:16px;background:#fff;padding:10px 10px 12px;cursor:pointer;text-align:center;font:inherit;color:var(--ink);display:flex;flex-direction:column;align-items:center;gap:6px;min-height:150px}
+.tile svg{width:76px;height:76px}
+.tile b{font-size:15px;line-height:1.2}
+.tile small{color:var(--muted);font-size:13px}
+.tile.flat{min-height:0;padding:16px 10px;justify-content:center}
+.tile.on{border-color:var(--red);background:var(--sel)}
+.tile.on::after{content:"✓";position:absolute;top:8px;right:10px;width:22px;height:22px;border-radius:50%;background:var(--red);color:#fff;font-size:13px;display:grid;place-items:center}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{border:2px solid var(--line);background:#fff;border-radius:999px;padding:9px 16px;font:inherit;font-weight:700;cursor:pointer;color:var(--ink)}
+.chip.on{border-color:var(--red);background:var(--sel)}
+.chip:disabled{opacity:.45;cursor:not-allowed}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.svc{border:2px solid var(--line);border-radius:16px;background:#fff;padding:14px 16px;text-align:left;cursor:pointer;font:inherit;color:var(--ink)}
+.svc b{display:block;font-size:17px;margin-bottom:3px}.svc span{color:var(--muted);font-size:14px;line-height:1.4}
+.svc.on{border-color:var(--red);background:var(--sel)}
+.svc:disabled{opacity:.45;cursor:not-allowed}
+.sizerow{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.readout{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:40px;font-weight:700;line-height:1;min-width:120px}
+.readout small{font-size:16px;color:var(--muted);font-family:Figtree,sans-serif;font-weight:500;display:block;margin-top:4px}
+input[type=range]{flex:1 1 220px;accent-color:var(--red);height:40px}
+.nudge{margin:10px 0 0;font-size:14px;color:var(--muted)}
+.nudge b{color:var(--ink)}
+.qty{display:flex;align-items:center;gap:0;border:2px solid var(--line);border-radius:999px;overflow:hidden;width:max-content}
+.qty button{width:50px;height:50px;border:0;background:#fff;font-size:24px;cursor:pointer;color:var(--ink)}
+.qty input{width:80px;height:50px;border:0;text-align:center;font:inherit;font-size:22px;font-weight:700;color:var(--ink)}
+.qty input::-webkit-outer-spin-button,.qty input::-webkit-inner-spin-button{-webkit-appearance:none}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.f{display:flex;flex-direction:column;gap:6px}
+.f label{font-weight:700}.f small{color:var(--muted);font-weight:400}
+input[type=text],input[type=email],input[type=tel],input[type=date],textarea{font:inherit;font-size:16px;padding:13px 14px;border:1px solid var(--field);border-radius:12px;background:#fff;color:var(--ink);width:100%}
+.check{display:flex;gap:12px;align-items:flex-start;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 14px;line-height:1.5}
+.check input{width:22px;height:22px;accent-color:var(--red);flex:none;margin-top:2px}
+.upload{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:2px solid var(--ink);background:#fff;color:var(--ink);border-radius:999px;padding:12px 22px;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;min-height:48px}
+.btn.red{background:var(--red);border-color:var(--red);color:#fff;font-size:18px;padding:16px 30px}
+.btn.red:hover{background:var(--redd);border-color:var(--redd)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.attest{border:3px solid var(--red);border-radius:18px;padding:20px;background:#FFF7F6}
+.attest h3{margin:0 0 6px;font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:22px;color:var(--redd)}
+.attest .words{font-size:17px;line-height:1.55;margin:0 0 16px}
+.attest .words b{background:#fff;padding:0 4px;border-radius:4px}
+.initials{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.initials input{width:120px;font-size:26px;font-weight:800;letter-spacing:6px;text-transform:uppercase;text-align:center;border:2px solid var(--red)}
+.sig{font-family:Caveat,cursive;font-size:38px;line-height:1;color:var(--ink);min-width:80px;border-bottom:2px solid var(--ink);padding:0 8px 2px}
+.sig.empty{color:#B7B0A4;border-bottom-color:#B7B0A4}
+.hint{font-size:14px;color:var(--muted);margin:8px 0 0}
+.hint.bad{color:var(--redd);font-weight:600}
+.err{background:#FBE9E6;border:1px solid #E8B4AE;border-radius:12px;padding:12px 14px;color:var(--redd);font-weight:600}
+.side{position:sticky;top:16px;display:flex;flex-direction:column;gap:14px}
+.preview{background:#fff;border:1px solid var(--line);border-radius:22px;padding:18px;text-align:center}
+.preview svg{width:100%;max-height:340px;display:block}
+.preview .cap{margin:10px 0 0;font-size:14px;color:var(--muted)}
+.preview .cap b{color:var(--ink)}
+.summary{background:var(--ink);color:#D5DADF;border-radius:22px;padding:22px 24px}
+.summary h2{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:22px;color:#fff;margin:0 0 10px}
+.summary dl{margin:0;padding:0}
+.summary div{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #2A3038;font-size:15px}
+.summary dt{margin:0}.summary dd{margin:0;font-weight:700;color:#fff;white-space:nowrap}
+.summary .tot{border-bottom:0;padding-top:12px;align-items:center}.summary .tot dt{color:#fff;font-weight:700;font-size:17px}.summary .tot dd{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:32px;color:var(--gold)}
+.summary p{font-size:13px;line-height:1.5;margin:10px 0 0;color:#9AA3AD}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--ink);color:#fff;padding:12px 18px;display:none;justify-content:space-between;align-items:center;gap:12px;z-index:9;box-shadow:0 -8px 24px rgba(0,0,0,.25)}
+.bar b{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:24px;color:var(--gold)}
+.bar a{background:var(--red);color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:999px}
+.note{font-size:14px;color:var(--muted);margin:0}
+@media (max-width:960px){main{grid-template-columns:1fr}.side{position:static}.preview svg{max-height:260px}.bar{display:flex}}
+@media (max-width:560px){main{padding:20px 16px 120px}.step{padding:18px 16px}h1{font-size:34px}.grid,.two{grid-template-columns:1fr}.tiles{grid-template-columns:repeat(2,1fr)}.readout{font-size:32px}}
+</style>
+<style>.money{font-size:26px;font-weight:800;font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif}.pre{position:relative}.pre span{position:absolute;left:14px;top:13px;font-size:16px;color:var(--muted)}.pre input{padding-left:28px}</style>
+</head>
+<body>
+<div class="hubbar"><span id="hubwho">Custom price</span><a href="/hub/">&#8592; Back to the hub</a></div>
+<header>
+  <a class="brand" href="/" aria-label="HD Laser Studio home"><svg width="78" height="26" viewBox="220 115 1930 640" aria-hidden="true"><path fill="#C8372A" d="M510 125 L730 125 L636 371 L963 371 L1072 125 L2000 125 C2100 125 2160 210 2130 300 L2010 610 C1970 700 1880 742 1790 742 L1115 742 L1283 341 L1525 341 L1425 595 L1800 595 L1938 272 L1222 272 L1030 742 L808 742 L907 523 L572 523 L483 742 L232 742 Z"></path></svg><span>LASER STUDIO</span></a>
+  <a class="call" href="tel:+18583739866">(858) 373-9866</a>
+</header>
+<main>
+<div>
+  <h1>Custom price.</h1>
+  <p class="lead">For a job the regular order page can&#8217;t price. A manager or owner sets the price, the customer signs, and the Terminal takes the card. <a href="/order/?via=hub">Regular order instead</a>.</p>
+  <p class="err" id="loaderr" hidden></p>
+
+  <section class="step" id="s-work">
+    <h2><span class="n">1</span>What are we making?</h2>
+    <div class="f"><label for="desc">Describe the work <small>(this goes on the receipt and the customer signs it)</small></label><input id="desc" type="text" maxlength="200" placeholder="e.g. Engrave 12 steak knives, both sides, customer&#8217;s own set"></div>
+    <div class="grid" style="margin-top:14px">
+      <div class="f"><label for="unit">Price per piece</label><div class="pre"><span>$</span><input id="unit" type="text" inputmode="decimal" placeholder="0.00"></div></div>
+      <div class="f"><label for="qty">How many</label><input id="qty" type="text" inputmode="numeric" value="1"></div>
+    </div>
+    <label class="check" style="margin-top:14px"><input type="checkbox" id="supply"><span><b>We supply the item.</b> Adds sales tax. Leave unchecked when the customer brings their own.</span></label>
+  </section>
+
+  <section class="step" id="s-you">
+    <h2><span class="n">2</span>Who is it for?</h2>
+    <div class="grid">
+      <div class="f"><label for="name">Customer name</label><input id="name" type="text" autocomplete="off"></div>
+      <div class="f"><label for="business">Business <small>(optional)</small></label><input id="business" type="text" autocomplete="off"></div>
+      <div class="f"><label for="email">Email</label><input id="email" type="email" autocomplete="off"></div>
+      <div class="f"><label for="phone">Phone</label><input id="phone" type="tel" autocomplete="off"></div>
+    </div>
+    <div class="f" style="margin-top:14px"><label for="notes">Notes for the shop <small>(optional)</small></label><textarea id="notes" rows="2" placeholder="Where it goes, colors, due date, anything agreed at the counter."></textarea></div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">
+      <label class="check"><input type="checkbox" id="agree"><span>Customer agrees to HD Laser&#8217;s <a href="/terms/" target="_blank" rel="noopener">Terms of Sale &amp; Privacy Notice</a>. Custom orders are <b>final once paid</b>.</span></label>
+      <label class="check"><input type="checkbox" id="sms"><span><b>Text me order updates.</b> I agree to receive text messages from HD Laser Studio at the number above about this order (proof ready, payment received, ready for pickup). Consent is not a condition of purchase. Msg frequency varies. Msg &amp; data rates may apply. Reply STOP to cancel, HELP for help. <a href="/terms/" target="_blank" rel="noopener">Terms &amp; Privacy</a>.</span></label>
+    </div>
+  </section>
+
+  <section class="step" id="s-confirm">
+    <h2><span class="n">3</span>Customer reads this, then signs.</h2>
+    <div class="attest">
+      <h3>We make exactly what we agreed.</h3>
+      <p class="words" id="words">Fill in step 1 and the customer&#8217;s name and the confirmation appears here.</p>
+      <div class="initials">
+        <label for="initials" style="font-weight:700">Customer&#8217;s initials</label>
+        <input type="text" id="initials" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <div class="sig empty" id="sig">initials</div>
+      </div>
+      <p class="hint" id="inithint">Kept with the order, the name and the time signed.</p>
+    </div>
+    <p class="err" id="err" hidden style="margin:14px 0 0"></p>
+    <div style="margin-top:18px;padding:16px;border:2px solid var(--ink);border-radius:16px;background:#fff">
+      <div class="f" style="max-width:260px"><label for="staffpin">Manager or owner PIN <small>(<span id="staffname"></span>)</small></label><input id="staffpin" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></div>
+      <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="btn red" id="payterm">Charge on the Terminal</button>
+        <button type="button" class="btn" id="pay">Pay by card online instead</button>
+      </div>
+      <div id="termwait" hidden style="margin-top:14px;padding:14px;border-radius:12px;background:var(--sel)"><b id="termmsg">Waiting for the card on the Terminal…</b><div style="margin-top:10px"><button type="button" class="chip" id="termcancel">Cancel on the Terminal</button></div></div>
+    </div>
+  </section>
+</div>
+<aside class="side">
+  <div class="summary"><h2>Price</h2><dl id="lines"><div><dt>Describe the work and set a price.</dt><dd></dd></div></dl><p>Custom prices are logged with the manager&#8217;s name and show on the money page.</p></div>
+</aside>
+</main>
+<script src="/assets/site-config.js?v=4"></script>
+<script>
+(function(){
+  var $ = function(s){ return document.querySelector(s); };
+  var esc = function(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+  var money = function(c){ return '$' + (c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var CFG = window.HD_CONFIG || {}, BASE = CFG.WORKER_BASE || '', TAX = 0.0775;
+  var qs = new URLSearchParams(location.search), BY = (qs.get('by') || '').slice(0,60);
+  var me = null; try { me = JSON.parse(localStorage.getItem('hd_staff_me') || 'null'); } catch(e){}
+  if (!BY && me && me.name) BY = me.name;
+  $('#staffname').textContent = BY || 'your name'; $('#hubwho').textContent = 'Custom price' + (BY ? ' · ' + BY : '');
+  if (!BASE) { $('#loaderr').textContent = 'The shop server address is missing.'; $('#loaderr').hidden = false; }
+  fetch(BASE + '/pricing?t=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.json(); }).then(function(b){ TAX = b.tax_rate || TAX; render(); }).catch(function(){});
+
+  function parts(){
+    var unit = Math.round((parseFloat(String($('#unit').value).replace(/[^0-9.]/g,'')) || 0) * 100), qty = parseInt($('#qty').value, 10) || 0, supply = $('#supply').checked;
+    var desc = $('#desc').value.trim(); if (!desc || unit < 100 || qty < 1) return null;
+    var sub = unit * qty, tax = supply ? Math.round(sub * TAX) : 0;
+    return { desc:desc, unit:unit, qty:qty, supply:supply, sub:sub, tax:tax, total:sub + tax };
+  }
+  function initialsFor(name){ var w = String(name||'').trim().split(/\s+/).filter(Boolean); if(!w.length) return ''; return (w[0][0] + (w.length>1 ? w[w.length-1][0] : '')).toUpperCase(); }
+  function render(){
+    var p = parts(), dl = $('#lines');
+    if (!p) { dl.innerHTML = '<div><dt>Describe the work and set a price.</dt><dd></dd></div>'; $('#words').textContent = 'Fill in step 1 and the customer\u2019s name and the confirmation appears here.'; return; }
+    dl.innerHTML = '<div><dt><b>' + p.qty + ' \u00d7</b> ' + esc(p.desc) + '</dt><dd>' + money(p.sub) + '</dd></div>' + (p.supply ? '<div><dt>Sales tax, est.</dt><dd>' + money(p.tax) + '</dd></div>' : '<div><dt>Sales tax</dt><dd>none <small>(own item)</small></dd></div>') + '<div class="tot"><dt>Total</dt><dd>' + money(p.total) + '</dd></div>';
+    var name = $('#name').value.trim() || '(customer name)';
+    $('#words').innerHTML = 'I, <b>' + esc(name) + '</b>, have checked this order myself. HD Laser Studio will make exactly what we agreed at the counter: <b>' + esc(p.desc) + '</b>, quantity <b>' + p.qty + '</b>, at <b>' + money(p.unit) + '</b> each. I understand that engraving and printing are permanent and cannot be undone. If what I asked for turns out to be wrong, or I change my mind after approving the proof, <b>any redo or replacement is at my expense.</b>';
+  }
+  function renderInitials(){
+    var v = $('#initials').value.toUpperCase().replace(/[^A-Z]/g,''); $('#initials').value = v;
+    var sig = $('#sig'); sig.textContent = v || 'initials'; sig.classList.toggle('empty', !v);
+    var want = initialsFor($('#name').value), hint = $('#inithint');
+    if (v && want && v.indexOf(want)!==0) { hint.className = 'hint bad'; hint.textContent = 'Those don\u2019t match the customer\u2019s name. Expected to start with ' + want.split('').join('.') + '.'; return false; }
+    hint.className = 'hint'; hint.textContent = v ? 'Signed.' : 'Kept with the order, the name and the time signed.';
+    return !!(v && want && v.indexOf(want)===0);
+  }
+  ['desc','unit','qty','name'].forEach(function(id){ $('#'+id).addEventListener('input', function(){ render(); if (id==='name') renderInitials(); }); });
+  $('#supply').addEventListener('change', render); $('#initials').addEventListener('input', renderInitials);
+
+  var ref = 'HD-' + Date.now().toString(36).toUpperCase();
+  function fail(msg){ var e = $('#err'); e.textContent = msg; e.hidden = false; e.scrollIntoView({behavior:'smooth', block:'center'}); $('#pay').disabled = false; $('#payterm').disabled = false; $('#payterm').textContent = 'Charge on the Terminal'; $('#termwait').hidden = true; if (termTimer) { clearInterval(termTimer); termTimer = null; } }
+  function checkForm(){
+    $('#err').hidden = true; var p = parts();
+    if (!p) return fail('Describe the work, set a price of at least $1, and a quantity.');
+    var name = $('#name').value.trim(), email = $('#email').value.trim(), phone = $('#phone').value.trim();
+    if (name.length < 2) return fail('Customer name is needed.');
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('That email doesn\u2019t look right.');
+    if (phone.replace(/\D/g,'').length < 10) return fail('A phone number is needed for pickup texts.');
+    if (!$('#agree').checked) return fail('Tick the Terms of Sale box.');
+    if (!renderInitials()) return fail('The customer types their initials in step 3.');
+    if (!/^\d{4,8}$/.test($('#staffpin').value)) return fail('Enter your manager or owner PIN.');
+    return { p:p, name:name, email:email, phone:phone };
+  }
+  function body(v, pay){
+    return { ref: ref, pay: pay, spec: { custom: { description: v.p.desc, unit_cents: v.p.unit, we_supply_item: v.p.supply }, qty: v.p.qty },
+      customer: { name:v.name, business:$('#business').value.trim(), email:v.email, phone:v.phone, agreed:true, textConsent:$('#sms').checked },
+      notes: $('#notes').value.trim(), attest: { initials: $('#initials').value, version: '2026-09-26' }, taken_by: BY, staff: { name: BY, pin: $('#staffpin').value } };
+  }
+  $('#pay').onclick = function(){
+    var v = checkForm(); if (!v) return; $('#pay').disabled = true;
+    fetch(BASE + '/order/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body(v, 'link')) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if (d && d.url) { location.href = d.url; return; } if (d && d.ok) { location.href = '/thanks/?kind=custom&pay=later&ref=' + encodeURIComponent(d.ref || ref); return; } fail((d && d.error) || 'Something went wrong.'); })
+      .catch(function(){ fail('Couldn\u2019t reach the shop\u2019s server. Try again in a minute.'); });
+  };
+  var TERM = null, termTimer = null;
+  $('#payterm').onclick = function(){
+    var v = checkForm(); if (!v) return;
+    var btn = $('#payterm'); btn.disabled = true; btn.textContent = 'Sending to the Terminal\u2026';
+    fetch(BASE + '/order/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body(v, 'terminal')) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok || !d.terminal) return fail((d && d.error) || 'The Terminal did not answer. Is it on and online?');
+        TERM = { ref: d.ref, id: d.terminal };
+        $('#termmsg').textContent = 'Waiting for the card on the Terminal: ' + money(v.p.total) + '. Hand it to the customer.'; $('#termwait').hidden = false;
+        var polls = 0;
+        termTimer = setInterval(function(){
+          if (++polls > 150) return fail('The Terminal timed out. Try again.');
+          fetch(BASE + '/order/terminal/status?ref=' + encodeURIComponent(TERM.ref) + '&id=' + encodeURIComponent(TERM.id) + '&t=' + Date.now(), { cache:'no-store' })
+            .then(function(r){ return r.json(); })
+            .then(function(st){
+              if (!st) return;
+              if (st.status === 'COMPLETED' || st.order === 'paid') { clearInterval(termTimer); location.href = '/thanks/?paid=1&kind=custom&counter=1&ref=' + encodeURIComponent(TERM.ref); return; }
+              if (st.status === 'CANCELED' || st.status === 'CANCEL_REQUESTED') fail('Canceled on the Terminal. Nothing was charged.');
+              else if (st.status === 'IN_PROGRESS') $('#termmsg').textContent = 'Card presented. Finishing on the Terminal\u2026';
+            }).catch(function(){});
+        }, 2000);
+      })
+      .catch(function(){ fail('Couldn\u2019t reach the shop\u2019s server. Try again in a minute.'); });
+  };
+  $('#termcancel').onclick = function(){
+    if (!TERM) return;
+    fetch(BASE + '/order/terminal/cancel', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(TERM) }).then(function(){ fail('Canceled. Nothing was charged.'); }).catch(function(){ fail('Canceled.'); });
+  };
+})();
+</script>
+</body>
+</html>

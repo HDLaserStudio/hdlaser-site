@@ -7,5 +7,6 @@ Disallow: /pricing-lab/
 Disallow: /coffee/
 Disallow: /marisa/
 Disallow: /partnership/
+Disallow: /custom/
 
 Sitemap: https://hdlaser.net/sitemap.xml

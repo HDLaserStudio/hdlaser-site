@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-01 v15"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-02 v16"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2337,12 +2337,28 @@ function quoteSpec(book, spec) {
 }
 // The exact words the customer initials. Rendered identically on the order page; the copy stored with the order is this one.
 function attestText(q, name) {
+  if (q.custom) return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what we agreed at the counter: ${q.product.name}, quantity ${q.qty}, at ${"$" + (q.work_unit_cents / 100).toFixed(2)} each. I understand that engraving and printing are permanent and cannot be undone. If what I asked for turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
   return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what I have specified here: ${lcName(q.service.name)} on ${q.product.key === "own" ? "my own " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "my own garment" : "a " + q.product.name.toLowerCase()}, artwork ${q.inches} inches on its longest side${q.sides ? " on the " + (q.sides === "both" ? "front and the back" : q.sides) : ""}, quantity ${q.qty}${q.art === "text" ? ", reading exactly: \u201c" + q.text + "\u201d" : q.art === "file" ? ", using the logo we have on file for " + q.art_ref : ""}. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
 }
 // lower-case a service name for a sentence, keeping acronyms: "UV printing", "DTF printing", "laser engraving"
 function lcName(n) { return String(n).replace(/\b[A-Z][a-z]+\b/g, (w) => w.toLowerCase()); }
 function initialsFor(name) { const w = String(name || "").trim().split(/\s+/).filter(Boolean); if (!w.length) return ""; return (w[0][0] + (w.length > 1 ? w[w.length - 1][0] : "")).toUpperCase(); }
 
+// A custom-priced job from the counter: a manager or owner names the work and the price. Same order record, Terminal and emails as everything else.
+function customQuote(book, spec) {
+  const c = spec.custom || {};
+  const description = String(c.description || "").trim().slice(0, 200);
+  if (description.length < 3) return { error: "Describe the work" };
+  const unit = Math.round(Number(c.unit_cents));
+  if (!(unit >= 100 && unit <= 2000000)) return { error: "Price per piece must be between $1 and $20,000" };
+  const qty = parseInt(spec.qty, 10);
+  if (!(qty >= 1 && qty <= 1000)) return { error: "Quantity must be 1 to 1000" };
+  const taxable = !!c.we_supply_item;
+  const work = unit * qty;
+  return { custom: true, product: { key: "custom", name: description }, material: { key: "custom", name: "" }, service: { key: "custom", name: "Custom work", setup_cents: 0 }, inches: 0, qty, rush: false, sides: null, prints: 1, taxable, art: "logo", text: "", art_ref: "", flat_text: false,
+    work_unit_cents: unit, work_unit_after_cents: unit, discount_pct: 0, discount_cents: 0, blank_unit_cents: 0, handling_unit_cents: 0, work_cents: work, blank_cents: 0, handling_cents: 0, rush_cents: 0, setup_cents: 0, minimum_top_up_cents: 0, subtotal_cents: work, next_break: null,
+    summary: `${qty} × custom: ${description}${taxable ? " (we supply the item)" : ""}` };
+}
 async function verifyStaff(env, name, pin) {
   name = String(name || "").trim(); pin = String(pin || "").trim();
   if (!env.DB || !name || !/^\d{4,8}$/.test(pin)) return null;
@@ -2391,7 +2407,7 @@ async function orderCheckout(request, env, cors) {
   const ip = request.headers.get("CF-Connecting-IP") || "";
   if (rateLimited("order:" + ip, 10, 600000)) return json({ error: "Too many attempts. Please wait a few minutes." }, 429, cors);
   const book = await priceBook(env);
-  const q = quoteSpec(book, b.spec || {});
+  const q = b.spec && b.spec.custom ? customQuote(book, b.spec) : quoteSpec(book, b.spec || {});
   if (q.error) return json({ error: q.error }, 400, cors);
   const c = b.customer || {};
   const email = String(c.email || "").trim().toLowerCase();
@@ -2419,7 +2435,9 @@ async function orderCheckout(request, env, cors) {
     const who = await verifyStaff(env, b.staff.name, b.staff.pin);
     if (!who) return json({ error: "Employee name or PIN doesn't match" }, 401, cors);
     takenBy = who.name; takenById = who.id;
+    if (q.custom && ROLE_RANK[who.role] < 2) return json({ error: "A manager or owner PIN is needed for a custom price" }, 403, cors);
   }
+  if (q.custom && !takenById) return json({ error: "Enter a manager or owner PIN for a custom price" }, 400, cors);
   if (payHow === "terminal" && !takenById) return json({ error: "Enter your employee PIN to charge the Terminal" }, 400, cors);
   if (payHow === "terminal" && !env.SQUARE_TERMINAL_DEVICE_ID) return json({ error: "The Terminal isn't connected yet (SQUARE_TERMINAL_DEVICE_ID)" }, 503, cors);
   const taxRate = parseFloat(env.TAX_RATE || "0.0775") || 0;
@@ -2429,7 +2447,7 @@ async function orderCheckout(request, env, cors) {
   let logo = null; const L = b.logo || {};
   if (L.data && /^data:(image\/(png|jpeg|webp|svg\+xml));base64,[A-Za-z0-9+/=]+$/.test(String(L.data)) && String(L.data).length <= 950000) logo = { name: String(L.name || "logo").slice(0, 120), type: String(L.data).slice(5, String(L.data).indexOf(";")), data: String(L.data) };
 
-  const lineItems = [{ name: `${q.service.name}, ${q.inches} in on ${q.product.key === "own" ? "customer's " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "customer's own garment" : q.product.name.toLowerCase()}${q.sides ? ", " + (q.sides === "both" ? "front and back" : q.sides) : ""}${q.discount_pct ? ` (${q.discount_pct}% quantity discount)` : ""}`, quantity: String(q.qty * q.prints), base_price_money: { amount: q.work_unit_after_cents, currency: "USD" } }];
+  const lineItems = [{ name: q.custom ? q.product.name : `${q.service.name}, ${q.inches} in on ${q.product.key === "own" ? "customer's " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "customer's own garment" : q.product.name.toLowerCase()}${q.sides ? ", " + (q.sides === "both" ? "front and back" : q.sides) : ""}${q.discount_pct ? ` (${q.discount_pct}% quantity discount)` : ""}`, quantity: String(q.qty * q.prints), base_price_money: { amount: q.work_unit_after_cents, currency: "USD" } }];
   if (q.blank_unit_cents) lineItems.push({ name: q.product.name, quantity: String(q.qty), base_price_money: { amount: q.blank_unit_cents, currency: "USD" } });
   if (q.handling_unit_cents) lineItems.push({ name: "Customer-supplied item handling", quantity: String(q.qty), base_price_money: { amount: q.handling_unit_cents, currency: "USD" } });
   if (q.setup_cents) lineItems.push({ name: `${q.service.name} setup (artwork prep, one time)`, quantity: "1", base_price_money: { amount: q.setup_cents, currency: "USD" } });
@@ -2473,7 +2491,7 @@ async function orderCheckout(request, env, cors) {
   // tell the shop and the customer straight away; payment confirmation follows from the Square webhook
   const $ = (n) => "$" + (n / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const who = c.business ? `${c.business} (${name})` : name;
-  const breakdown = [`${q.qty * q.prints} × ${lcName(q.service.name)} ${q.inches} in${q.sides ? " (" + (q.sides === "both" ? "front and back" : q.sides) + ")" : ""} @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", q.setup_cents ? `Setup ${$(q.setup_cents)}` : `Setup: none (${q.art === "text" ? "text only" : "logo on file"})`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
+  const breakdown = [q.custom ? `${q.qty} × ${q.product.name} @ ${$(q.work_unit_cents)} (custom price set by ${takenBy})` : `${q.qty * q.prints} × ${lcName(q.service.name)} ${q.inches} in${q.sides ? " (" + (q.sides === "both" ? "front and back" : q.sides) + ")" : ""} @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", q.setup_cents ? `Setup ${$(q.setup_cents)}` : `Setup: none (${q.art === "text" ? "text only" : "logo on file"})`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
   if (env.RESEND_API_KEY) {
     await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
 `New order ${ref} from hdlaser.net${takenBy ? " (taken at the counter by " + takenBy + ")" : ""}

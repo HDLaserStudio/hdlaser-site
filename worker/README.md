@@ -96,6 +96,10 @@ Setup, once:
 
 A Terminal checkout needs an employee PIN; the online card button in counter mode accepts a PIN too so the sale is credited either way.
 
+## Custom price (hdlaser.net/custom)
+
+For a job the order page can't price. A manager or owner describes the work, sets a per-piece price and quantity, ticks "we supply the item" if tax applies, the customer signs with initials, and the manager's PIN authorises it (a staff PIN is refused). Then Charge on the Terminal or the online card link, exactly like a regular order. The order is stored with `spec.custom`, the Square line item carries the description, the emails say who set the price, and it shows on the dashboards like any other order.
+
 ## Staff portal (hdlaser.net/staff)
 
 Every employee signs in with their own name and PIN (no shared account). The portal gives them clock in/out, the opening and closing checklists, the prioritized work queue with a same-day capacity counter, a form to log walk-in jobs, and their own weekly numbers. Managers and the owner also get a Team tab with everyone's KPIs, and can add people, reset PINs, set who is on call, and deactivate accounts. The written SOP lives at hdlaser.net/staff/sop/.
