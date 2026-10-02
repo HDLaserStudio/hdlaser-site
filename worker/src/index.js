@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-02 v16"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-02 v17"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -921,6 +921,7 @@ const PRODUCTS = [
   { key: "tumbler", name: "Tumbler or bottle engraving", setup: 10, each: 12 },
   { key: "uv_small", name: "UV print, small item", setup: 10, each: 8 },
   { key: "dtf", name: "DTF print on apparel", setup: 15, each: 4 },
+  { key: "cut", name: "Laser cutting", setup: 10, each: 6 },
   { key: "award", name: "Plaque, award or trophy", setup: 15, each: 25 },
   { key: "board", name: "Cutting board or wood engraving", setup: 10, each: 20 },
   { key: "glass", name: "Glassware engraving", setup: 10, each: 10 },
@@ -2233,20 +2234,21 @@ const DEFAULT_BOOK = {
     { key: "engrave", name: "Laser engraving", blurb: "Etched into the surface. Permanent, one tone.", setup_cents: 0, min_per_piece: 4, per_inch: 2, consumable_cents: 8 },
     { key: "uv", name: "UV printing", blurb: "Full color, printed onto the surface.", setup_cents: 0, min_per_piece: 3, per_inch: 1.5, consumable_cents: 35 },
     { key: "dtf", name: "DTF printing", blurb: "Full color pressed onto fabric. Shirts, hoodies, hats, totes.", setup_cents: 1000, min_per_piece: 3, per_inch: 0.5, consumable_cents: 60 },
+    { key: "cut", name: "Laser cutting", blurb: "Cut right through. Shapes, letters, signs from wood, acrylic or leather.", setup_cents: 0, min_per_piece: 4, per_inch: 2.5, consumable_cents: 10 },
   ],
   // Price per piece by the artwork's longest side, in half-inch steps. Each step up costs a little more than the step
   // before it (first_gap, then +gap_growth every step), so the bigger the engraving the more it carries, and the next
   // size up always looks like a small jump. sizes[] is generated from these once, then edited cell by cell.
   // flat_to_inches: every size up to this is the starting price (the shop minimum for a small job); the ladder climbs from there.
-  ladders: { engrave: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 300, gap_growth_cents: 50 }, uv: { start_cents: 4000, flat_to_inches: 2, first_gap_cents: 350, gap_growth_cents: 50 }, dtf: { start_cents: 350, flat_to_inches: 0, first_gap_cents: 30, gap_growth_cents: 3 } },
+  ladders: { engrave: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 300, gap_growth_cents: 50 }, uv: { start_cents: 4000, flat_to_inches: 2, first_gap_cents: 350, gap_growth_cents: 50 }, dtf: { start_cents: 350, flat_to_inches: 0, first_gap_cents: 30, gap_growth_cents: 3 }, cut: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 400, gap_growth_cents: 75 } },
   max_inches: 12,
   sizes: [],
   materials: [
-    { key: "wood", name: "Wood", factor: 1, services: ["engrave", "uv"] },
+    { key: "wood", name: "Wood", factor: 1, services: ["engrave", "uv", "cut"] },
     { key: "metal", name: "Metal", factor: 1, services: ["engrave", "uv"] },
     { key: "glass", name: "Glass", factor: 1, services: ["engrave", "uv"] },
-    { key: "leather", name: "Leather", factor: 1, services: ["engrave"] },
-    { key: "acrylic", name: "Acrylic or plastic", factor: 1, services: ["engrave", "uv"] },
+    { key: "leather", name: "Leather", factor: 1, services: ["engrave", "cut"] },
+    { key: "acrylic", name: "Acrylic or plastic", factor: 1, services: ["engrave", "uv", "cut"] },
     { key: "stone", name: "Stone or slate", factor: 1, services: ["engrave"] },
     { key: "fabric", name: "Fabric", factor: 1, services: ["dtf"] },
   ],
@@ -2255,10 +2257,13 @@ const DEFAULT_BOOK = {
     { key: "tumbler", name: "20 oz tumbler", material: "metal", blank_cents: 2200, cost_cents: 900, max_inches: 3.5, w_in: 3.5, h_in: 8.25, shape: "tumbler", photo: "/assets/corp-crest-tumbler.jpg" },
     { key: "bottle", name: "Water bottle", material: "metal", blank_cents: 2400, cost_cents: 1000, max_inches: 3, w_in: 3, h_in: 10, shape: "bottle", photo: "/assets/corp-ucsd-bottle.jpg" },
     { key: "pint", name: "Pint glass", material: "glass", blank_cents: 900, cost_cents: 300, max_inches: 3, w_in: 3.5, h_in: 6, shape: "glass", photo: "/assets/engrave-wine-glasses.jpg" },
-    { key: "board", name: "Cutting board", material: "wood", blank_cents: 3200, cost_cents: 1400, max_inches: 8, w_in: 10, h_in: 14, shape: "board", photo: "/assets/wood-wedding-board.jpg" },
-    { key: "plaque", name: "Wood plaque", material: "wood", blank_cents: 2800, cost_cents: 1100, max_inches: 7, w_in: 8, h_in: 10, shape: "plaque", photo: "/assets/engrave-tree-plaque.jpg" },
+    { key: "board", name: "Cutting board", material: "wood", blank_cents: 3200, cost_cents: 1400, max_inches: 8, w_in: 10, h_in: 14, shape: "board", photo: "/assets/wood-wedding-board.jpg" , services: ["engrave", "uv"]},
+    { key: "plaque", name: "Wood plaque", material: "wood", blank_cents: 2800, cost_cents: 1100, max_inches: 7, w_in: 8, h_in: 10, shape: "plaque", photo: "/assets/engrave-tree-plaque.jpg" , services: ["engrave", "uv"]},
     { key: "tag", name: "Metal tag or plate", material: "metal", blank_cents: 600, cost_cents: 150, max_inches: 2.5, w_in: 3, h_in: 2, shape: "tag", photo: "/assets/engrave-anodized-tags.jpg" },
-    { key: "patch", name: "Leather patch or wallet", material: "leather", blank_cents: 1400, cost_cents: 500, max_inches: 2.5, w_in: 3.5, h_in: 2.5, shape: "patch", photo: "/assets/uv-mandala-wallet.jpg" },
+    { key: "patch", name: "Leather patch or wallet", material: "leather", blank_cents: 1400, cost_cents: 500, max_inches: 2.5, w_in: 3.5, h_in: 2.5, shape: "patch", photo: "/assets/uv-mandala-wallet.jpg", services: ["engrave"] },
+    // sheet stock we cut shapes from; the size slider is the longest side of the finished piece
+    { key: "woodblank", name: "Cut from our wood", material: "wood", blank_cents: 600, cost_cents: 200, max_inches: 12, w_in: 12, h_in: 12, shape: "board", photo: null, services: ["cut"] },
+    { key: "acrylicblank", name: "Cut from our acrylic", material: "acrylic", blank_cents: 900, cost_cents: 350, max_inches: 12, w_in: 12, h_in: 12, shape: "board", photo: null, services: ["cut"] },
     // DTF is priced as print + press only. Customers bring their own shirts, hoodies, hats or totes; no garment price is baked in.
     { key: "garment", name: "Your own shirt, hoodie, hat or tote", material: "fabric", blank_cents: 0, cost_cents: 0, max_inches: 12, w_in: 20, h_in: 27, shape: "shirt", photo: null },
     { key: "own", name: "Something I'll bring in", material: null, blank_cents: 0, cost_cents: 0, max_inches: 12, w_in: 8, h_in: 8, shape: "own", photo: null },
@@ -2280,6 +2285,8 @@ async function priceBook(env) {
   const book = { ...JSON.parse(JSON.stringify(DEFAULT_BOOK)), ...s };
   // anything the code has added since the book was saved (a new service, material, item or size) joins the saved book; saved prices win
   for (const k of ["services", "materials", "products"]) { const have = new Set((book[k] || []).map((x) => x.key)); for (const d of DEFAULT_BOOK[k]) if (!have.has(d.key)) book[k].push(JSON.parse(JSON.stringify(d))); }
+  for (const d of DEFAULT_BOOK.materials) { const m = book.materials.find((x) => x.key === d.key); if (m) for (const svc of d.services) if (!m.services.includes(svc)) m.services.push(svc); }
+  for (const d of DEFAULT_BOOK.products) { const p = book.products.find((x) => x.key === d.key); if (p && d.services && !p.services) p.services = [...d.services]; }
   book.ladders = { ...DEFAULT_BOOK.ladders, ...(s.ladders || {}) }; book.max_inches = Math.max(book.max_inches || 0, DEFAULT_BOOK.max_inches); if (book.text_only_own_cents == null) book.text_only_own_cents = DEFAULT_BOOK.text_only_own_cents;
   if (!Array.isArray(book.sizes)) book.sizes = [];
   const fresh = buildSizes(book);
@@ -2300,8 +2307,8 @@ function quoteSpec(book, spec) {
   const material = book.materials.find((m) => m.key === matKey);
   if (!material) return { error: "Pick the material" };
   const service = book.services.find((s) => s.key === String(spec.service || ""));
-  if (!service) return { error: "Pick engraving or printing" };
-  if (!material.services.includes(service.key)) return { error: `${service.name} isn't available on ${material.name.toLowerCase()}` };
+  if (!service) return { error: "Pick engraving, printing or cutting" };
+  if (!material.services.includes(service.key) || (product.services && !product.services.includes(service.key))) return { error: `${service.name} isn't available on ${product.key === "own" ? material.name.toLowerCase() : product.name.toLowerCase()}` };
   const inches = Math.round(Number(spec.inches) * 2) / 2;
   const maxIn = Math.min(product.max_inches || book.max_inches, book.max_inches);
   if (!(inches >= 0.5 && inches <= maxIn)) return { error: `Size must be between 0.5 and ${maxIn} inches` };

@@ -134,7 +134,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
 
   <section class="step" id="s-service">
     <h2><span class="n">2</span>How should we put it on?</h2>
-    <p class="sub">Engraving is etched into the surface, one tone, forever. UV printing lays full color onto hard goods. DTF presses full color onto fabric.</p>
+    <p class="sub">Engraving is etched into the surface, one tone, forever. UV printing lays full color onto hard goods. DTF presses full color onto fabric. Laser cutting cuts shapes, letters and signs right through wood, acrylic or leather.</p>
     <div class="two" id="services"></div>
   </section>
 
@@ -267,7 +267,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     if (!BOOK) return null;
     var product = BOOK.products.filter(function(p){return p.key===S.product;})[0]; if(!product) return null;
     var matKey = product.material || S.material; var material = BOOK.materials.filter(function(m){return m.key===matKey;})[0]; if(!material) return null;
-    var service = BOOK.services.filter(function(s){return s.key===S.service;})[0]; if(!service || material.services.indexOf(service.key)<0) return null;
+    var service = BOOK.services.filter(function(s){return s.key===S.service;})[0]; if(!service || material.services.indexOf(service.key)<0 || (product.services && product.services.indexOf(service.key)<0)) return null;
     var size = BOOK.sizes.filter(function(s){return s.inches===S.inches;})[0]; if(!size) return null;
     var qty = S.qty;
     var flatText = S.art==='text' && (product.key==='own'||product.key==='garment') && service.key!=='dtf' && (BOOK.text_only_own_cents||0)>0;
@@ -329,7 +329,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   }
   function renderServices(){
     var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var m = p ? BOOK.materials.filter(function(x){return x.key===(p.material||S.material);})[0] : null;
-    $('#services').innerHTML = BOOK.services.map(function(s){ var ok = !m || m.services.indexOf(s.key)>=0; return '<button type="button" class="svc'+(S.service===s.key?' on':'')+'" data-s="'+s.key+'"'+(ok?'':' disabled')+'><b>'+esc(s.name)+'</b><span>'+esc(s.blurb)+(ok?'':' Not on '+esc(m.name.toLowerCase())+'.')+'</span></button>'; }).join('');
+    $('#services').innerHTML = BOOK.services.map(function(s){ var ok = (!m || m.services.indexOf(s.key)>=0) && (!p || !p.services || p.services.indexOf(s.key)>=0); return '<button type="button" class="svc'+(S.service===s.key?' on':'')+'" data-s="'+s.key+'"'+(ok?'':' disabled')+'><b>'+esc(s.name)+'</b><span>'+esc(s.blurb)+(ok?'':' Not on '+esc(m.name.toLowerCase())+'.')+'</span></button>'; }).join('');
   }
   function renderSize(){
     var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var max = p ? Math.min(p.max_inches, BOOK.max_inches) : BOOK.max_inches;
@@ -342,7 +342,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   function renderPreview(){
     var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var box = $('#preview');
     if (!p) { box.querySelector('svg').outerHTML = shapeSvg(BOOK.products[0], SAMPLE, 2, 'engrave'); $('#cap').innerHTML = 'Pick an item to see the preview.'; return; }
-    box.querySelector('svg').outerHTML = shapeSvg(p, S.logo || SAMPLE, S.inches, S.service==='engrave' || !S.service ? 'engrave' : 'uv');
+    box.querySelector('svg').outerHTML = shapeSvg(p, S.logo || SAMPLE, S.inches, S.service==='engrave' || S.service==='cut' || !S.service ? 'engrave' : 'uv');
     $('#cap').innerHTML = (S.logo ? '<b>Your logo</b>' : '<b>Our logo as a stand-in.</b> Yours goes here') + ' at <b>'+S.inches+' in</b>' + (p.key==='garment' ? ' on the <b>'+(S.sides==='both'?'front and back':S.sides)+'</b>' : '') + ' on '+(p.key==='garment' ? 'your garment (shirt shown; same price on hoodies, hats and totes)' : 'the '+esc(p.name.toLowerCase()))+(S.service ? ', '+(S.service==='engrave'?'engraved':'full color') : '')+'. Drawn to scale.';
   }
   function renderSummary(){
@@ -351,7 +351,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var rows = [['<b>'+(q.qty*q.prints)+' × '+esc(lcName(q.service.name))+'</b>, '+(q.flatText ? 'text only, flat price' : S.inches+' in')+(q.sides ? ', '+(q.sides==='both'?'front and back':q.sides) : '')+(q.off?' <small>('+q.off+'% off)</small>':''), money(q.work)]];
     if (q.blankUnit) rows.push([q.qty+' × '+esc(q.product.name), money(q.blank)]);
     if (q.handUnit) rows.push([q.qty+' × handling your own item', money(q.hand)]);
-    rows.push(q.art==='logo' ? ['Setup, artwork prep <small>(one time)</small>', money(q.setup)] : ['Setup', 'none <small>('+(q.art==='text'?'text only':'logo on file')+')</small>']);
+    if (q.art==='logo') { if (q.setup) rows.push(['Setup, artwork prep <small>(one time)</small>', money(q.setup)]); } else rows.push(['Setup', 'none <small>('+(q.art==='text'?'text only':'logo on file')+')</small>']);
     if (q.rush) rows.push(['Rush, '+BOOK.rush_pct+'% on the work', money(q.rush)]);
     if (q.top) rows.push(['Shop minimum', money(q.top)]);
     rows.push(q.taxable ? ['Sales tax, est.', money(q.tax)] : ['Sales tax', 'none <small>(your own item)</small>']);
@@ -387,7 +387,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
 
   // ---- events
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[data-p]'); if (t) { S.product = t.dataset.p; var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; if (p.material) S.material = p.material; else if (S.material && p.key==='own') {} ; var m = BOOK.materials.filter(function(x){return x.key===(p.material||S.material);})[0]; if (m && S.service && m.services.indexOf(S.service)<0) S.service = null; renderAll(); return; }
+    var t = e.target.closest('[data-p]'); if (t) { S.product = t.dataset.p; var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; if (p.material) S.material = p.material; else if (S.material && p.key==='own') {} ; var m = BOOK.materials.filter(function(x){return x.key===(p.material||S.material);})[0]; if (S.service && ((m && m.services.indexOf(S.service)<0) || (p.services && p.services.indexOf(S.service)<0))) S.service = null; renderAll(); return; }
     var o = e.target.closest('[data-own]'); if (o) { var want = o.dataset.own==='1'; if (S.own!==want) { S.own = want; S.product = null; S.material = null; } renderAll(); return; }
     var c = e.target.closest('[data-m]'); if (c) { S.material = c.dataset.m; S.product = c.dataset.m==='fabric' ? 'garment' : 'own'; var cm = BOOK.materials.filter(function(x){return x.key===S.material;})[0]; if (cm && S.service && cm.services.indexOf(S.service)<0) S.service = null; var mm = BOOK.materials.filter(function(x){return x.key===S.material;})[0]; if (mm && S.service && mm.services.indexOf(S.service)<0) S.service = null; renderAll(); return; }
     var s = e.target.closest('[data-s]'); if (s && !s.disabled) { S.service = s.dataset.s; renderAll(); return; }
