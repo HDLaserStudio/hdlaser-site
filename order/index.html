@@ -278,18 +278,21 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     var qty = S.qty;
     var flatText = S.art==='text' && (product.key==='own'||product.key==='garment') && service.key!=='dtf' && (BOOK.text_only_own_cents||0)>0;
     var det = service.key==='cut' ? ((BOOK.cut_detail||[]).filter(function(d){return d.key===S.detail;})[0] || (BOOK.cut_detail||[])[0] || {key:'simple',name:'Simple outline',factor:1}) : null;
-    var workUnit = flatText ? BOOK.text_only_own_cents : r25(size[service.key+'_cents']*material.factor*(det?det.factor:1));
-    var brk = BOOK.qty_breaks.slice().sort(function(a,b){return b.min-a.min;}).filter(function(b){return qty>=b.min;})[0] || {off_pct:0};
-    var workAfter = r25(workUnit*(1-brk.off_pct/100));
+    var flatWork = product.flat_work && product.flat_work[service.key]!=null ? product.flat_work[service.key] : null;
+    var workUnit = flatText ? BOOK.text_only_own_cents : flatWork!=null ? flatWork : r25(size[service.key+'_cents']*material.factor*(det?det.factor:1));
+    var brk = product.qty_off ? {off_pct:0} : (BOOK.qty_breaks.slice().sort(function(a,b){return b.min-a.min;}).filter(function(b){return qty>=b.min;})[0] || {off_pct:0});
+    var flatOff = product.qty_off && qty>=product.qty_off.min ? Math.min(product.qty_off.cents, workUnit) : 0;
+    var workAfter = flatOff ? workUnit-flatOff : r25(workUnit*(1-brk.off_pct/100));
     var handling = product.key==='own' && !flatText ? BOOK.own_item_handling_cents : 0;
     var prints = product.key==='garment' && S.sides==='both' ? 2 : 1;
     var work = workAfter*qty*prints, blank = (product.blank_cents||0)*qty, hand = handling*qty;
     var rush = S.rush ? r25(work*BOOK.rush_pct/100) : 0;
     var setup = S.art==='logo' ? service.setup_cents : 0;
     var subtotal = work+blank+hand+rush+setup; var top = Math.max(0, BOOK.min_order_cents-subtotal); subtotal += top;
-    var next = BOOK.qty_breaks.slice().sort(function(a,b){return a.min-b.min;}).filter(function(b){return b.min>qty;})[0] || null;
+    var next = product.qty_off ? (qty<product.qty_off.min ? {min:product.qty_off.min, off_cents:product.qty_off.cents} : null) : (BOOK.qty_breaks.slice().sort(function(a,b){return a.min-b.min;}).filter(function(b){return b.min>qty;})[0] || null);
+    var over = product.max_qty && qty>product.max_qty ? product.max_qty : 0;
     var taxable = TAX_OWN || (product.key!=='own' && product.key!=='garment');
-    return { product:product, material:material, service:service, qty:qty, prints:prints, sides:product.key==='garment'?S.sides:null, workUnit:workUnit, workAfter:workAfter, off:brk.off_pct, work:work, blank:blank, blankUnit:product.blank_cents||0, hand:hand, handUnit:handling, rush:rush, setup:setup, art:S.art, flatText:flatText, detail:det, top:top, subtotal:subtotal, taxable:taxable, tax:taxable?Math.round(subtotal*TAX):0, next:next };
+    return { product:product, material:material, service:service, qty:qty, prints:prints, sides:product.key==='garment'?S.sides:null, workUnit:workUnit, workAfter:workAfter, off:brk.off_pct, flatOff:flatOff, over:over, work:work, blank:blank, blankUnit:product.blank_cents||0, hand:hand, handUnit:handling, rush:rush, setup:setup, art:S.art, flatText:flatText, detail:det, top:top, subtotal:subtotal, taxable:taxable, tax:taxable?Math.round(subtotal*TAX):0, next:next };
   }
   function unitFor(productKey, matKey, svcKey, inches){ var p=BOOK.products.filter(function(x){return x.key===productKey;})[0], m=BOOK.materials.filter(function(x){return x.key===(p.material||matKey);})[0], s=BOOK.sizes.filter(function(x){return x.inches===inches;})[0]; if(!p||!m||!s) return null; return r25(s[svcKey+'_cents']*m.factor); }
 
@@ -333,7 +336,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
       return;
     }
     $('#prodsub').textContent = 'The logo shown is ours. Yours takes its place in step 5.';
-    $('#products').innerHTML = BOOK.products.filter(function(p){ return p.key!=='own' && p.key!=='garment'; }).map(function(p){ var pm = BOOK.materials.filter(function(x){return x.key===p.material;})[0]; var from = p.key==='own' || !pm ? null : unitFor(p.key, null, pm.services[0], 0.5) + p.blank_cents; return '<button type="button" class="tile'+(S.product===p.key?' on':'')+'" data-p="'+p.key+'">'+thumb(p)+'<b>'+esc(p.name)+'</b><small>'+(p.key==='garment' ? 'print and press, from '+money0(from) : from!=null ? 'from '+money0(from) : 'we price the work only')+'</small></button>'; }).join('');
+    $('#products').innerHTML = BOOK.products.filter(function(p){ return p.key!=='own' && p.key!=='garment'; }).map(function(p){ var pm = BOOK.materials.filter(function(x){return x.key===p.material;})[0]; var fs = (p.services && p.services[0]) || (pm && pm.services[0]); var from = p.key==='own' || !pm ? null : (p.flat_work && p.flat_work[fs]!=null ? p.flat_work[fs] : unitFor(p.key, null, fs, 0.5)) + p.blank_cents; return '<button type="button" class="tile'+(S.product===p.key?' on':'')+'" data-p="'+p.key+'">'+thumb(p)+'<b>'+esc(p.name)+'</b><small>'+(p.key==='garment' ? 'print and press, from '+money0(from) : from!=null ? 'from '+money0(from) : 'we price the work only')+'</small></button>'; }).join('');
   }
   function renderServices(){
     var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var m = p ? BOOK.materials.filter(function(x){return x.key===(p.material||S.material);})[0] : null;
@@ -347,7 +350,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     if (q) { $('#ppu').textContent = money(q.workUnit)+' per piece for the work'; var up = S.inches+0.5<=max ? unitFor(S.product, S.material, S.service, S.inches+0.5) : null; $('#nudge').innerHTML = up!=null ? 'Half an inch bigger is <b>'+money(up-q.workUnit)+' more</b> per piece. Bigger reads better from across the room.' : 'That is as big as this item takes. Need larger? <a href="/quote/">Ask for a quote.</a>'; }
     else { $('#ppu').textContent = ''; $('#nudge').textContent = p && m && !S.service ? 'Pick engraving or printing to see the price.' : ''; }
   }
-  function renderQty(){ $('#qty').value = S.qty; var q = quote(); $('#qnudge').innerHTML = q ? (q.off ? '<b>'+q.off+'% off the work</b> at this quantity.' : '') + (q.next ? (q.off?' ':'')+'Order <b>'+q.next.min+' or more</b> and the work is '+q.next.off_pct+'% off.' : '') : ''; }
+  function renderQty(){ $('#qty').value = S.qty; var q = quote(); $('#qnudge').innerHTML = q ? (q.over ? '<b style="color:var(--redd)">More than '+q.over+'? We price that by hand.</b> <a href="/quote/">Ask for a quote</a> and we\u2019ll do better than the list.' : (q.flatOff ? '<b>'+money(q.flatOff)+' off each</b> at this quantity.' : q.off ? '<b>'+q.off+'% off the work</b> at this quantity.' : '') + (q.next ? (q.off||q.flatOff?' ':'')+'Order <b>'+q.next.min+' or more</b> and '+(q.next.off_cents ? 'it\u2019s '+money(q.next.off_cents)+' off each.' : 'the work is '+q.next.off_pct+'% off.') : '')+(q.product.max_qty && !q.over ? ' Up to '+q.product.max_qty+' here; more than that, <a href="/quote/">ask for a quote</a>.' : '')) : ''; }
   function renderPreview(){
     var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var box = $('#preview');
     if (!p) { box.querySelector('svg').outerHTML = shapeSvg(BOOK.products[0], SAMPLE, 2, 'engrave'); $('#cap').innerHTML = 'Pick an item to see the preview.'; return; }
@@ -358,7 +361,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   function renderSummary(){
     var q = quote(); var dl = $('#lines');
     if (!q) { dl.innerHTML = '<div><dt>Pick the item, the finish and the size.</dt><dd></dd></div>'; $('#bartot').textContent = '$0'; $('#pay').textContent = 'Pay securely'; return; }
-    var rows = [['<b>'+(q.qty*q.prints)+' × '+esc(lcName(q.service.name))+'</b>, '+(q.flatText ? 'text only, flat price' : S.inches+' in')+(q.detail ? ', '+esc(q.detail.name.toLowerCase()) : '')+(q.sides ? ', '+(q.sides==='both'?'front and back':q.sides) : '')+(q.off?' <small>('+q.off+'% off)</small>':''), money(q.work)]];
+    var rows = [['<b>'+(q.qty*q.prints)+' × '+esc(lcName(q.service.name))+'</b>, '+(q.flatText ? 'text only, flat price' : S.inches+' in')+(q.detail ? ', '+esc(q.detail.name.toLowerCase()) : '')+(q.sides ? ', '+(q.sides==='both'?'front and back':q.sides) : '')+(q.off?' <small>('+q.off+'% off)</small>':q.flatOff?' <small>('+money(q.flatOff)+' off each)</small>':''), money(q.work)]];
     if (q.blankUnit) rows.push([q.qty+' × '+esc(q.product.name), money(q.blank)]);
     if (q.handUnit) rows.push([q.qty+' × handling your own item', money(q.hand)]);
     if (q.art==='logo') { if (q.setup) rows.push(['Setup, artwork prep <small>(one time)</small>', money(q.setup)]); } else rows.push(['Setup', 'none <small>('+(q.art==='text'?'text only':'logo on file')+')</small>']);
@@ -434,6 +437,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   function checkForm(){
     $('#err').hidden = true; var q = quote();
     if (!q) return fail('Finish steps 1 to 4 first: the item, the finish and the size.');
+    if (q.over) return fail('For more than '+q.over+' of these we price it by hand. Ask for a quote and we\u2019ll come back with a number.');
     var name = $('#name').value.trim(), email = $('#email').value.trim(), phone = $('#phone').value.trim();
     if (name.length < 2) return fail('Tell us your name (step 7).');
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('That email doesn’t look right (step 7).');

@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-02 v21"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-02 v22"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2261,6 +2261,9 @@ const DEFAULT_BOOK = {
   // blank_cents is what the customer pays for the item when we supply it; cost_cents is what it costs us (never shown).
   products: [
     { key: "tumbler", name: "20 oz tumbler", material: "metal", blank_cents: 2200, cost_cents: 900, max_inches: 3.5, w_in: 3.5, h_in: 8.25, shape: "tumbler", photo: "/assets/corp-crest-tumbler.jpg" },
+    // Hugh, Oct 2 2026: 12 oz cup $25, 16 oz cup $30 blank; engraving adds $15, UV printing adds $20, any artwork size; $5 off each cup from 6 up to 50; more than 50 is quoted.
+    { key: "cup12", name: "12 oz cup", material: "metal", blank_cents: 2500, cost_cents: 900, max_inches: 3, w_in: 3.2, h_in: 4.6, shape: "tumbler", photo: "/assets/cup-navy.jpg", services: ["engrave", "uv"], flat_work: { engrave: 1500, uv: 2000 }, qty_off: { min: 6, cents: 500 }, max_qty: 50 },
+    { key: "cup16", name: "16 oz cup", material: "metal", blank_cents: 3000, cost_cents: 1100, max_inches: 3.5, w_in: 3.4, h_in: 5.6, shape: "tumbler", photo: "/assets/cup-black.jpg", services: ["engrave", "uv"], flat_work: { engrave: 1500, uv: 2000 }, qty_off: { min: 6, cents: 500 }, max_qty: 50 },
     { key: "bottle", name: "Water bottle", material: "metal", blank_cents: 2400, cost_cents: 1000, max_inches: 3, w_in: 3, h_in: 10, shape: "bottle", photo: "/assets/corp-ucsd-bottle.jpg" },
     { key: "pint", name: "Pint glass", material: "glass", blank_cents: 900, cost_cents: 300, max_inches: 3, w_in: 3.5, h_in: 6, shape: "glass", photo: "/assets/engrave-wine-glasses.jpg" },
     { key: "board", name: "Cutting board", material: "wood", blank_cents: 3200, cost_cents: 1400, max_inches: 8, w_in: 10, h_in: 14, shape: "board", photo: "/assets/wood-wedding-board.jpg" , services: ["engrave", "uv"]},
@@ -2324,6 +2327,7 @@ function quoteSpec(book, spec) {
   if (!(inches >= 0.5 && inches <= maxIn)) return { error: `Size must be between 0.5 and ${maxIn} inches` };
   const qty = parseInt(spec.qty, 10);
   if (!(qty >= 1 && qty <= 500)) return { error: "Quantity must be 1 to 500" };
+  if (product.max_qty && qty > product.max_qty) return { error: `For more than ${product.max_qty} of these we price it by hand. Ask for a quote at hdlaser.net/quote` };
   const rush = !!spec.rush;
   const sides = product.key === "garment" ? (["front", "back", "both"].includes(String(spec.sides)) ? String(spec.sides) : "front") : null;
   const prints = sides === "both" ? 2 : 1; // front and back are two prints, each priced by size
@@ -2336,9 +2340,11 @@ function quoteSpec(book, spec) {
   if (!size) return { error: "Size not on the price list" };
   const flatText = art === "text" && OWN_ITEM_KEYS.includes(product.key) && service.key !== "dtf" && book.text_only_own_cents > 0; // plain text on their own item: one flat price, any size
   const detail = service.key === "cut" ? ((book.cut_detail || []).find((d) => d.key === String(spec.detail)) || (book.cut_detail || [])[0] || { key: "simple", name: "Simple outline", factor: 1 }) : null;
-  const workUnit = flatText ? book.text_only_own_cents : r25(size[service.key + "_cents"] * material.factor * (detail ? detail.factor : 1));
-  const brk = [...book.qty_breaks].sort((a, b) => b.min - a.min).find((b) => qty >= b.min) || { off_pct: 0 };
-  const workUnitAfter = r25(workUnit * (1 - brk.off_pct / 100));
+  const flatWork = product.flat_work && product.flat_work[service.key] != null ? product.flat_work[service.key] : null; // items with one work price whatever the artwork size
+  const workUnit = flatText ? book.text_only_own_cents : flatWork != null ? flatWork : r25(size[service.key + "_cents"] * material.factor * (detail ? detail.factor : 1));
+  const brk = product.qty_off ? { off_pct: 0 } : ([...book.qty_breaks].sort((a, b) => b.min - a.min).find((b) => qty >= b.min) || { off_pct: 0 });
+  const flatOff = product.qty_off && qty >= product.qty_off.min ? Math.min(product.qty_off.cents, workUnit) : 0; // a fixed amount off each piece instead of a percentage
+  const workUnitAfter = flatOff ? workUnit - flatOff : r25(workUnit * (1 - brk.off_pct / 100));
   const handlingUnit = product.key === "own" && !flatText ? book.own_item_handling_cents : 0;
   const blankUnit = product.blank_cents || 0;
   const work = workUnitAfter * qty * prints, blank = blankUnit * qty, handling = handlingUnit * qty;
@@ -2346,11 +2352,11 @@ function quoteSpec(book, spec) {
   const setup = art === "logo" ? service.setup_cents : 0;
   let subtotal = work + blank + handling + rushCents + setup;
   const minimumTopUp = Math.max(0, book.min_order_cents - subtotal); subtotal += minimumTopUp;
-  const nextBreak = [...book.qty_breaks].sort((a, b) => a.min - b.min).find((b) => b.min > qty);
+  const nextBreak = product.qty_off ? (qty < product.qty_off.min ? { min: product.qty_off.min, off_cents: product.qty_off.cents } : null) : [...book.qty_breaks].sort((a, b) => a.min - b.min).find((b) => b.min > qty);
   const taxable = !OWN_ITEM_KEYS.includes(product.key); // no sales tax when the customer brings the item; we only sell the work
-  return { product, material, service, inches, qty, rush, sides, prints, taxable, art, text, art_ref: artRef, flat_text: flatText, detail: detail ? detail.key : null, detail_name: detail ? detail.name : null, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_cents: (workUnit - workUnitAfter) * qty,
+  return { product, material, service, inches, qty, rush, sides, prints, taxable, art, text, art_ref: artRef, flat_text: flatText, detail: detail ? detail.key : null, detail_name: detail ? detail.name : null, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_off_cents: flatOff, discount_cents: (workUnit - workUnitAfter) * qty,
     blank_unit_cents: blankUnit, handling_unit_cents: handlingUnit, work_cents: work, blank_cents: blank, handling_cents: handling, rush_cents: rushCents, setup_cents: setup, minimum_top_up_cents: minimumTopUp, subtotal_cents: subtotal,
-    next_break: nextBreak ? { min: nextBreak.min, off_pct: nextBreak.off_pct } : null,
+    next_break: nextBreak ? { min: nextBreak.min, off_pct: nextBreak.off_pct, off_cents: nextBreak.off_cents } : null,
     summary: `${qty} × ${lcName(service.name)}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.key === "garment" ? "customer's own garment" : product.name.toLowerCase()}${sides ? ", " + (sides === "both" ? "front and back" : sides) : ""}${detail ? ", " + detail.name.toLowerCase() : ""}${rush ? ", rush" : ""}${art === "text" ? ", text: \u201c" + text + "\u201d" : art === "file" ? ", logo on file (" + artRef + ")" : ""}` };
 }
 // The exact words the customer initials. Rendered identically on the order page; the copy stored with the order is this one.
@@ -2509,7 +2515,7 @@ async function orderCheckout(request, env, cors) {
   // tell the shop and the customer straight away; payment confirmation follows from the Square webhook
   const $ = (n) => "$" + (n / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const who = c.business ? `${c.business} (${name})` : name;
-  const breakdown = [q.custom ? `${q.qty} × ${q.product.name} @ ${$(q.work_unit_cents)} (custom price set by ${takenBy})` : `${q.qty * q.prints} × ${lcName(q.service.name)} ${q.inches} in${q.sides ? " (" + (q.sides === "both" ? "front and back" : q.sides) + ")" : ""} @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", q.setup_cents ? `Setup ${$(q.setup_cents)}` : `Setup: none (${q.art === "text" ? "text only" : "logo on file"})`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
+  const breakdown = [q.custom ? `${q.qty} × ${q.product.name} @ ${$(q.work_unit_cents)} (custom price set by ${takenBy})` : `${q.qty * q.prints} × ${lcName(q.service.name)} ${q.inches} in${q.sides ? " (" + (q.sides === "both" ? "front and back" : q.sides) + ")" : ""} @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : q.discount_off_cents ? ` (${$(q.discount_off_cents)} off each for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", q.setup_cents ? `Setup ${$(q.setup_cents)}` : `Setup: none (${q.art === "text" ? "text only" : "logo on file"})`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
   if (env.RESEND_API_KEY) {
     await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
 `New order ${ref} from hdlaser.net${takenBy ? " (taken at the counter by " + takenBy + ")" : ""}
