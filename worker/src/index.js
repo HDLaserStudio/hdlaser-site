@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-02 v20"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-02 v21"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2240,7 +2240,7 @@ const DEFAULT_BOOK = {
   // before it (first_gap, then +gap_growth every step), so the bigger the engraving the more it carries, and the next
   // size up always looks like a small jump. sizes[] is generated from these once, then edited cell by cell.
   // flat_to_inches: every size up to this is the starting price (the shop minimum for a small job); the ladder climbs from there.
-  ladders: { engrave: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 300, gap_growth_cents: 50 }, uv: { start_cents: 4000, flat_to_inches: 2, first_gap_cents: 350, gap_growth_cents: 50 }, dtf: { start_cents: 350, flat_to_inches: 0, first_gap_cents: 30, gap_growth_cents: 3 }, cut: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 125, gap_growth_cents: 0 } },
+  ladders: { engrave: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 200, gap_growth_cents: 10 }, uv: { start_cents: 4000, flat_to_inches: 2, first_gap_cents: 350, gap_growth_cents: 50 }, dtf: { start_cents: 350, flat_to_inches: 0, first_gap_cents: 30, gap_growth_cents: 3 }, cut: { start_cents: 3500, flat_to_inches: 2, first_gap_cents: 125, gap_growth_cents: 0 } },
   max_inches: 28,                     // the cutting bed is 15 x 28 in; engraving and printing stop at each service's max_inches
   sizes: [],
   // how much of the bed time a cut really takes: a simple outline is the ladder price; detail and intricacy multiply it
@@ -2265,6 +2265,8 @@ const DEFAULT_BOOK = {
     { key: "pint", name: "Pint glass", material: "glass", blank_cents: 900, cost_cents: 300, max_inches: 3, w_in: 3.5, h_in: 6, shape: "glass", photo: "/assets/engrave-wine-glasses.jpg" },
     { key: "board", name: "Cutting board", material: "wood", blank_cents: 3200, cost_cents: 1400, max_inches: 8, w_in: 10, h_in: 14, shape: "board", photo: "/assets/wood-wedding-board.jpg" , services: ["engrave", "uv"]},
     { key: "plaque", name: "Wood plaque", material: "wood", blank_cents: 2800, cost_cents: 1100, max_inches: 7, w_in: 8, h_in: 10, shape: "plaque", photo: "/assets/engrave-tree-plaque.jpg" , services: ["engrave", "uv"]},
+    // Hugh, Oct 2 2026: wood plaque with a 7 x 9 metal plate, logo and text engraved on the plate, $125. The plate is the artwork area (9 in longest side).
+    { key: "plaqueplate", name: "Wood plaque with 7 \u00d7 9 metal plate", material: "metal", blank_cents: 5300, cost_cents: 2200, max_inches: 9, w_in: 9, h_in: 11, shape: "plaque", photo: null, services: ["engrave"] },
     { key: "tag", name: "Metal tag or plate", material: "metal", blank_cents: 600, cost_cents: 150, max_inches: 2.5, w_in: 3, h_in: 2, shape: "tag", photo: "/assets/engrave-anodized-tags.jpg" },
     { key: "patch", name: "Leather patch or wallet", material: "leather", blank_cents: 1400, cost_cents: 500, max_inches: 2.5, w_in: 3.5, h_in: 2.5, shape: "patch", photo: "/assets/uv-mandala-wallet.jpg", services: ["engrave"] },
     // sheet stock we cut shapes from; the size slider is the longest side of the finished piece
