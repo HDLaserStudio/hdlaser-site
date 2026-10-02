@@ -351,7 +351,8 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   function renderPreview(){
     var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var box = $('#preview');
     if (!p) { box.querySelector('svg').outerHTML = shapeSvg(BOOK.products[0], SAMPLE, 2, 'engrave'); $('#cap').innerHTML = 'Pick an item to see the preview.'; return; }
-    box.querySelector('svg').outerHTML = shapeSvg(p, S.logo || SAMPLE, S.inches, S.service==='engrave' || S.service==='cut' || !S.service ? 'engrave' : 'uv');
+    var pd = (p.key==='own' && S.inches > p.w_in - 1) ? Object.assign({}, p, { w_in: S.inches + 1, h_in: S.inches + 1 }) : p;
+    box.querySelector('svg').outerHTML = shapeSvg(pd, S.logo || SAMPLE, S.inches, S.service==='engrave' || S.service==='cut' || !S.service ? 'engrave' : 'uv');
     $('#cap').innerHTML = (S.logo ? '<b>Your logo</b>' : '<b>Our logo as a stand-in.</b> Yours goes here') + ' at <b>'+S.inches+' in</b>' + (p.key==='garment' ? ' on the <b>'+(S.sides==='both'?'front and back':S.sides)+'</b>' : '') + ' on '+(p.key==='garment' ? 'your garment (shirt shown; same price on hoodies, hats and totes)' : 'the '+esc(p.name.toLowerCase()))+(S.service ? ', '+(S.service==='engrave'?'engraved':'full color') : '')+'. Drawn to scale.';
   }
   function renderSummary(){
