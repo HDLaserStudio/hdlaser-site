@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-02 v24"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-02 v25"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -1015,9 +1015,15 @@ async function staffRoutes(request, env, cors, path, url) {
 
   // Receipts: every Square payment we know of (web, counter and register), newest first, printable on the Terminal.
   if (path === "/staff/receipts") {
-    const rows = (await env.DB.prepare(`SELECT p.payment_id, p.created_at, p.amount_cents, p.refunded_cents, p.source, p.card_brand, p.ref, o.name, o.business, o.kind, o.spec, o.taken_by FROM payments p LEFT JOIN orders o ON o.ref = p.ref WHERE p.status = 'COMPLETED' ORDER BY p.created_at DESC LIMIT 80`).all()).results;
+    const rows = (await env.DB.prepare(`SELECT p.payment_id, p.created_at, p.amount_cents, p.refunded_cents, p.source, p.card_brand, p.ref, o.name, o.business, o.kind, o.spec, o.taken_by FROM payments p LEFT JOIN orders o ON o.ref = p.ref WHERE p.status = 'COMPLETED' AND p.created_at >= ? ORDER BY p.created_at DESC LIMIT 300`).bind(new Date(Date.now() - 30 * 86400000).toISOString()).all()).results;
+    const lastSync = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'last_sync'`).first();
     const list = rows.map((r) => { let what = ""; if (r.spec) { try { what = JSON.parse(r.spec).summary || ""; } catch {} } return { payment_id: r.payment_id, at: r.created_at, amount_cents: r.amount_cents, refunded_cents: r.refunded_cents || 0, source: r.source, card: r.card_brand, ref: r.ref, who: r.business || r.name || "", what, taken_by: r.taken_by }; });
-    return json({ ok: true, terminal: !!env.SQUARE_TERMINAL_DEVICE_ID, receipts: list }, 200, { ...cors, "Cache-Control": "no-store" });
+    return json({ ok: true, terminal: !!env.SQUARE_TERMINAL_DEVICE_ID, receipts: list, last_sync: lastSync ? lastSync.v : null, can_sync: isMgr }, 200, { ...cors, "Cache-Control": "no-store" });
+  }
+  if (path === "/staff/receipts/sync" && request.method === "POST") {
+    if (!isMgr) return json({ error: "Managers and the owner can pull from Square" }, 403, cors);
+    const r = await syncSquare(env, 8); // the past week of register sales, so every receipt is printable
+    return json({ ok: r.ok, payments: r.payments, errors: r.errors }, 200, cors);
   }
   if (path === "/staff/receipts/print" && request.method === "POST") {
     let b; try { b = await request.json(); } catch { return json({ error: "Bad JSON" }, 400, cors); }

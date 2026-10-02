@@ -187,7 +187,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
     if(name==='receipts'){ v.innerHTML='<div class="panel"><button class="back" data-home>&#8592; Hub</button><h2>Receipts</h2><p id="rnote" style="margin:0 0 14px;color:#545B63">Loading\u2026</p><div id="rlist"></div></div>';
       api('/staff/receipts').then(function(d){
         var money=function(c){return '$'+(c/100).toFixed(2);}, when=function(t){ return new Date(t).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); };
-        $('#rnote').textContent = d.terminal ? 'Tap Print and the Terminal prints that receipt. Newest first; web, counter and register sales.' : 'The Terminal isn\u2019t connected yet, so nothing can print.';
+        $('#rnote').innerHTML = (d.terminal ? 'Tap Print and the Terminal prints that receipt. The last 30 days, newest first: web, counter and register sales.' : 'The Terminal isn\u2019t connected yet, so nothing can print.') + (d.last_sync ? ' Register sales last pulled from Square '+when(d.last_sync)+'.' : ' Register sales haven\u2019t been pulled from Square yet.') + (d.can_sync ? ' <button type="button" class="btn-sm" id="rsync">Pull the past week from Square</button>' : '');
         $('#rlist').innerHTML = d.receipts.length ? '<table><tr><th>When</th><th>Who</th><th>What</th><th class="num">Paid</th><th></th></tr>'+d.receipts.map(function(r){ return '<tr><td style="white-space:nowrap">'+when(r.at)+'</td><td>'+esc(r.who||'Register sale')+(r.ref?'<div class="small">'+esc(r.ref)+'</div>':'')+'</td><td>'+esc(r.what||(r.source==='CASH'?'Cash':(r.card||r.source||'')))+'</td><td class="num">'+money(r.amount_cents)+(r.refunded_cents?'<div class="small">refunded '+money(r.refunded_cents)+'</div>':'')+'</td><td><button type="button" class="btn-sm" data-print="'+esc(r.payment_id)+'"'+(d.terminal?'':' disabled')+'>Print</button></td></tr>'; }).join('')+'</table>' : '<p>No payments yet.</p>';
       }).catch(function(e){ $('#rnote').textContent = e.message; });
       return; }
@@ -203,6 +203,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
     var h=e.target.closest('[data-home]'); if(h){ $('#view').hidden=true; $('#home').hidden=false; window.scrollTo(0,0); return; }
     var c=e.target.closest('[data-cat]'); if(c){ view('samples',c.dataset.cat); return; }
     var v=e.target.closest('[data-view]'); if(v){ view(v.dataset.view); return; }
+    if(e.target.id==='rsync'){ e.target.disabled=true; e.target.textContent='Pulling\u2026'; api('/staff/receipts/sync',{}).then(function(r){ view('receipts'); }).catch(function(err){ e.target.textContent=err.message; e.target.disabled=false; }); return; }
     var pr=e.target.closest('[data-print]'); if(pr){ pr.disabled=true; pr.textContent='Printing\u2026'; api('/staff/receipts/print',{payment_id:pr.dataset.print}).then(function(){ pr.textContent='Sent'; setTimeout(function(){ pr.textContent='Print'; pr.disabled=false; },4000); }).catch(function(err){ pr.textContent=err.message; pr.disabled=false; }); return; }
   });
 
