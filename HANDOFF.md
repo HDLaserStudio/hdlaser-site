@@ -21,7 +21,7 @@ Commit as `git -c user.name="jake-hess" -c user.email="jakehessplans@gmail.com"`
 
 ## Architecture in one paragraph
 
-Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v25**. Deployed in Cloudflare when this session ended: **v23** (v24 and v25 pending).
+Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v25**. Deployed in Cloudflare: **v25** (confirmed Oct 2).
 
 ## How the worker gets deployed (nobody automates this yet)
 
@@ -68,7 +68,7 @@ Public: `/` home (engraving, UV, DTF, cutting sections), `/order/` the single or
 - The Terminal is signed in with a device code as "Front counter" and is visible to the worker. `SQUARE_TERMINAL_DEVICE_ID` in Cloudflare is `051CS108A6000200` (the paired id, no `device:` prefix). `/api/terminals` lists it; `/api/terminals?create=1` makes a new device code if it ever has to be re-paired.
 - Flow: order page in counter mode, employee PIN (verified against the staff table), worker creates a Square Order with the line items and tax, then a Terminal checkout against it; page polls `/order/terminal/status` until COMPLETED; order marked paid, payment stored with Square's team member id, `taken_by_id` set. Webhook `terminal.checkout.updated` is the backstop; Hugh has not yet added it in the Square Developer webhook subscription (open item).
 - Receipts: the Terminal offers print/email/text after the tap; thank-you page has "Print receipt on the Terminal"; the hub's **Receipts** tile (v24+) lists the last 30 days of payments with a Print button, and a manager button pulls the past week of register sales from Square.
-- Not yet done: the live $25 test sale on the iPad. Steps are in the last messages of the previous session: hub, New order, own wood, engraving, text only, Hugh's PIN, Charge on the Terminal, tap card, refund in Square.
+- Done Oct 2: live $25 test sale on the iPad (hub, New order, own wood, engraving, text only, Hugh's PIN, Charge on the Terminal, tap card). Page moved to thanks on payment, sale showed in hub Receipts, then refunded in Square. Hub Receipts and "Pull the past week from Square" both work on v25.
 
 ## Other systems and their state
 
@@ -86,8 +86,8 @@ The container cannot reach hdlaser.net or workers.dev. Test the worker by import
 
 ## Open items, in priority order
 
-1. Deploy v25, then on the iPad: hub, Receipts, "Pull the past week from Square". If empty, screenshot the note and read Square's error (token permissions or wrong location).
-2. The live $25 Terminal test, refunded afterward.
+1. ~~Deploy v25 and check hub Receipts~~ done Oct 2.
+2. ~~The live $25 Terminal test, refunded~~ done Oct 2.
 3. Add `terminal.checkout.updated` to the Square webhook subscription.
 4. Press "Load the starting numbers" after any pricing change so Hugh's saved book matches the code.
 5. Twilio and Apple decisions arrive by email; forward to the session.
