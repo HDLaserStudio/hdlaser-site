@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-02 v17"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-02 v18"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2250,7 +2250,7 @@ const DEFAULT_BOOK = {
     { key: "leather", name: "Leather", factor: 1, services: ["engrave", "cut"] },
     { key: "acrylic", name: "Acrylic or plastic", factor: 1, services: ["engrave", "uv", "cut"] },
     { key: "stone", name: "Stone or slate", factor: 1, services: ["engrave"] },
-    { key: "fabric", name: "Fabric", factor: 1, services: ["dtf"] },
+    { key: "fabric", name: "Fabric", factor: 1, services: ["dtf", "cut"] },
   ],
   // blank_cents is what the customer pays for the item when we supply it; cost_cents is what it costs us (never shown).
   products: [

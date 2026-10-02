@@ -321,7 +321,8 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
     if (S.own) {
       $('#prodsub').textContent = 'What is it made of? Pick the closest.';
       var g = BOOK.products.filter(function(x){return x.key==='garment';})[0];
-      $('#products').innerHTML = BOOK.materials.map(function(m){ var isG = m.key==='fabric' && g; var on = isG ? S.product==='garment' : (S.product==='own' && S.material===m.key); var from = unitFor(isG?'garment':'own', m.key, m.services[0], 0.5); return '<button type="button" class="tile'+(isG?'':' flat')+(on?' on':'')+'" data-m="'+m.key+'">'+(isG?thumb(g):'')+'<b>'+esc(isG ? g.name : m.name)+'</b><small>'+(from!=null?'work from '+money0(from):'')+'</small></button>'; }).join('');
+      $('#products').innerHTML = BOOK.materials.map(function(m){ var on = S.product==='own' && S.material===m.key; var from = unitFor('own', m.key, m.services[0], 0.5); return '<button type="button" class="tile flat'+(on?' on':'')+'" data-m="'+m.key+'">'+'<b>'+esc(m.name)+'</b><small>'+(from!=null?'work from '+money0(from):'')+'</small></button>'; }).join('')
+        + (g ? '<button type="button" class="tile'+(S.product==='garment'?' on':'')+'" data-p="garment">'+thumb(g)+'<b>'+esc(g.name)+'</b><small>'+(function(){ var f=unitFor('garment','fabric','dtf',0.5); return f!=null?'print and press, from '+money0(f):''; })()+'</small></button>' : '');
       return;
     }
     $('#prodsub').textContent = 'The logo shown is ours. Yours takes its place in step 5.';
@@ -389,7 +390,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea{fon
   document.addEventListener('click', function(e){
     var t = e.target.closest('[data-p]'); if (t) { S.product = t.dataset.p; var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; if (p.material) S.material = p.material; else if (S.material && p.key==='own') {} ; var m = BOOK.materials.filter(function(x){return x.key===(p.material||S.material);})[0]; if (S.service && ((m && m.services.indexOf(S.service)<0) || (p.services && p.services.indexOf(S.service)<0))) S.service = null; renderAll(); return; }
     var o = e.target.closest('[data-own]'); if (o) { var want = o.dataset.own==='1'; if (S.own!==want) { S.own = want; S.product = null; S.material = null; } renderAll(); return; }
-    var c = e.target.closest('[data-m]'); if (c) { S.material = c.dataset.m; S.product = c.dataset.m==='fabric' ? 'garment' : 'own'; var cm = BOOK.materials.filter(function(x){return x.key===S.material;})[0]; if (cm && S.service && cm.services.indexOf(S.service)<0) S.service = null; var mm = BOOK.materials.filter(function(x){return x.key===S.material;})[0]; if (mm && S.service && mm.services.indexOf(S.service)<0) S.service = null; renderAll(); return; }
+    var c = e.target.closest('[data-m]'); if (c) { S.material = c.dataset.m; S.product = 'own'; var cm = BOOK.materials.filter(function(x){return x.key===S.material;})[0]; if (cm && S.service && cm.services.indexOf(S.service)<0) S.service = null; var mm = BOOK.materials.filter(function(x){return x.key===S.material;})[0]; if (mm && S.service && mm.services.indexOf(S.service)<0) S.service = null; renderAll(); return; }
     var s = e.target.closest('[data-s]'); if (s && !s.disabled) { S.service = s.dataset.s; renderAll(); return; }
     var ar = e.target.closest('[data-art]'); if (ar) { S.art = ar.dataset.art; renderAll(); return; }
     var sd = e.target.closest('[data-side]'); if (sd) { S.sides = sd.dataset.side; renderAll(); return; }
