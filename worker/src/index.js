@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-02 v23"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-02 v24"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -1012,6 +1012,25 @@ async function staffRoutes(request, env, cors, path, url) {
   if (path === "/staff/logout" && request.method === "POST") { await env.DB.prepare(`DELETE FROM staff_sessions WHERE token = ?`).bind(me.token).run(); return json({ ok: true }, 200, cors); }
 
   if (path === "/staff/me") return json(await staffHome(env, me), 200, { ...cors, "Cache-Control": "no-store" });
+
+  // Receipts: every Square payment we know of (web, counter and register), newest first, printable on the Terminal.
+  if (path === "/staff/receipts") {
+    const rows = (await env.DB.prepare(`SELECT p.payment_id, p.created_at, p.amount_cents, p.refunded_cents, p.source, p.card_brand, p.ref, o.name, o.business, o.kind, o.spec, o.taken_by FROM payments p LEFT JOIN orders o ON o.ref = p.ref WHERE p.status = 'COMPLETED' ORDER BY p.created_at DESC LIMIT 80`).all()).results;
+    const list = rows.map((r) => { let what = ""; if (r.spec) { try { what = JSON.parse(r.spec).summary || ""; } catch {} } return { payment_id: r.payment_id, at: r.created_at, amount_cents: r.amount_cents, refunded_cents: r.refunded_cents || 0, source: r.source, card: r.card_brand, ref: r.ref, who: r.business || r.name || "", what, taken_by: r.taken_by }; });
+    return json({ ok: true, terminal: !!env.SQUARE_TERMINAL_DEVICE_ID, receipts: list }, 200, { ...cors, "Cache-Control": "no-store" });
+  }
+  if (path === "/staff/receipts/print" && request.method === "POST") {
+    let b; try { b = await request.json(); } catch { return json({ error: "Bad JSON" }, 400, cors); }
+    if (!env.SQUARE_TERMINAL_DEVICE_ID) return json({ error: "The Terminal isn't connected" }, 503, cors);
+    const pid = String(b.payment_id || "");
+    const p = await env.DB.prepare(`SELECT payment_id FROM payments WHERE payment_id = ? AND status = 'COMPLETED'`).bind(pid).first();
+    if (!p) return json({ error: "Unknown payment" }, 404, cors);
+    const body = { idempotency_key: `rcpt-${pid}-${Date.now()}`, action: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), type: "RECEIPT", receipt_options: { payment_id: pid, print_only: true } } };
+    const r = await squareFetch(env, "/v2/terminals/actions", { method: "POST", body: JSON.stringify(body) }); const d = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ error: squareErr(d) || "The Terminal did not take the print job. Is it on?" }, 502, cors);
+    await staffLog(env, me.id, "receipt_printed", pid);
+    return json({ ok: true, status: d.action && d.action.status }, 200, cors);
+  }
 
   if (path === "/staff/clock" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));

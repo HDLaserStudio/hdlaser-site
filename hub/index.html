@@ -57,6 +57,7 @@ main{max-width:1240px;margin:0 auto;padding:16px 32px 60px}
 .gal figure{margin:0;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .gal img{width:100%;height:200px;object-fit:cover;display:block;cursor:zoom-in}
 .gal figcaption{padding:8px 12px;font-size:14px;color:#545B63}
+.btn-sm{font:inherit;font-weight:700;font-size:14px;padding:8px 14px;border-radius:999px;border:2px solid var(--ink);background:#fff;color:var(--ink);cursor:pointer}.btn-sm:disabled{opacity:.5}.small{font-size:12px;color:#545B63}
 table{border-collapse:collapse;width:100%;font-size:15px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}th{font-size:12px;color:#545B63;text-transform:uppercase;letter-spacing:.06em}td.num,th.num{text-align:right;white-space:nowrap}
 .pcols{display:grid;grid-template-columns:1.2fr 1fr;gap:20px}
 .login{max-width:440px;margin:40px auto;background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:22px;padding:28px;box-shadow:0 10px 26px rgba(21,25,30,.08)}
@@ -124,6 +125,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
   $('#signout').onclick=function(){ api('/staff/logout',{}).catch(function(){}).then(signOut); };
 
   var I={
+    receipt:'<svg viewBox="0 0 24 24"><path d="M6 3h12v18l-2-1.5L14 21l-2-1.5L10 21l-2-1.5L6 21z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>',
     order:'<svg viewBox="0 0 24 24"><path d="M4 7h16l-1.5 11h-13z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/><path d="M9 12h6"/></svg>',
     quote:'<svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>',
     samples:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.5"/></svg>',
@@ -146,6 +148,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
       {href:'/order/?via=hub&by='+by,ic:'order',t:'New order',s:'Every job starts here: price it, preview it, charge the Terminal with your PIN. Anything it can’t price links to the quote form.',cls:'primary',tag:'start here'},
       {view:'samples',ic:'samples',t:'Samples',s:'Show what we’ve made, by category'},
       {view:'prices',ic:'prices',t:'Price list',s:'Sizes, items, quantity breaks'},
+      {view:'receipts',ic:'receipt',t:'Receipts',s:'Print any past sale on the Terminal'},
       {href:'/staff/#queue',ic:'queue',t:'Work queue',s:'What’s waiting, most urgent first'},
       {href:'/staff/#job',ic:'walkin',t:'Log a walk-in',s:'Same-day job taken at the counter'},
       {href:'/staff/',ic:'clock',t:'Clock in & checklists',s:'Opening, closing, your shift'},
@@ -181,6 +184,13 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
     var v=$('#view'); $('#home').hidden=true; v.hidden=false; window.scrollTo(0,0);
     if(name==='samples'&&!arg){ v.innerHTML='<div class="panel"><button class="back" data-home>&#8592; Hub</button><h2>Samples</h2><p style="margin:0 0 16px;color:#545B63">Tap a category. Tap a photo to fill the screen.</p><div class="cats">'+CATS.map(function(c){ return '<button type="button" class="cat" data-cat="'+c.k+'"><img src="/assets/'+c.cover+'" alt=""><i>'+c.f.length+'</i><span>'+esc(c.n)+'</span></button>'; }).join('')+'</div></div>'; return; }
     if(name==='samples'){ var c=CATS.filter(function(x){return x.k===arg;})[0]; v.innerHTML='<div class="panel"><button class="back" data-view="samples">&#8592; All categories</button><h2>'+esc(c.n)+'</h2><div class="gal">'+c.f.map(function(f){ return '<figure><img src="/assets/'+f+'.jpg" alt="'+esc(cap(f))+'" loading="lazy" data-zoom><figcaption>'+esc(cap(f))+'</figcaption></figure>'; }).join('')+'</div></div>'; return; }
+    if(name==='receipts'){ v.innerHTML='<div class="panel"><button class="back" data-home>&#8592; Hub</button><h2>Receipts</h2><p id="rnote" style="margin:0 0 14px;color:#545B63">Loading\u2026</p><div id="rlist"></div></div>';
+      api('/staff/receipts').then(function(d){
+        var money=function(c){return '$'+(c/100).toFixed(2);}, when=function(t){ return new Date(t).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); };
+        $('#rnote').textContent = d.terminal ? 'Tap Print and the Terminal prints that receipt. Newest first; web, counter and register sales.' : 'The Terminal isn\u2019t connected yet, so nothing can print.';
+        $('#rlist').innerHTML = d.receipts.length ? '<table><tr><th>When</th><th>Who</th><th>What</th><th class="num">Paid</th><th></th></tr>'+d.receipts.map(function(r){ return '<tr><td style="white-space:nowrap">'+when(r.at)+'</td><td>'+esc(r.who||'Register sale')+(r.ref?'<div class="small">'+esc(r.ref)+'</div>':'')+'</td><td>'+esc(r.what||(r.source==='CASH'?'Cash':(r.card||r.source||'')))+'</td><td class="num">'+money(r.amount_cents)+(r.refunded_cents?'<div class="small">refunded '+money(r.refunded_cents)+'</div>':'')+'</td><td><button type="button" class="btn-sm" data-print="'+esc(r.payment_id)+'"'+(d.terminal?'':' disabled')+'>Print</button></td></tr>'; }).join('')+'</table>' : '<p>No payments yet.</p>';
+      }).catch(function(e){ $('#rnote').textContent = e.message; });
+      return; }
     if(name==='prices'){ v.innerHTML='<div class="panel"><button class="back" data-home>&#8592; Hub</button><h2>Price list</h2><p id="pnote" style="margin:0 0 14px;color:#545B63">Loading…</p><div id="ptable"></div></div>';
       var render=function(b){ var cents=function(c){return '$'+(c/100).toFixed(2);};
         $('#pnote').textContent=(b.updated_at?'Prices last saved '+new Date(b.updated_at).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'. ':'These are the starting numbers from the code; nothing has been saved yet. ')+'Per piece, by the longest side of the artwork. Multiply by the material factor, then add the item if we supply it. The order page does this for you.';
@@ -193,6 +203,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
     var h=e.target.closest('[data-home]'); if(h){ $('#view').hidden=true; $('#home').hidden=false; window.scrollTo(0,0); return; }
     var c=e.target.closest('[data-cat]'); if(c){ view('samples',c.dataset.cat); return; }
     var v=e.target.closest('[data-view]'); if(v){ view(v.dataset.view); return; }
+    var pr=e.target.closest('[data-print]'); if(pr){ pr.disabled=true; pr.textContent='Printing\u2026'; api('/staff/receipts/print',{payment_id:pr.dataset.print}).then(function(){ pr.textContent='Sent'; setTimeout(function(){ pr.textContent='Print'; pr.disabled=false; },4000); }).catch(function(err){ pr.textContent=err.message; pr.disabled=false; }); return; }
   });
 
   function load(){ if(!token){ signOut(); return; }
