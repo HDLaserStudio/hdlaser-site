@@ -145,6 +145,11 @@ button[type=submit]:hover{background:var(--redd)}
     h1.textContent = 'You’re in. Order ' + ref + ' is confirmed.';
     lead.textContent = qs.get('counter') === '1' ? 'Paid at the counter. Your proof is next; your receipt is on its way from Square.' : custom ? 'Payment received. Your proof is next, and your receipt from Square is on its way to your inbox.' : 'Payment received. Two quick things below and we’ll get your proof started. Your receipt from Square is on its way to your inbox.';
     document.getElementById('paid').hidden = false;
+    if (qs.get('counter') === '1' && (window.HD_CONFIG || {}).WORKER_BASE) {
+      var pb = document.createElement('button'); pb.type = 'button'; pb.textContent = 'Print receipt on the Terminal'; pb.style.cssText = 'font:inherit;font-weight:700;padding:12px 22px;border-radius:999px;border:2px solid #15191E;background:#fff;cursor:pointer;margin:12px 0 0';
+      pb.onclick = function(){ pb.disabled = true; pb.textContent = 'Printing\u2026'; fetch(HD_CONFIG.WORKER_BASE + '/order/terminal/receipt', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ref: ref }) }).then(function(r){ return r.json(); }).then(function(d){ pb.textContent = d && d.ok ? 'Sent to the Terminal' : ((d && d.error) || 'Could not print'); if (!(d && d.ok)) pb.disabled = false; }).catch(function(){ pb.textContent = 'Could not reach the shop server'; pb.disabled = false; }); };
+      lead.insertAdjacentElement('afterend', pb);
+    }
     if (window.hdTrack) hdTrack('paid_return', ref);
   } else if (qs.get('pay') === 'later') {
     h1.textContent = 'Thanks. Order ' + ref + ' is in.';

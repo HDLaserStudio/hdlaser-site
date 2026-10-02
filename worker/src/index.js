@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-02 v22"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-02 v23"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -115,6 +115,7 @@ export default {
       if (path === "/order/checkout" && request.method === "POST") return requireOrigin(cors) || orderCheckout(request, env, cors);
       if (path === "/order/terminal/status") return requireOrigin(cors) || terminalStatus(env, url.searchParams.get("ref"), url.searchParams.get("id"), cors);
       if (path === "/order/terminal/cancel" && request.method === "POST") return requireOrigin(cors) || terminalCancel(request, env, cors);
+      if (path === "/order/terminal/receipt" && request.method === "POST") return requireOrigin(cors) || terminalReceipt(request, env, cors);
       // ---- Boards n' Beans coffee counter (order ahead, pay through Square, the bar gets a text) ----
       if (path === "/coffee/menu") return json({ menu: COFFEE.menu, milks: COFFEE.milks, extras: COFFEE.extras, shop: COFFEE.shop }, 200, { ...cors, "Cache-Control": "public, max-age=300" });
       if (path === "/coffee/checkout" && request.method === "POST") return requireOrigin(cors) || coffeeCheckout(request, env, cors);
@@ -2417,6 +2418,18 @@ async function terminalStatus(env, ref, id, cors) {
   const after = await env.DB.prepare(`SELECT status FROM orders WHERE ref = ?`).bind(ref).first();
   return json({ ok: true, status: d.checkout.status, cancel_reason: d.checkout.cancel_reason || null, order: after.status }, 200, { ...cors, "Cache-Control": "no-store" });
 }
+// Print the receipt for a paid counter order on the Terminal's own printer (a Terminal "RECEIPT" action).
+async function terminalReceipt(request, env, cors) {
+  let b; try { b = await request.json(); } catch { return json({ error: "Bad JSON" }, 400, cors); }
+  if (!env.DB || !env.SQUARE_TERMINAL_DEVICE_ID) return json({ error: "Terminal not set up" }, 503, cors);
+  const o = await env.DB.prepare(`SELECT ref, square_payment_id, paid_at FROM orders WHERE ref = ? AND terminal_checkout_id IS NOT NULL AND status = 'paid'`).bind(String(b.ref || "")).first();
+  if (!o || !o.square_payment_id) return json({ error: "No paid counter order with that number" }, 404, cors);
+  if (Date.now() - Date.parse(o.paid_at || 0) > 24 * 3600000) return json({ error: "Receipts print from the Terminal for 24 hours after payment; after that use Square's dashboard" }, 400, cors);
+  const body = { idempotency_key: `${o.ref}-r-${Date.now()}`, action: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), type: "RECEIPT", receipt_options: { payment_id: o.square_payment_id, print_only: true } } };
+  const r = await squareFetch(env, "/v2/terminals/actions", { method: "POST", body: JSON.stringify(body) }); const d = await r.json().catch(() => ({}));
+  if (!r.ok) return json({ error: squareErr(d) || "The Terminal did not take the print job" }, 502, cors);
+  return json({ ok: true, status: d.action && d.action.status }, 200, cors);
+}
 async function terminalCancel(request, env, cors) {
   let b; try { b = await request.json(); } catch { return json({ error: "Bad JSON" }, 400, cors); }
   const o = env.DB ? await env.DB.prepare(`SELECT ref FROM orders WHERE ref = ? AND terminal_checkout_id = ?`).bind(String(b.ref || ""), String(b.id || "")).first() : null;
@@ -2482,11 +2495,15 @@ async function orderCheckout(request, env, cors) {
   let linkOk = false, data = {}, terminal = null;
   if (payHow === "terminal" && env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
     // the Square Terminal on the counter shows the amount; the customer taps there. Completion arrives by webhook or the page's status poll.
-    const tc = { idempotency_key: `${ref}-t-${Date.now()}`, checkout: { amount_money: { amount: total, currency: "USD" }, reference_id: ref, note: `hdlaser.net ${ref}: ${q.summary}`.slice(0, 250), payment_type: "CARD_PRESENT",
+    let sqOrderId = null;
+    const or = await squareFetch(env, "/v2/orders", { method: "POST", body: JSON.stringify({ idempotency_key: `${ref}-o-${Date.now()}`, order }) });
+    const od = await or.json().catch(() => ({}));
+    if (or.ok && od.order) sqOrderId = od.order.id; else console.error("Square order error", or.status, JSON.stringify(od).slice(0, 400));
+    const tc = { idempotency_key: `${ref}-t-${Date.now()}`, checkout: { amount_money: { amount: total, currency: "USD" }, reference_id: ref, order_id: sqOrderId || undefined, note: `hdlaser.net ${ref}: ${q.summary}`.slice(0, 250), payment_type: "CARD_PRESENT",
       device_options: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), skip_receipt_screen: false, collect_signature: false, tip_settings: { allow_tipping: false } } } };
     const res = await squareFetch(env, "/v2/terminals/checkouts", { method: "POST", body: JSON.stringify(tc) });
     data = await res.json().catch(() => ({}));
-    if (res.ok && data.checkout) terminal = { id: data.checkout.id, status: data.checkout.status };
+    if (res.ok && data.checkout) terminal = { id: data.checkout.id, status: data.checkout.status, order_id: sqOrderId };
     else { console.error("Terminal error", res.status, JSON.stringify(data).slice(0, 600)); return json({ error: "The Terminal didn't answer: " + (squareErr(data) || res.status) + ". Is it on and online?" }, 502, cors); }
   } else if (env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
     const payload = { idempotency_key: `${ref}-${Date.now()}`, order,
@@ -2505,7 +2522,7 @@ async function orderCheckout(request, env, cors) {
     await env.DB.batch([
       env.DB.prepare(`INSERT OR REPLACE INTO orders (ref, created_at, status, business, name, email, phone, notes, text_consent, cups, base_price_cents, cups_subtotal_cents, setup_fee_cents, total_cents, deposit_percent, square_order_id, kind, spec, needed_by, rush, taken_by, tax_cents, tax_invoiced_at, attest_initials, attest_text, attest_at, attest_ip, attest_ua, attest_hash, logo_asset_id)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, linkOk || terminal ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
-        null, q.work_unit_cents, q.subtotal_cents - q.setup_cents, q.setup_cents, total, 100, linkOk ? (data.payment_link.order_id || null) : null, "custom", JSON.stringify(spec), neededBy, q.rush ? 1 : 0, takenBy, tax, tax ? now : null, initials, text, now, ip, ua, hash, assetId),
+        null, q.work_unit_cents, q.subtotal_cents - q.setup_cents, q.setup_cents, total, 100, terminal ? terminal.order_id : linkOk ? (data.payment_link.order_id || null) : null, "custom", JSON.stringify(spec), neededBy, q.rush ? 1 : 0, takenBy, tax, tax ? now : null, initials, text, now, ip, ua, hash, assetId),
       env.DB.prepare(`UPDATE orders SET taken_by_id = ?, terminal_checkout_id = ? WHERE ref = ?`).bind(takenById, terminal ? terminal.id : null, ref),
       env.DB.prepare(`DELETE FROM order_items WHERE ref = ?`).bind(ref),
       env.DB.prepare(`INSERT INTO order_items (ref, product, material, service, inches, qty, work_unit_cents, blank_unit_cents, discount_pct, line_cents) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(ref, q.product.key, q.material.key, q.service.key, q.inches, q.qty, q.work_unit_after_cents, q.blank_unit_cents, q.discount_pct, q.work_cents + q.blank_cents + q.handling_cents),

@@ -94,6 +94,8 @@ Setup, once:
 3. Square Developer → the app → Webhooks → add the events `terminal.checkout.created` and `terminal.checkout.updated` to the existing subscription (same URL, `/webhooks/square`). The page's polling works without this; the webhook is the backstop if the iPad closes mid-tap.
 4. The access token needs the `PAYMENTS_WRITE` permission (it already has it for payment links).
 
+**Receipts.** The Terminal checkout is created against a Square Order carrying the line items and tax, so the receipt the Terminal offers after the tap (print, email or text; `skip_receipt_screen` is off) is itemized. The thank-you page for counter orders has a "Print receipt on the Terminal" button that sends a RECEIPT action to the Terminal (24 hours after payment). On the Terminal itself, Settings → Receipts can auto-print a copy after every sale.
+
 A Terminal checkout needs an employee PIN; the online card button in counter mode accepts a PIN too so the sale is credited either way.
 
 ## Custom price (hdlaser.net/custom)
