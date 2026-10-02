@@ -1,10 +1,10 @@
 /* Section editor for /marisa/. Loads only when the page URL ends in ?edit.
    Click Edit on a section, change the text in place, click Save. Save commits
-   the page to GitHub (jake-hess/hdlaser-site, main) and Pages republishes it
+   the page to GitHub (hdlaserstudio/hdlaser-site, main) and Pages republishes it
    within about a minute. A GitHub fine-grained token with Contents: read/write
    on this repo is asked for once and kept in this browser's localStorage. */
 (function () {
-  var OWNER = 'jake-hess', REPO = 'hdlaser-site', PATH = 'marisa/index.html', BRANCH = 'main';
+  var OWNER = 'hdlaserstudio', REPO = 'hdlaser-site', PATH = 'marisa/index.html', BRANCH = 'main';
   var TOKEN_KEY = 'hdlaser.marisa.ghtoken';
   var API = 'https://api.github.com/repos/' + OWNER + '/' + REPO + '/contents/' + PATH;
 

@@ -10,10 +10,12 @@ Read this first. It is the state of everything built for HD Laser Studio (Hugh D
 
 ## The two repositories
 
+Both were transferred from Jake's GitHub (jake-hess) to Hugh's (**hdlaserstudio**) on October 2, 2026, because Hugh owns the business. Old links redirect, but use the new ones. The `www` CNAME at GoDaddy must point to `hdlaserstudio.github.io`.
+
 | Repo | Branch | What it holds |
 |---|---|---|
-| `jake-hess/hdlaser-site` | `main` | The whole website (GitHub Pages at hdlaser.net) and the Cloudflare Worker in `worker/`. Push to main deploys the site in about two minutes. |
-| `jake-hess/hdlaser2` | `claude/great-dirac-7s9id5` | Reference PDFs and the price workbook in `print/`, nothing live. |
+| `hdlaserstudio/hdlaser-site` | `main` | The whole website (GitHub Pages at hdlaser.net) and the Cloudflare Worker in `worker/`. Push to main deploys the site in about two minutes. |
+| `hdlaserstudio/hdlaser2` | `claude/great-dirac-7s9id5` | Reference PDFs and the price workbook in `print/`, nothing live. |
 
 Commit as `git -c user.name="jake-hess" -c user.email="jakehessplans@gmail.com"`. Never put a model name in repo content. Never put a secret in chat or in the repo.
 
@@ -25,7 +27,7 @@ Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index
 
 Hugh or Jake pastes the file by hand. Give them these three links every time:
 
-1. Copy: `https://raw.githubusercontent.com/jake-hess/hdlaser-site/main/worker/src/index.js` (Shift+Cmd+R first, then Cmd+A, Cmd+C).
+1. Copy: `https://raw.githubusercontent.com/hdlaserstudio/hdlaser-site/main/worker/src/index.js` (Shift+Cmd+R first, then Cmd+A, Cmd+C).
 2. Paste and Deploy: `https://dash.cloudflare.com/eb1619b6420b76958b65758160575437/workers/services/edit/hdlaser-checkout/production` (Edit code, click in editor, Cmd+A, Cmd+V, Deploy). "Error 1031" in the preview pane and "50 errors" in the editor are harmless.
 3. Check: `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev/health`.
 
