@@ -63,6 +63,7 @@ h1{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:44px;li
 .readout small{font-size:16px;color:var(--muted);font-family:Figtree,sans-serif;font-weight:500;display:block;margin-top:4px}
 input[type=range]{flex:1 1 220px;accent-color:var(--red);height:40px}
 .nudge{margin:10px 0 0;font-size:14px;color:var(--muted)}
+.qcalc{margin:12px 0 0;font-size:18px}.qcalc:empty{display:none}.qcalc b{font-size:22px}.qcalc small{display:block;font-size:14px;color:var(--muted);margin-top:2px}
 .nudge b{color:var(--ink)}
 .qty{display:flex;align-items:center;gap:0;border:2px solid var(--line);border-radius:999px;overflow:hidden;width:max-content}
 .qty button{width:50px;height:50px;border:0;background:#fff;font-size:24px;cursor:pointer;color:var(--ink)}
@@ -168,6 +169,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     <h2><span class="n">4</span>How many?</h2>
     <p class="sub">Every piece gets the same artwork. Names or numbers that change piece to piece? Mention it in the notes.</p>
     <div class="qty"><button type="button" id="minus" aria-label="Fewer">&#8722;</button><input type="number" id="qty" min="1" max="500" value="1" inputmode="numeric" aria-label="Quantity"><button type="button" id="plus" aria-label="More">+</button></div>
+    <p class="qcalc" id="qcalc"></p>
     <p class="nudge" id="qnudge"></p>
     <div id="ovwrap" hidden style="margin-top:16px;padding:14px 16px;border:2px dashed var(--ink);border-radius:14px;background:#fff">
       <label class="check" style="background:transparent;border:0;padding:0"><input type="checkbox" id="ovon"><span><b>Set the price myself</b> <small style="color:var(--muted)">(counter only, needs a manager or owner PIN)</small></span></label>
@@ -360,7 +362,15 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     else if (q) { $('#ppu').textContent = money(q.workUnit)+' per piece for the work'; var tq = BOOK.text_only_own_min_qty||1; var textTip = S.art==='text' && (S.product==='own'||S.product==='garment') && S.service!=='dtf' && S.qty<tq && (BOOK.text_only_own_cents||0)>0 ? ' Bringing '+tq+' or more items with text only? It\u2019s '+money(BOOK.text_only_own_cents)+' each, any size.' : ''; var up = S.inches+0.5<=max ? unitFor(S.product, S.material, S.service, S.inches+0.5) : null; $('#nudge').innerHTML = (up!=null ? 'Half an inch bigger is <b>'+money(up-q.workUnit)+' more</b> per piece. Bigger reads better from across the room.' : 'That is as big as this item takes. Need larger? <a href="/quote/">Ask for a quote.</a>') + textTip; }
     else { $('#ppu').textContent = ''; $('#nudge').textContent = p && m && !S.service ? 'Pick engraving or printing to see the price.' : ''; }
   }
-  function renderQty(){ $('#qty').value = S.qty; var q = quote(); $('#qnudge').innerHTML = q ? (q.over ? '<b style="color:var(--redd)">More than '+q.over+'? We price that by hand.</b> <a href="/quote/">Ask for a quote</a> and we\u2019ll do better than the list.' : (q.flatOff ? '<b>'+money(q.flatOff)+' off each</b> at this quantity.' : q.off ? '<b>'+q.off+'% off the work</b> at this quantity.' : '') + (q.next ? (q.off||q.flatOff?' ':'')+'Order <b>'+q.next.min+' or more</b> and '+(q.next.off_cents ? 'it\u2019s '+money(q.next.off_cents)+' off each.' : 'the work is '+q.next.off_pct+'% off.') : '')+(q.product.max_qty && !q.over ? ' Up to '+q.product.max_qty+' here; more than that, <a href="/quote/">ask for a quote</a>.' : '')) : ''; }
+  function renderQtyMath(){ // step 4: price per piece times how many, so the quantity's effect is plain
+    var q = priced(), el = $('#qcalc');
+    if (!q || q.ovBad || q.over) { el.innerHTML = ''; return; }
+    var each = q.ov ? q.ov.unit : q.workAfter*q.prints + q.blankUnit + q.handUnit;
+    var parts = q.ov ? ['price set at the counter'] : [q.blankUnit ? money(q.blankUnit)+' item' : '', money(q.workAfter*q.prints)+' '+lcName(q.service.name)+(q.prints>1?' ('+q.prints+' prints)':''), q.handUnit ? money(q.handUnit)+' handling' : ''].filter(Boolean);
+    var extra = !q.ov && (q.setup || q.rush || q.top) ? ' Setup, rush or the shop minimum are added in Your price.' : '';
+    el.innerHTML = q.qty+' \u00d7 '+money(each)+' = <b>'+money(each*q.qty)+'</b><small>Each piece: '+parts.join(' + ')+(q.taxable ? '. Before sales tax.' : '.')+extra+'</small>';
+  }
+  function renderQty(){ $('#qty').value = S.qty; renderQtyMath(); var q = quote(); $('#qnudge').innerHTML = q ? (q.over ? '<b style="color:var(--redd)">More than '+q.over+'? We price that by hand.</b> <a href="/quote/">Ask for a quote</a> and we\u2019ll do better than the list.' : (q.flatOff ? '<b>'+money(q.flatOff)+' off each</b> at this quantity.' : q.off ? '<b>'+q.off+'% off the work</b> at this quantity.' : '') + (q.next ? (q.off||q.flatOff?' ':'')+'Order <b>'+q.next.min+' or more</b> and '+(q.next.off_cents ? 'it\u2019s '+money(q.next.off_cents)+' off each.' : 'the work is '+q.next.off_pct+'% off.') : '')+(q.product.max_qty && !q.over ? ' Up to '+q.product.max_qty+' here; more than that, <a href="/quote/">ask for a quote</a>.' : '')) : ''; }
   function renderPreview(){
     var p = BOOK.products.filter(function(x){return x.key===S.product;})[0]; var box = $('#preview');
     if (!p) { box.querySelector('svg').outerHTML = shapeSvg(BOOK.products[0], SAMPLE, 2, 'engrave'); $('#cap').innerHTML = 'Pick an item to see the preview.'; return; }
@@ -453,8 +463,8 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   $('#qty').addEventListener('blur', function(){ this.value = S.qty; });
   $('#rush').addEventListener('change', function(){ S.rush = this.checked; renderAll(); });
   $('#ovon').addEventListener('change', function(){ $('#ovbox').hidden = !this.checked; if (this.checked) $('#ovprice').focus(); renderAll(); });
-  $('#ovprice').addEventListener('input', function(){ renderSummary(); renderWords(); });
-  $('#ovspots').addEventListener('input', function(){ renderSummary(); renderWords(); });
+  $('#ovprice').addEventListener('input', function(){ renderQtyMath(); renderSummary(); renderWords(); });
+  $('#ovspots').addEventListener('input', function(){ renderQtyMath(); renderSummary(); renderWords(); });
   $('#name').addEventListener('input', function(){ renderWords(); renderInitials(); });
   $('#initials').addEventListener('input', renderInitials);
   $('#arttext').addEventListener('input', function(){ S.text = this.value; renderSummary(); renderWords(); });

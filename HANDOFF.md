@@ -21,7 +21,7 @@ Commit as `git -c user.name="jake-hess" -c user.email="jakehessplans@gmail.com"`
 
 ## Architecture in one paragraph
 
-Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v27** (Oct 3: $25 text-only needs 2+ items). Deployed in Cloudflare: **v25** (confirmed Oct 2; v26 and v27 pending).
+Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v27** (Oct 3: $25 text-only needs 2+ items). Deployed in Cloudflare: **v27** (confirmed Oct 3).
 
 ## How the worker gets deployed (nobody automates this yet)
 
@@ -31,7 +31,7 @@ Hugh or Jake pastes the file by hand. Give them these three links every time:
 2. Paste and Deploy: `https://dash.cloudflare.com/eb1619b6420b76958b65758160575437/workers/services/edit/hdlaser-checkout/production` (Edit code, click in editor, Cmd+A, Cmd+V, Deploy). "Error 1031" in the preview pane and "50 errors" in the editor are harmless.
 3. Check: `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev/health`.
 
-After a change to `DEFAULT_BOOK`, Hugh also presses **Load the starting numbers from the code** on `/admin/money` (admin password = ADMIN_KEY), otherwise his saved prices keep winning. Jake's decision: the code's starting numbers are the master copy of pricing.
+After a change to `DEFAULT_BOOK`, Hugh also presses **Load the price list from the code** on `/admin/money` (bottom of the page, under Price list, in the Pricing review box) (admin password = ADMIN_KEY), otherwise his saved prices keep winning. Jake's decision: the code's starting numbers are the master copy of pricing.
 
 ## Pages and what they do
 
@@ -43,7 +43,7 @@ Public: `/` home (engraving, UV, DTF, cutting sections), `/order/` the single or
 2. How should we put it on? Laser engraving, UV printing, DTF printing, Laser cutting. Greyed out when the material or item doesn't allow it.
    - Garments: front, back, or both (both = two prints). Cutting: simple / detailed / intricate.
 3. Size slider: longest side, to 12 in (28 in for cutting).
-4. Quantity.
+4. Quantity. Shows the math under the counter: qty x price per piece = total, with what each piece is made of (Oct 3).
 5. Artwork: new logo (setup applies if any), text only (no setup), logo on file (no setup).
 6. Needed by and rush.
 7. Contact, terms box, text-message consent box.
@@ -96,10 +96,10 @@ The container cannot reach hdlaser.net or workers.dev. Test the worker by import
 
 1. ~~Deploy v25 and check hub Receipts~~ done Oct 2.
 2. ~~The live $25 Terminal test, refunded~~ done Oct 2.
-3. Deploy v27 (source tracking from v26, plus the 2-item rule for $25 text only). Then press "Load the starting numbers" on `/admin/money`, then put the tagged links on the Google Business Profile.
+3. v27 deployed Oct 3. Confirm Hugh pressed "Load the price list from the code" so the 2-item rule is in his saved book, then put the tagged links on the Google Business Profile.
 4. Hugh confirms the holiday packages and the order-by date; then remove noindex from `/holiday/`, link it from the home page, add it to `sitemap.xml`, and email past business customers.
 5. Add `terminal.checkout.updated` to the Square webhook subscription.
-6. Press "Load the starting numbers" after any pricing change so Hugh's saved book matches the code.
+6. Press "Load the price list from the code" after any pricing change so Hugh's saved book matches the code.
 7. Twilio and Apple decisions arrive by email; forward to the session.
 8. Google Business Profile photos, order link, first post; Search Console indexing.
 9. Compare Square charges to the price matrix once Jake sends the Items Detail CSV export (Transactions, Export).
