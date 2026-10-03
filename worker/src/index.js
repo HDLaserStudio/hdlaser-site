@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-03 v27"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-03 v28"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2360,6 +2360,9 @@ const DEFAULT_BOOK = {
   // Hugh, Oct 3 2026: "there is no $25 price unless somebody brings multiple items, otherwise pricing always starts from $35".
   // So the $25 text-only price needs at least this many items; one item is priced on the normal ladder ($35 up to 2 in, then by size).
   text_only_own_min_qty: 2,
+  // Hugh, Oct 3 2026: one big item was $199 but two dropped to $50 total. The $25 is for small text only; above this size
+  // every item is priced by size, so a second item never costs less than the first.
+  text_only_own_max_inches: 2,
 };
 function ladderPrices(l, steps) { const out = []; let p = l.start_cents, climbs = 0; const flat = Math.round((l.flat_to_inches || 0) * 2); for (let i = 0; i < steps; i++) { out.push(Math.round(p / 25) * 25); if (i + 1 >= flat) { p += l.first_gap_cents + climbs * l.gap_growth_cents; climbs++; } } return out; }
 function buildSizes(book) { const n = Math.round(book.max_inches / 0.5); const cols = Object.fromEntries(Object.entries(book.ladders).map(([k, l]) => [k, ladderPrices(l, n)])); return Array.from({ length: n }, (_, i) => { const row = { inches: (i + 1) / 2 }; for (const k of Object.keys(cols)) row[k + "_cents"] = cols[k][i]; return row; }); }
@@ -2376,7 +2379,7 @@ async function priceBook(env) {
   for (const d of DEFAULT_BOOK.products) { const p = book.products.find((x) => x.key === d.key); if (p && d.services && !p.services) p.services = [...d.services]; if (p && ["own", "woodblank", "acrylicblank"].includes(d.key) && (p.max_inches || 0) < d.max_inches) { p.max_inches = d.max_inches; p.w_in = d.w_in; p.h_in = d.h_in; } }
   for (const d of DEFAULT_BOOK.services) { const v = book.services.find((x) => x.key === d.key); if (v && v.max_inches == null) v.max_inches = d.max_inches; }
   if (!book.cut_detail) book.cut_detail = JSON.parse(JSON.stringify(DEFAULT_BOOK.cut_detail));
-  book.ladders = { ...DEFAULT_BOOK.ladders, ...(s.ladders || {}) }; book.max_inches = Math.max(book.max_inches || 0, DEFAULT_BOOK.max_inches); if (book.text_only_own_cents == null) book.text_only_own_cents = DEFAULT_BOOK.text_only_own_cents; if (book.text_only_own_min_qty == null) book.text_only_own_min_qty = DEFAULT_BOOK.text_only_own_min_qty;
+  book.ladders = { ...DEFAULT_BOOK.ladders, ...(s.ladders || {}) }; book.max_inches = Math.max(book.max_inches || 0, DEFAULT_BOOK.max_inches); if (book.text_only_own_cents == null) book.text_only_own_cents = DEFAULT_BOOK.text_only_own_cents; if (book.text_only_own_min_qty == null) book.text_only_own_min_qty = DEFAULT_BOOK.text_only_own_min_qty; if (book.text_only_own_max_inches == null) book.text_only_own_max_inches = DEFAULT_BOOK.text_only_own_max_inches;
   if (!Array.isArray(book.sizes)) book.sizes = [];
   const fresh = buildSizes(book);
   for (const f of fresh) { let row = book.sizes.find((x) => x.inches === f.inches); if (!row) { row = { inches: f.inches }; book.sizes.push(row); } for (const svc of book.services) { const c = svc.key + "_cents"; if (row[c] == null) row[c] = f[c]; } }
@@ -2414,7 +2417,7 @@ function quoteSpec(book, spec) {
   if (art === "file" && !artRef) return { error: "Tell us which logo: your business name or a past order number" };
   const size = book.sizes.find((s) => s.inches === inches);
   if (!size) return { error: "Size not on the price list" };
-  const flatText = art === "text" && OWN_ITEM_KEYS.includes(product.key) && service.key !== "dtf" && book.text_only_own_cents > 0 && qty >= (book.text_only_own_min_qty || 1); // plain text on 2+ of their own items: one flat price, any size
+  const flatText = art === "text" && OWN_ITEM_KEYS.includes(product.key) && service.key !== "dtf" && book.text_only_own_cents > 0 && qty >= (book.text_only_own_min_qty || 1) && inches <= (book.text_only_own_max_inches || 99); // plain small text on 2+ of their own items: one flat price; any size
   const detail = service.key === "cut" ? ((book.cut_detail || []).find((d) => d.key === String(spec.detail)) || (book.cut_detail || [])[0] || { key: "simple", name: "Simple outline", factor: 1 }) : null;
   const flatWork = product.flat_work && product.flat_work[service.key] != null ? product.flat_work[service.key] : null; // items with one work price whatever the artwork size
   const workUnit = flatText ? book.text_only_own_cents : flatWork != null ? flatWork : r25(size[service.key + "_cents"] * material.factor * (detail ? detail.factor : 1));

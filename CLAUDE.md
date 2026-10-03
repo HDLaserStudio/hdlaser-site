@@ -21,7 +21,7 @@ Commit as `git -c user.name="jake-hess" -c user.email="jakehessplans@gmail.com"`
 
 ## Architecture in one paragraph
 
-Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v27** (Oct 3: $25 text-only needs 2+ items). Deployed in Cloudflare: **v27** (confirmed Oct 3).
+Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v28** (Oct 3: $25 text-only only up to 2 in). Deployed in Cloudflare: **v27** (confirmed Oct 3; v28 pending).
 
 ## How the worker gets deployed (nobody automates this yet)
 
@@ -53,7 +53,7 @@ Public: `/` home (engraving, UV, DTF, cutting sections), `/order/` the single or
 ## Pricing rules Hugh has given (also in worker/PRICING-RULES.md)
 
 - Anything up to 2 in: $35 engraving, $40 UV, all in. Setup 0. Material factors 1.
-- Text only on the customer's own item (engraving or UV): $25 each, any size, **only when they bring 2 or more items** (Hugh, Oct 3; `text_only_own_min_qty`). One item starts at $35 and follows the ladder.
+- Text only on the customer's own item (engraving or UV): $25 each, any size, **only when they bring 2 or more items and the text is up to 2 in** (Hugh, Oct 3; `text_only_own_min_qty`, `text_only_own_max_inches`). One item, or text over 2 in, is priced by size on the ladder, so a second item never costs less than the first.
 - Customer's own item: no sales tax. Shop-supplied item: 7.75% tax. `TAX_OWN_ITEMS=1` in Cloudflare turns tax on for own items if the accountant says so (open question, flagged to Jake).
 - Engraving ladder above 2 in: $2 per half inch growing 10 cents (9 in = $72, 12 in = $94). UV: $3.50 per half inch growing 50 cents.
 - Cutting: bed is 15 x 28 in. $35 to 2 in, straight line to $100 at 28 in for a simple outline; detailed x1.5, intricate x2.
@@ -96,7 +96,7 @@ The container cannot reach hdlaser.net or workers.dev. Test the worker by import
 
 1. ~~Deploy v25 and check hub Receipts~~ done Oct 2.
 2. ~~The live $25 Terminal test, refunded~~ done Oct 2.
-3. v27 deployed Oct 3. Confirm Hugh pressed "Load the price list from the code" so the 2-item rule is in his saved book, then put the tagged links on the Google Business Profile.
+3. Deploy v28. **Do not press "Load the price list from the code"**: Hugh's saved price list has hand-set prices (12 in engraving $199 vs $94 in the code) and he says his are correct. Get a screenshot of `/admin/prices`, copy his numbers into `DEFAULT_BOOK`, and only then is Load safe. New book keys fill in from the code automatically without Load. Then put the tagged links on the Google Business Profile.
 4. Hugh confirms the holiday packages and the order-by date; then remove noindex from `/holiday/`, link it from the home page, add it to `sitemap.xml`, and email past business customers.
 5. Add `terminal.checkout.updated` to the Square webhook subscription.
 6. Press "Load the price list from the code" after any pricing change so Hugh's saved book matches the code.
