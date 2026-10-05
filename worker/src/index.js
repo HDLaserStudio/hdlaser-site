@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-05 v31"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-05 v32"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -1177,8 +1177,15 @@ async function staffRoutes(request, env, cors, path, url) {
 }
 function pub(p) { return { id: p.id, name: p.name, role: p.role, phone: p.phone || "", email: p.email || "", on_call: !!p.on_call, active: p.active !== 0, hourly_rate_cents: p.hourly_rate_cents || 0, commission_pct: p.commission_pct || 0, sms_consent_at: p.sms_consent_at || null }; }
 
+// At checkout a PIN alone says who took the sale, so no two active people may share one.
+async function pinTaken(env, pin, exceptId) {
+  for (const s of (await env.DB.prepare(`SELECT id, pin_salt, pin_hash FROM staff WHERE active = 1 AND pin_hash IS NOT NULL AND id != ?`).bind(+exceptId || 0).all()).results)
+    if (timingSafeEqual(await pbkdf(String(pin), s.pin_salt), s.pin_hash)) return true;
+  return false;
+}
 async function upsertStaff(env, b) {
   const name = String(b.name || "").trim().slice(0, 60);
+  if (b.pin && /^\d{4,8}$/.test(String(b.pin)) && await pinTaken(env, b.pin, b.id)) return { ok: false, error: "Someone else on the team already uses that PIN. Pick a different one." };
   const role = ["staff", "manager", "owner"].includes(b.role) ? b.role : "staff";
   if (b.id) {
     const sets = [], args = [];
@@ -2482,12 +2489,19 @@ function customQuote(book, spec) {
     work_unit_cents: unit, work_unit_after_cents: unit, discount_pct: 0, discount_cents: 0, blank_unit_cents: 0, handling_unit_cents: 0, work_cents: work, blank_cents: 0, handling_cents: 0, rush_cents: 0, setup_cents: 0, minimum_top_up_cents: 0, subtotal_cents: work, next_break: null,
     summary: `${qty} × custom: ${description}${taxable ? " (we supply the item)" : ""}` };
 }
+// The PIN says who took the sale. The named person is tried first; if it isn't their PIN, any active employee whose
+// PIN it is takes the sale (Hugh, Oct 5: whoever served the customer types their own PIN, whoever is signed in).
 async function verifyStaff(env, name, pin) {
   name = String(name || "").trim(); pin = String(pin || "").trim();
-  if (!env.DB || !name || !/^\d{4,8}$/.test(pin)) return null;
-  const p = await env.DB.prepare(`SELECT * FROM staff WHERE lower(name) = lower(?) AND active = 1`).bind(name).first();
-  if (!p || !p.pin_hash || !timingSafeEqual(await pbkdf(pin, p.pin_salt), p.pin_hash)) { await staffLog(env, p && p.id, "pin_failed", "checkout"); return null; }
-  return p;
+  if (!env.DB || !/^\d{4,8}$/.test(pin)) return null;
+  const p = name ? await env.DB.prepare(`SELECT * FROM staff WHERE lower(name) = lower(?) AND active = 1`).bind(name).first() : null;
+  if (p && p.pin_hash && timingSafeEqual(await pbkdf(pin, p.pin_salt), p.pin_hash)) return p;
+  const matches = [];
+  for (const s of (await env.DB.prepare(`SELECT * FROM staff WHERE active = 1 AND pin_hash IS NOT NULL`).all()).results)
+    if (timingSafeEqual(await pbkdf(pin, s.pin_salt), s.pin_hash)) matches.push(s);
+  if (matches.length === 1) return matches[0];
+  await staffLog(env, p && p.id, "pin_failed", matches.length > 1 ? "checkout: PIN shared by " + matches.length + " people" : "checkout");
+  return null;
 }
 // A Terminal checkout finished (webhook or poll): mark the order paid and record the payment so the dashboards see it.
 async function terminalUpdate(env, ck) {
@@ -2572,7 +2586,7 @@ async function orderCheckout(request, env, cors) {
     // counter orders: the employee taking the order proves it with their PIN, so every sale is credited to a person
     if (rateLimited("pin:" + ip, 12, 600000)) return json({ error: "Too many PIN attempts. Wait 10 minutes." }, 429, cors);
     const who = await verifyStaff(env, b.staff.name, b.staff.pin);
-    if (!who) return json({ error: "Employee name or PIN doesn't match" }, 401, cors);
+    if (!who) return json({ error: "That PIN doesn't match anyone on the team. Try again." }, 401, cors);
     takenBy = who.name; takenById = who.id;
     if (q.custom && ROLE_RANK[who.role] < 2) return json({ error: "A manager or owner PIN is needed for a custom price" }, 403, cors);
   }
