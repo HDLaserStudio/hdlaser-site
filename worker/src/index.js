@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-03 v28"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-05 v29"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -385,6 +385,7 @@ async function submitInquiry(request, env, cors) {
 async function sendEmail(env, { to, subject, text, html, replyTo }) {
   if (!env.RESEND_API_KEY) return { ok: false, error: "RESEND_API_KEY not set" };
   const from = env.FROM_EMAIL || `HD Laser Studio <contact@hdlaser.net>`;
+  if (!to || (Array.isArray(to) && !to.filter(Boolean).length)) return { ok: false, error: "No email address" }; // counter orders may have no customer email
   const body = { from, to: Array.isArray(to) ? to : [to], subject, text };
   if (html) body.html = html;
   // Replies always land in a real inbox: the customer's address when we're emailing the shop, otherwise contact@.
@@ -2526,7 +2527,9 @@ async function orderCheckout(request, env, cors) {
   if (q.error) return json({ error: q.error }, 400, cors);
   const c = b.customer || {};
   const email = String(c.email || "").trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Valid email required" }, 400, cors);
+  // at the counter (employee PIN, checked below) the customer may give just a name; online, an email is required
+  const counter = !!(b.staff && b.staff.pin);
+  if (email ? !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) : !counter) return json({ error: "Valid email required" }, 400, cors);
   const name = String(c.name || "").trim().slice(0, 80);
   if (name.length < 2) return json({ error: "Your name is required" }, 400, cors);
   if (!c.agreed) return json({ error: "Terms must be accepted" }, 400, cors);
@@ -2588,7 +2591,7 @@ async function orderCheckout(request, env, cors) {
   } else if (env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
     const payload = { idempotency_key: `${ref}-${Date.now()}`, order,
       checkout_options: { redirect_url: `${env.SITE_URL}/thanks/?paid=1&kind=custom&ref=${encodeURIComponent(ref)}${logo ? "&logo=1" : ""}`, ask_for_shipping_address: false, merchant_support_email: env.SUPPORT_EMAIL, allow_tipping: false },
-      pre_populated_data: { buyer_email: email, buyer_phone_number: e164(c.phone) },
+      pre_populated_data: { buyer_email: email || undefined, buyer_phone_number: e164(c.phone) },
       payment_note: `hdlaser.net order ${ref}: ${q.summary} for ${c.business || name}`.slice(0, 500) };
     const res = await squareFetch(env, "/v2/online-checkout/payment-links", { method: "POST", body: JSON.stringify(payload) });
     data = await res.json().catch(() => ({}));
@@ -2601,7 +2604,7 @@ async function orderCheckout(request, env, cors) {
     if (logo) { const ins = await env.DB.prepare(`INSERT INTO order_assets (ref, created_at, name, type, bytes, data) VALUES (?,?,?,?,?,?)`).bind(ref, now, logo.name, logo.type, Math.round(logo.data.length * 0.75), logo.data).run(); assetId = ins.meta && ins.meta.last_row_id; }
     await env.DB.batch([
       env.DB.prepare(`INSERT OR REPLACE INTO orders (ref, created_at, status, business, name, email, phone, notes, text_consent, cups, base_price_cents, cups_subtotal_cents, setup_fee_cents, total_cents, deposit_percent, square_order_id, kind, spec, needed_by, rush, taken_by, tax_cents, tax_invoiced_at, attest_initials, attest_text, attest_at, attest_ip, attest_ua, attest_hash, logo_asset_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, linkOk || terminal ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, linkOk || terminal ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email || null, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
         null, q.work_unit_cents, q.subtotal_cents - q.setup_cents, q.setup_cents, total, 100, terminal ? terminal.order_id : linkOk ? (data.payment_link.order_id || null) : null, "custom", JSON.stringify(spec), neededBy, q.rush ? 1 : 0, takenBy, tax, tax ? now : null, initials, text, now, ip, ua, hash, assetId),
       env.DB.prepare(`UPDATE orders SET taken_by_id = ?, terminal_checkout_id = ? WHERE ref = ?`).bind(takenById, terminal ? terminal.id : null, ref),
       env.DB.prepare(`UPDATE orders SET channel = ?, heard = ?, src = ? WHERE ref = ?`).bind(takenBy ? "At the counter" : channelOf(src), cleanHeard(b.heard), src ? JSON.stringify(src) : null, ref),
