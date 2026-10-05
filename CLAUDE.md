@@ -21,7 +21,7 @@ Commit as `git -c user.name="jake-hess" -c user.email="jakehessplans@gmail.com"`
 
 ## Architecture in one paragraph
 
-Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v31** (Oct 5: finished orders go into the work log). Deployed in Cloudflare: **v30** (confirmed Oct 5; v31 pending).
+Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v31** (Oct 5: finished orders go into the work log). Deployed in Cloudflare: **v31** (confirmed Oct 5). GitHub Pages publishes were stuck in GitHub's queue from 19:38 UTC Oct 5 (runs 153 and 154 queued, never started); the Served by picker and the optional email/phone labels on the order page wait on it. If still stuck, check githubstatus.com and Hugh's GitHub billing.
 
 ## How the worker gets deployed (nobody automates this yet)
 
@@ -98,7 +98,8 @@ The container cannot reach hdlaser.net or workers.dev. Test the worker by import
 1. ~~Deploy v25 and check hub Receipts~~ done Oct 2.
 2. ~~The live $25 Terminal test, refunded~~ done Oct 2.
 3. v30 deployed Oct 5. Check on the iPad: Served by list, name-only checkout, 2 text-only items at 12 in. **Do not press "Load the price list from the code"**: Hugh's saved price list has hand-set prices (12 in engraving $199 vs $94 in the code) and he says his are correct. Get a screenshot of `/admin/prices`, copy his numbers into `DEFAULT_BOOK`, and only then is Load safe. New book keys fill in from the code automatically without Load. Then put the tagged links on the Google Business Profile.
-4. Hugh confirms the holiday packages and the order-by date; then remove noindex from `/holiday/`, link it from the home page, add it to `sitemap.xml`, and email past business customers.
+4. Open question from Hugh (Oct 5): showing prices may scare people. Options offered: price small jobs and quote big ones (recommended), show only "starting at $35" and quote everything, show the price only at the last step, or keep as is and decide on 3-4 weeks of dashboard data. He will answer later.
+4b. Hugh confirms the holiday packages and the order-by date; then remove noindex from `/holiday/`, link it from the home page, add it to `sitemap.xml`, and email past business customers.
 5. Add `terminal.checkout.updated` to the Square webhook subscription.
 6. Press "Load the price list from the code" after any pricing change so Hugh's saved book matches the code.
 7. Twilio and Apple decisions arrive by email; forward to the session.
