@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-05 v32"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-05 v33"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -122,6 +122,18 @@ export default {
       if (path === "/coffee/status") return requireOrigin(cors) || coffeeStatus(env, url.searchParams.get("ref"), cors);
       if (path === "/webhooks/square" && request.method === "POST") return squareWebhook(request, env);
       if (path === "/webhooks/twilio" && request.method === "POST") return twilioInbound(request, env);
+      // ---- shop iPad time clock: everyone on one screen, each person punches with their own PIN ----
+      if (path === "/clock") return new Response(CLOCK_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } });
+      if (path === "/clock/status") return json(await clockBoard(env), 200, { "Cache-Control": "no-store" });
+      if (path === "/clock/punch" && request.method === "POST") {
+        const ip = request.headers.get("CF-Connecting-IP") || "";
+        if (rateLimited("clock:" + ip, 20, 600000)) return json({ error: "Too many tries. Wait a few minutes." }, 429);
+        const b = await request.json().catch(() => ({}));
+        const p = await env.DB.prepare(`SELECT * FROM staff WHERE id = ? AND active = 1`).bind(+b.id || 0).first();
+        if (!p || !p.pin_hash || !/^\d{4,8}$/.test(String(b.pin || "")) || !timingSafeEqual(await pbkdf(String(b.pin), p.pin_salt), p.pin_hash)) { await staffLog(env, p && p.id, "pin_failed", "time clock"); return json({ error: "That PIN doesn't match " + (p ? p.name : "that person") + "." }, 401); }
+        const r = await clockPunch(env, p, b.action, b.note);
+        return json({ ...r.body, board: await clockBoard(env) }, r.status);
+      }
       // ---- staff portal (per-employee sign-in, Bearer token) ----
       if (path.startsWith("/staff/")) return requireOrigin(cors) || staffRoutes(request, env, cors, path, url);
 
@@ -1037,6 +1049,83 @@ async function staffLog(env, staffId, action, detail) {
 }
 function staffAlertsOn(env, kind) { return String(env.STAFF_ALERTS || "clockin,clockout,noshow").split(",").map((s) => s.trim()).includes(kind); }
 
+// Who is on the team and who is clocked in right now, for the time clock screen.
+async function clockBoard(env) {
+  const rows = (await env.DB.prepare(`SELECT s.id, s.name, (SELECT in_at FROM shifts h WHERE h.staff_id = s.id AND h.out_at IS NULL ORDER BY h.in_at DESC LIMIT 1) in_at FROM staff s WHERE s.active = 1 ORDER BY s.name`).all()).results;
+  return { people: rows.map((r) => ({ id: r.id, name: r.name, in_at: r.in_at || null })) };
+}
+const CLOCK_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>Time clock | HD Laser</title>
+<style>
+:root{--bg:#F6F4EF;--ink:#15191E;--muted:#545B63;--red:#C8372A;--line:#E4E0D8;--green:#2F6B4F}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif}
+main{max-width:760px;margin:0 auto;padding:24px 16px 60px}h1{font-size:30px;margin:0}.sub{color:var(--muted);margin:6px 0 20px}
+#now{font-size:18px;font-weight:700;color:var(--muted)}
+.person{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:12px}
+.person b{font-size:20px}.person small{display:block;color:var(--muted);margin-top:3px;font-size:15px}.in small{color:var(--green);font-weight:700}
+button{font:inherit;font-size:18px;font-weight:700;border:0;border-radius:999px;padding:14px 22px;min-width:150px;cursor:pointer;background:var(--green);color:#fff}
+button.out{background:var(--red)}button.ghost{background:transparent;color:var(--ink);border:2px solid var(--line);min-width:0}
+#pad{position:fixed;inset:0;background:rgba(21,25,30,.55);display:none;align-items:center;justify-content:center;padding:16px}
+#pad.on{display:flex}.box{background:#fff;border-radius:20px;padding:24px;width:100%;max-width:380px}.box h2{margin:0 0 4px}
+#pin{font:inherit;font-size:28px;letter-spacing:8px;text-align:center;width:100%;padding:12px;border:2px solid var(--line);border-radius:12px;margin:14px 0}
+.row{display:flex;gap:10px;justify-content:flex-end}#msg{min-height:22px;color:var(--red);font-weight:700;margin:0 0 10px}
+#done{background:#E7F2EC;color:var(--green);font-weight:700;border-radius:12px;padding:12px 14px;margin-bottom:14px;display:none}
+a{color:var(--red)}
+</style></head><body><main>
+<h1>Time clock</h1><p class="sub"><span id="now"></span> &middot; Tap your name, type your PIN. Everyone clocks in and out here.</p>
+<div id="done"></div><div id="list">Loading&hellip;</div>
+<p class="sub" style="margin-top:22px">Opening and closing checklists are in the staff portal: <a href="https://hdlaser.net/staff/">hdlaser.net/staff</a></p>
+</main>
+<div id="pad"><div class="box"><h2 id="padh"></h2><p class="sub" id="pads" style="margin:0"></p><input id="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="PIN"><p id="msg"></p>
+<div class="row"><button class="ghost" id="cancel" type="button">Cancel</button><button id="go" type="button">OK</button></div></div></div>
+<script>
+var people=[], pick=null, TZ='America/Los_Angeles';
+function $(s){return document.querySelector(s);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function t(iso){return new Date(iso).toLocaleTimeString('en-US',{timeZone:TZ,hour:'numeric',minute:'2-digit'});}
+function hrs(iso){var m=Math.round((Date.now()-new Date(iso))/60000);return Math.floor(m/60)+' h '+(m%60)+' min';}
+function render(){ $('#list').innerHTML=people.length?people.map(function(p){ return '<div class="person'+(p.in_at?' in':'')+'"><div><b>'+esc(p.name)+'</b><small>'+(p.in_at?'In since '+t(p.in_at)+' &middot; '+hrs(p.in_at):'Not clocked in')+'</small></div><button type="button" class="'+(p.in_at?'out':'')+'" data-id="'+p.id+'">'+(p.in_at?'Clock out':'Clock in')+'</button></div>'; }).join(''):'<p class="sub">No one on the team yet. Add people on the Team page.</p>'; }
+function load(){ fetch('/clock/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ people=d.people||[]; render(); }).catch(function(){ $('#list').textContent='Could not load. Check the internet and refresh.'; }); }
+function tick(){ $('#now').textContent=new Date().toLocaleString('en-US',{timeZone:TZ,weekday:'long',hour:'numeric',minute:'2-digit'}); }
+document.addEventListener('click',function(e){ var b=e.target.closest('button[data-id]'); if(!b) return; pick=people.filter(function(p){return String(p.id)===b.dataset.id;})[0]; if(!pick) return;
+  $('#padh').textContent=pick.name; $('#pads').textContent=pick.in_at?'Clock out (in since '+t(pick.in_at)+')':'Clock in now'; $('#go').textContent=pick.in_at?'Clock out':'Clock in'; $('#go').className=pick.in_at?'out':'';
+  $('#msg').textContent=''; $('#pin').value=''; $('#pad').classList.add('on'); setTimeout(function(){ $('#pin').focus(); },50); });
+function close(){ $('#pad').classList.remove('on'); pick=null; }
+$('#cancel').onclick=close;
+function punch(){ if(!pick) return; var pin=$('#pin').value; if(!/^[0-9]{4,8}$/.test(pin)){ $('#msg').textContent='Type your 4 to 8 digit PIN.'; return; }
+  var action=pick.in_at?'out':'in', who=pick.name; $('#go').disabled=true;
+  fetch('/clock/punch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:pick.id,pin:pin,action:action})}).then(function(r){return r.json();}).then(function(d){ $('#go').disabled=false;
+    if(d.error){ $('#msg').textContent=d.error; $('#pin').value=''; return; }
+    if(d.board) people=d.board.people; render(); close();
+    var done=$('#done'); done.textContent=who+(action==='in'?' clocked in at '+t(new Date().toISOString())+'.':' clocked out'+(d.minutes?' after '+Math.floor(d.minutes/60)+' h '+(d.minutes%60)+' min.':'.')); done.style.display='block'; setTimeout(function(){ done.style.display='none'; },6000);
+  }).catch(function(){ $('#go').disabled=false; $('#msg').textContent='No connection. Try again.'; }); }
+$('#go').onclick=punch; $('#pin').addEventListener('keydown',function(e){ if(e.key==='Enter') punch(); });
+tick(); setInterval(tick,15000); load(); setInterval(load,60000);
+</script></body></html>`;
+// Clock in or out for one person; shared by the staff portal (signed in) and the shop iPad time clock (/clock, PIN per person).
+async function clockPunch(env, me, action, note) {
+  const now = new Date().toISOString();
+  const open = await env.DB.prepare(`SELECT * FROM shifts WHERE staff_id = ? AND out_at IS NULL ORDER BY in_at DESC LIMIT 1`).bind(me.id).first();
+  if (action === "in") {
+    if (open) return { status: 200, body: { ok: true, shift: open, note: "Already clocked in" } };
+    const r = await env.DB.prepare(`INSERT INTO shifts (staff_id, in_at) VALUES (?,?)`).bind(me.id, now).run();
+    await staffLog(env, me.id, "clock_in", "");
+    const l = local();
+    const first = await env.DB.prepare(`SELECT COUNT(*) n FROM shifts WHERE in_at >= ? AND in_at < ?`).bind(localDayRange(l.date).from, now).first();
+    if (staffAlertsOn(env, "clockin")) await sendAlert(env, `${me.name} clocked in at ${fmtLocal(now)}${first.n === 0 ? " (first in today)" : ""}.`, { emailShop: true });
+    await env.DB.prepare(`DELETE FROM meta WHERE k = 'noshow_pending'`).run();
+    return { status: 200, body: { ok: true, shift: { id: r.meta && r.meta.last_row_id, in_at: now } } };
+  }
+  if (action === "out") {
+    if (!open) return { status: 400, body: { error: "You're not clocked in" } };
+    const mins = Math.max(1, Math.round((Date.now() - new Date(open.in_at)) / 60000));
+    await env.DB.prepare(`UPDATE shifts SET out_at = ?, minutes = ?, note = ? WHERE id = ?`).bind(now, mins, String(note || "").slice(0, 500) || null, open.id).run();
+    await staffLog(env, me.id, "clock_out", mins + " min");
+    if (staffAlertsOn(env, "clockout")) await sendAlert(env, `${me.name} clocked out at ${fmtLocal(now)} (${(mins / 60).toFixed(1)} h).`, { emailShop: true });
+    return { status: 200, body: { ok: true, minutes: mins } };
+  }
+  return { status: 400, body: { error: "action must be in or out" } };
+}
 async function staffRoutes(request, env, cors, path, url) {
   if (!env.DB) return json({ error: "No database" }, 503, cors);
   const now = new Date().toISOString();
@@ -1093,26 +1182,8 @@ async function staffRoutes(request, env, cors, path, url) {
 
   if (path === "/staff/clock" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));
-    const open = await env.DB.prepare(`SELECT * FROM shifts WHERE staff_id = ? AND out_at IS NULL ORDER BY in_at DESC LIMIT 1`).bind(me.id).first();
-    if (b.action === "in") {
-      if (open) return json({ ok: true, shift: open, note: "Already clocked in" }, 200, cors);
-      const r = await env.DB.prepare(`INSERT INTO shifts (staff_id, in_at) VALUES (?,?)`).bind(me.id, now).run();
-      await staffLog(env, me.id, "clock_in", "");
-      const l = local();
-      const first = await env.DB.prepare(`SELECT COUNT(*) n FROM shifts WHERE in_at >= ? AND in_at < ?`).bind(localDayRange(l.date).from, now).first();
-      if (staffAlertsOn(env, "clockin")) await sendAlert(env, `${me.name} clocked in at ${fmtLocal(now)}${first.n === 0 ? " (first in today)" : ""}.`, { emailShop: true });
-      await env.DB.prepare(`DELETE FROM meta WHERE k = 'noshow_pending'`).run();
-      return json({ ok: true, shift: { id: r.meta && r.meta.last_row_id, in_at: now } }, 200, cors);
-    }
-    if (b.action === "out") {
-      if (!open) return json({ error: "You're not clocked in" }, 400, cors);
-      const mins = Math.max(1, Math.round((Date.now() - new Date(open.in_at)) / 60000));
-      await env.DB.prepare(`UPDATE shifts SET out_at = ?, minutes = ?, note = ? WHERE id = ?`).bind(now, mins, String(b.note || "").slice(0, 500) || null, open.id).run();
-      await staffLog(env, me.id, "clock_out", mins + " min");
-      if (staffAlertsOn(env, "clockout")) await sendAlert(env, `${me.name} clocked out at ${fmtLocal(now)} (${(mins / 60).toFixed(1)} h).`, { emailShop: true });
-      return json({ ok: true, minutes: mins }, 200, cors);
-    }
-    return json({ error: "action must be in or out" }, 400, cors);
+    const r = await clockPunch(env, me, b.action, b.note);
+    return json(r.body, r.status, cors);
   }
 
   if (path === "/staff/checklist" && request.method === "POST") {
