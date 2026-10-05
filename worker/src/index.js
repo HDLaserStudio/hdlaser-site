@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-05 v29"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-05 v30"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -1060,6 +1060,8 @@ async function staffRoutes(request, env, cors, path, url) {
   if (path === "/staff/logout" && request.method === "POST") { await env.DB.prepare(`DELETE FROM staff_sessions WHERE token = ?`).bind(me.token).run(); return json({ ok: true }, 200, cors); }
 
   if (path === "/staff/me") return json(await staffHome(env, me), 200, { ...cors, "Cache-Control": "no-store" });
+  // names only, for the order page's "Served by" picker on the shop iPad; whoever is picked still proves it with their own PIN
+  if (path === "/staff/names") return json({ names: (await env.DB.prepare(`SELECT name FROM staff WHERE active = 1 ORDER BY name`).all()).results.map((r) => r.name) }, 200, { ...cors, "Cache-Control": "no-store" });
 
   // Receipts: every Square payment we know of (web, counter and register), newest first, printable on the Terminal.
   if (path === "/staff/receipts") {
