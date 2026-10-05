@@ -21,7 +21,7 @@ Commit as `git -c user.name="jake-hess" -c user.email="jakehessplans@gmail.com"`
 
 ## Architecture in one paragraph
 
-Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v30** (Oct 5: Served by picker; v29 counter orders need only a name). Deployed in Cloudflare: **v30** (confirmed Oct 5).
+Static HTML pages on GitHub Pages. A single Cloudflare Worker (`worker/src/index.js`, about 2,900 lines, D1 database) does everything dynamic: price book, order checkout, Square payment links and Terminal checkouts, staff portal, dashboards, Twilio texts, Plaid bank feed, weekly pricing review. The site reads `WORKER_BASE` from `assets/site-config.js`. The worker's address is `https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev`. `GET /health` returns `{version}`; the constant `WORKER_VERSION` at the top of the worker is bumped on every change so you can tell what is deployed. Latest pushed: **v31** (Oct 5: finished orders go into the work log). Deployed in Cloudflare: **v30** (confirmed Oct 5; v31 pending).
 
 ## How the worker gets deployed (nobody automates this yet)
 
@@ -84,6 +84,7 @@ Public: `/` home (engraving, UV, DTF, cutting sections), `/order/` the single or
 - **Apple Business Connect** domain verified by TXT record at GoDaddy (the registrar for hdlaser.net). Sent for review Oct 1.
 - **Google Business Profile**: description and services added Oct 1; photos, order link and a first post were still to do. Search Console indexing not requested yet.
 - **Plaid**: balances refreshed once a day to stay in the free tier.
+- **Work log** (v31): marking an order Done (staff Work queue or the `/admin` dashboard) writes a finished job to `jobs` (`orderJob()`, note `auto: order done`, `ref` = order), credited `done_by` whoever marked it (dashboard: the person who took the order, else the owner), so it counts in jobs done, job value and commission. Undo removes it; marking done twice does not double it. Text-only and logo-on-file orders skip "waiting for logo" in the queue.
 - **Staff**: Hugh must exist on the dashboard Team tab as owner with a PIN; the name must match the hub sign-in exactly. Employees need Square passcodes for register-sale attribution.
 - **Marisa** (salon room) page terms are final; waiting on her walk-through and redlines, then draft the agreement. **Partnership** page waits on Hugh.
 - **Docs**: Claude Doc "HD Laser: every link and login" (claude.ai/code/artifact/97808ec7-5355-4f58-a423-c2713b454087). PDFs in hdlaser2 `print/`: links and logins, Twilio resubmission guide, operating kit, two handoff briefs (one for Jason Coleman's three businesses, not started).

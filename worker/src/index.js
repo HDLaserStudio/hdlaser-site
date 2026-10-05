@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-05 v30"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-05 v31"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -181,7 +181,10 @@ export default {
         if (cm && request.method === "POST") return json(await coffeeUpdate(env, cm[1], await request.json()), 200);
         if (path === "/api/digest" && request.method === "POST") return json(await sendDigest(env), 200);
         const m = path.match(/^\/api\/orders\/(HD-[A-Z0-9]+)$/);
-        if (m && request.method === "POST") return json(await updateOrder(env, m[1], await request.json()), 200);
+        if (m && request.method === "POST") { const body = await request.json(); const r = await updateOrder(env, m[1], body);
+          if ("completed_at" in body) { const o = await env.DB.prepare(`SELECT taken_by_id FROM orders WHERE ref = ?`).bind(m[1]).first(); const owner = await env.DB.prepare(`SELECT id FROM staff WHERE role = 'owner' AND active = 1 ORDER BY id LIMIT 1`).first();
+            await orderJob(env, m[1], body.completed_at ? ((o && o.taken_by_id) || (owner && owner.id) || null) : null); } // from the dashboard: credit whoever took the order, else the owner
+          return json(r, 200); }
       }
       return json({ error: "Not found" }, 404, cors);
     } catch (e) {
@@ -1154,6 +1157,7 @@ async function staffRoutes(request, env, cors, path, url) {
     const allowed = {}; for (const k of ["logo_received_at", "proof_approved_at", "completed_at"]) if (k in b) allowed[k] = b[k];
     const r = await updateOrder(env, m[1], allowed);
     await staffLog(env, me.id, "order_update", m[1] + " " + Object.keys(allowed).join(","));
+    if ("completed_at" in allowed) await orderJob(env, m[1], allowed.completed_at ? me.id : null);
     return json(r, 200, cors);
   }
 
@@ -1223,6 +1227,19 @@ async function staffHome(env, me) {
 }
 
 // Everything waiting to be made, scored so the most urgent and valuable work sits on top.
+// An order marked done goes into the work log as a finished job, credited to whoever marked it done, so it counts
+// toward their jobs done, job value and commission like a logged walk-in. Undoing it takes the job back out.
+async function orderJob(env, ref, doneBy) {
+  await env.DB.prepare(`DELETE FROM jobs WHERE ref = ? AND note = 'auto: order done'`).bind(ref).run();
+  if (!doneBy) return;
+  const o = await env.DB.prepare(`SELECT * FROM orders WHERE ref = ?`).bind(ref).first(); if (!o) return;
+  let spec = {}; try { spec = JSON.parse(o.spec || "{}"); } catch {}
+  const qty = Math.max(1, parseInt(spec.qty || o.cups || 1, 10) || 1);
+  const minutes = o.kind === "custom" ? Math.round(qty * (spec.service === "uv" ? 3 + (spec.inches || 2) * 1.5 : 4 + (spec.inches || 2) * 2) + 10) : Math.round(qty * 2.5 + 20);
+  const now = new Date().toISOString();
+  await env.DB.prepare(`INSERT INTO jobs (created_at, staff_id, customer, phone, product, qty, minutes, amount_cents, status, started_at, done_at, done_by, note, ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(o.paid_at || o.created_at || now, o.taken_by_id || doneBy, String(o.business || o.name || "").slice(0, 120), String(o.phone || "").slice(0, 40), String(spec.summary || (o.cups ? o.cups + " logo cups" : "Web order")).slice(0, 200), qty, minutes, Math.max(0, (o.paid_cents || o.total_cents || 0) - (o.refunded_cents || 0)), "done", o.paid_at || now, now, doneBy, "auto: order done", ref).run();
+}
 async function workQueue(env) {
   const q = (sql, ...a) => env.DB.prepare(sql).bind(...a);
   const items = [];
@@ -1234,7 +1251,7 @@ async function workQueue(env) {
       (SELECT GROUP_CONCAT(qty || ' x ' || size || 'oz ' || finish || ' ' || color || ' (' || lid || ')', '; ') FROM order_lines l WHERE l.ref = o.ref) items
       FROM orders o WHERE o.status = 'paid' AND o.completed_at IS NULL ORDER BY o.paid_at`).all()).results;
   for (const o of orders) {
-    const custom = o.kind === "custom"; let spec = {}; if (custom) { try { spec = JSON.parse(o.spec || "{}"); } catch {} if (o.logo_asset_id && !o.logo_received_at) o.logo_received_at = o.paid_at; o.minutes = o.cminutes; }
+    const custom = o.kind === "custom"; let spec = {}; if (custom) { try { spec = JSON.parse(o.spec || "{}"); } catch {} if ((o.logo_asset_id || spec.art === "text" || spec.art === "file") && !o.logo_received_at) o.logo_received_at = o.paid_at; o.minutes = o.cminutes; }
     const stage = !o.logo_received_at ? "waiting for logo" : !o.proof_approved_at ? "send proof" : "in production";
     const wait = custom ? (o.rush ? 3 : 7) : 21;
     let due = o.proof_approved_at ? new Date(new Date(o.proof_approved_at).getTime() + wait * 86400000).toISOString() : (o.logo_received_at ? new Date(new Date(o.logo_received_at).getTime() + 2 * 86400000).toISOString() : null);
