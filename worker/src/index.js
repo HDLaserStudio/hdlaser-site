@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-05 v33"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-06 v34"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS plaid_items (item_id TEXT PRIMARY KEY, access_token T
 CREATE TABLE IF NOT EXISTS coffee_orders (ref TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, name TEXT, phone TEXT, email TEXT, items TEXT, summary TEXT, total_cents INTEGER, pickup TEXT, note TEXT, text_consent INTEGER DEFAULT 0, square_order_id TEXT, square_payment_id TEXT, paid_at TEXT, paid_cents INTEGER DEFAULT 0, tip_cents INTEGER DEFAULT 0, notified_at TEXT, ready_at TEXT, picked_up_at TEXT);
 CREATE INDEX IF NOT EXISTS coffee_created ON coffee_orders(created_at);`;
 // Columns added after the first release. Each ALTER is tried once and ignored if the column already exists.
-const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT"];
+const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0"];
 
 let migrated = false;
 async function ensureSchema(env) {
@@ -593,8 +593,8 @@ async function upsertPayment(env, p) {
     return;
   }
   if (ref && p.status === "COMPLETED") {
-    await env.DB.prepare(`UPDATE orders SET status = CASE WHEN ? >= total_cents AND ? > 0 THEN 'refunded' ELSE 'paid' END, square_payment_id = ?, paid_at = COALESCE(paid_at, ?), paid_cents = ?, fee_cents = ?, refunded_cents = ? WHERE ref = ?`)
-      .bind(refunded, refunded, p.id, p.created_at || new Date().toISOString(), amount, fee, refunded, ref).run();
+    await env.DB.prepare(`UPDATE orders SET status = CASE WHEN ? >= total_cents AND ? > 0 THEN 'refunded' ELSE 'paid' END, square_payment_id = ?, paid_at = COALESCE(paid_at, ?), paid_cents = ?, fee_cents = ?, refunded_cents = ?, tip_cents = ? WHERE ref = ?`)
+      .bind(refunded, refunded, p.id, p.created_at || new Date().toISOString(), amount, fee, refunded, money(p.tip_money), ref).run();
     await notifyPaid(env, ref);
   }
 }
@@ -680,7 +680,7 @@ async function kpis(env, from, to) {
   const q = (sql, ...args) => env.DB.prepare(sql).bind(...args);
 
   const salesFor = async (a, b) => {
-    const s = await q(`SELECT COUNT(*) orders, COALESCE(SUM(paid_cents - refunded_cents),0) revenue, COALESCE(SUM(cups),0) cups, COALESCE(SUM(setup_fee_cents),0) setup, COALESCE(SUM(fee_cents),0) fees, COALESCE(SUM(refunded_cents),0) refunded
+    const s = await q(`SELECT COUNT(*) orders, COALESCE(SUM(paid_cents - refunded_cents - COALESCE(tip_cents,0)),0) revenue, COALESCE(SUM(cups),0) cups, COALESCE(SUM(setup_fee_cents),0) setup, COALESCE(SUM(fee_cents),0) fees, COALESCE(SUM(refunded_cents),0) refunded
       FROM orders WHERE status IN ('paid','refunded') AND paid_at >= ? AND paid_at < ?`, a, b).first();
     const cust = await q(`SELECT COUNT(DISTINCT email) n FROM orders WHERE status IN ('paid','refunded') AND paid_at >= ? AND paid_at < ?`, a, b).first();
     const repeat = await q(`SELECT COUNT(*) n FROM orders o WHERE status IN ('paid','refunded') AND paid_at >= ? AND paid_at < ? AND EXISTS (SELECT 1 FROM orders p WHERE p.email = o.email AND p.status IN ('paid','refunded') AND p.paid_at < o.paid_at)`, a, b).first();
@@ -718,15 +718,15 @@ async function kpis(env, from, to) {
   const inqCount = await q(`SELECT COUNT(*) n FROM inquiries WHERE kind = 'quote' AND created_at >= ? AND created_at < ?`, fromIso, toIso).first();
   const inquiries = (await q(`SELECT id, created_at, kind, ref, name, business, email, phone, fields, emailed FROM inquiries ORDER BY created_at DESC LIMIT 50`).all()).results.map((r) => { let f = {}; try { f = JSON.parse(r.fields || "{}"); } catch {} return { ...r, fields: f }; });
   funnel.quote_request = Math.max(funnel.quote_request, inqCount.n);
-  const lifetime = await q(`SELECT COUNT(*) orders, COALESCE(SUM(paid_cents - refunded_cents),0) revenue, COALESCE(SUM(cups),0) cups FROM orders WHERE status IN ('paid','refunded')`).first();
+  const lifetime = await q(`SELECT COUNT(*) orders, COALESCE(SUM(paid_cents - refunded_cents - COALESCE(tip_cents,0)),0) revenue, COALESCE(SUM(cups),0) cups FROM orders WHERE status IN ('paid','refunded')`).first();
 
   // where customers come from: new visitors (first arrival), orders placed, paid, revenue and quote requests per channel
   const blank = (k) => ({ k, visitors: 0, orders: 0, paid: 0, revenue_cents: 0, quotes: 0 });
   const tally = (m, k, f, n = 1) => { (m[k] || (m[k] = blank(k)))[f] += n; };
   const byChannel = {}, byHeard = {}, byPage = {};
   for (const r of (await q(`SELECT detail FROM events WHERE name = 'arrival' AND ts >= ? AND ts < ?`, fromIso, toIso).all()).results) { let d = null; try { d = JSON.parse(r.detail || "null"); } catch {} tally(byChannel, channelOf(cleanSrc(d)), "visitors"); }
-  for (const r of (await q(`SELECT channel, heard, src, status, paid_cents, refunded_cents FROM orders WHERE created_at >= ? AND created_at < ? AND status != 'cancelled'`, fromIso, toIso).all()).results) {
-    const paid = r.status === "paid" || r.status === "refunded", rev = paid ? (r.paid_cents || 0) - (r.refunded_cents || 0) : 0;
+  for (const r of (await q(`SELECT channel, heard, src, status, paid_cents, refunded_cents, tip_cents FROM orders WHERE created_at >= ? AND created_at < ? AND status != 'cancelled'`, fromIso, toIso).all()).results) {
+    const paid = r.status === "paid" || r.status === "refunded", rev = paid ? (r.paid_cents || 0) - (r.refunded_cents || 0) - (r.tip_cents || 0) : 0;
     let via = null; try { via = (JSON.parse(r.src || "null") || {}).via || null; } catch {}
     for (const [m, k] of [[byChannel, r.channel || "Not recorded"], [byHeard, r.heard || "Didn't say"], ...(via ? [[byPage, via]] : [])]) { tally(m, k, "orders"); if (paid) { tally(m, k, "paid"); tally(m, k, "revenue_cents", rev); } }
   }
@@ -1316,7 +1316,7 @@ async function orderJob(env, ref, doneBy) {
   const minutes = o.kind === "custom" ? Math.round(qty * (spec.service === "uv" ? 3 + (spec.inches || 2) * 1.5 : 4 + (spec.inches || 2) * 2) + 10) : Math.round(qty * 2.5 + 20);
   const now = new Date().toISOString();
   await env.DB.prepare(`INSERT INTO jobs (created_at, staff_id, customer, phone, product, qty, minutes, amount_cents, status, started_at, done_at, done_by, note, ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(o.paid_at || o.created_at || now, o.taken_by_id || doneBy, String(o.business || o.name || "").slice(0, 120), String(o.phone || "").slice(0, 40), String(spec.summary || (o.cups ? o.cups + " logo cups" : "Web order")).slice(0, 200), qty, minutes, Math.max(0, (o.paid_cents || o.total_cents || 0) - (o.refunded_cents || 0)), "done", o.paid_at || now, now, doneBy, "auto: order done", ref).run();
+    .bind(o.paid_at || o.created_at || now, o.taken_by_id || doneBy, String(o.business || o.name || "").slice(0, 120), String(o.phone || "").slice(0, 40), String(spec.summary || (o.cups ? o.cups + " logo cups" : "Web order")).slice(0, 200), qty, minutes, Math.max(0, (o.paid_cents || o.total_cents || 0) - (o.refunded_cents || 0) - (o.tip_cents || 0)), "done", o.paid_at || now, now, doneBy, "auto: order done", ref).run();
 }
 async function workQueue(env) {
   const q = (sql, ...a) => env.DB.prepare(sql).bind(...a);
@@ -2687,7 +2687,7 @@ async function orderCheckout(request, env, cors) {
     const od = await or.json().catch(() => ({}));
     if (or.ok && od.order) sqOrderId = od.order.id; else console.error("Square order error", or.status, JSON.stringify(od).slice(0, 400));
     const tc = { idempotency_key: `${ref}-t-${Date.now()}`, checkout: { amount_money: { amount: total, currency: "USD" }, reference_id: ref, order_id: sqOrderId || undefined, note: `hdlaser.net ${ref}: ${q.summary}`.slice(0, 250), payment_type: "CARD_PRESENT",
-      device_options: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), skip_receipt_screen: false, collect_signature: false, tip_settings: { allow_tipping: false } } } };
+      device_options: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), skip_receipt_screen: false, collect_signature: false, tip_settings: env.TERMINAL_TIPS === "0" ? { allow_tipping: false } : { allow_tipping: true, separate_tip_screen: true, custom_tip_field: true, smart_tipping: true } } } };
     const res = await squareFetch(env, "/v2/terminals/checkouts", { method: "POST", body: JSON.stringify(tc) });
     data = await res.json().catch(() => ({}));
     if (res.ok && data.checkout) terminal = { id: data.checkout.id, status: data.checkout.status, order_id: sqOrderId };
