@@ -22,7 +22,8 @@ window.hdTrack = function (name, ref, detail) {
     var base = window.HD_CONFIG.WORKER_BASE; if (!base) return;
     var sid = sessionStorage.getItem('hd_sid'); if (!sid) { sid = Math.random().toString(36).slice(2, 12); sessionStorage.setItem('hd_sid', sid); }
     var body = JSON.stringify({ name: name, session: sid, ref: ref || null, path: location.pathname, detail: detail || undefined });
-    if (navigator.sendBeacon) { navigator.sendBeacon(base + '/event', new Blob([body], { type: 'application/json' })); }
+    // text/plain keeps it a simple request (no CORS preflight), so the browser sends it; the worker reads the JSON either way
+    if (navigator.sendBeacon) { navigator.sendBeacon(base + '/event', new Blob([body], { type: 'text/plain' })); }
     else { fetch(base + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, keepalive: true }).catch(function () {}); }
   } catch (e) {}
 };
