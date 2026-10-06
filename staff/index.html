@@ -105,6 +105,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
       <h2>Log a walk-in or phone job</h2>
       <form id="jobform" style="display:flex;flex-direction:column;gap:10px">
         <div class="row"><label>Customer<input name="customer" placeholder="Name or business"></label><label>Phone<input name="phone" inputmode="tel" placeholder="For pickup texts"></label></div>
+        <div class="row"><label>Email <span class="note" style="display:inline">(optional)</span><input name="email" type="email" inputmode="email" autocomplete="off" placeholder="For the receipt and order updates"></label></div>
         <div id="jlines"></div>
         <div><button type="button" class="btn ghost sm" id="jadd">+ Add another item</button></div>
         <label style="display:flex;flex-direction:row;justify-content:flex-start;gap:10px;align-items:center;font-weight:700;font-size:16px;color:inherit;text-align:left"><input type="checkbox" id="jsetup" style="width:22px;height:22px;flex:none;margin:0"> <span>Logo digitizing and setup <span id="jsetupamt">($50, once)</span></span></label>
@@ -217,13 +218,13 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
   function resetJob(f){ f.reset(); $('#jlines').innerHTML=''; addLine(); }
   // Add to queue: one job per item (for jobs paid another way); the logo setup rides on the first item
   $('#jobform').addEventListener('submit',function(e){ e.preventDefault(); var f=e.target, L=lines(), due=dueDate(f), setup=$('#jsetup').checked;
-    var posts=L.map(function(l,i){ return api('/staff/jobs',{customer:f.customer.value,phone:f.phone.value,product:l.key,qty:l.qty,amount:((l.line+(i===0&&setup?SETUP:0))/100).toFixed(2),minutes:(L.length===1?f.minutes.value:''),due:due.toISOString(),note:[f.note.value,(i===0&&setup?'Logo digitizing and setup '+money2(SETUP):'')].filter(Boolean).join(' · ')}); });
+    var posts=L.map(function(l,i){ return api('/staff/jobs',{customer:f.customer.value,phone:f.phone.value,email:f.email.value,product:l.key,qty:l.qty,amount:((l.line+(i===0&&setup?SETUP:0))/100).toFixed(2),minutes:(L.length===1?f.minutes.value:''),due:due.toISOString(),note:[f.note.value,(i===0&&setup?'Logo digitizing and setup '+money2(SETUP):'')].filter(Boolean).join(' · ')}); });
     Promise.all(posts).then(function(r){ $('#jobmsg').innerHTML='<div class="ok">Added '+r.length+' job'+(r.length>1?'s':'')+'. '+(r.length>1?'They\'re':'It\'s')+' in the work queue.</div>'; resetJob(f); load(); setTimeout(function(){$('#jobmsg').innerHTML='';},4000); }).catch(function(err){ $('#jobmsg').innerHTML='<div class="err">'+esc(err.message)+'</div>'; }); });
   // Charge on the Terminal: the order page asks the customer the same questions, shows each item, and puts the paid job in the queue
   $('#jobcharge').addEventListener('click',function(){ var f=$('#jobform'), L=lines(), sum=total();
     if(!(sum>=100)){ $('#jobmsg').innerHTML='<div class="err">Type a price for each item first.</div>'; return; }
     var due=dueDate(f), ymd=due.getFullYear()+'-'+String(due.getMonth()+1).padStart(2,'0')+'-'+String(due.getDate()).padStart(2,'0');
-    var p=new URLSearchParams({via:'hub',by:(state&&state.me&&state.me.name)||'',walkin:'1',lines:JSON.stringify(L.map(function(l){ return {n:l.name.slice(0,100),q:l.qty,u:l.unit}; })),setup:$('#jsetup').checked?'1':'0',name:f.customer.value,phone:f.phone.value,notes:f.note.value,needed:ymd});
+    var p=new URLSearchParams({via:'hub',by:(state&&state.me&&state.me.name)||'',walkin:'1',lines:JSON.stringify(L.map(function(l){ return {n:l.name.slice(0,100),q:l.qty,u:l.unit}; })),setup:$('#jsetup').checked?'1':'0',name:f.customer.value,phone:f.phone.value,email:f.email.value,notes:f.note.value,needed:ymd});
     location.href='/order/?'+p.toString(); });
 
   $('#clockbtn').onclick=function(){ var b=$('#clockbtn'); b.disabled=true; var out=!!(state&&state.shift); var note=out?(prompt('Anything to note about the shift? (optional)')||''):'';

@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v39"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v40"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS plaid_items (item_id TEXT PRIMARY KEY, access_token T
 CREATE TABLE IF NOT EXISTS coffee_orders (ref TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, name TEXT, phone TEXT, email TEXT, items TEXT, summary TEXT, total_cents INTEGER, pickup TEXT, note TEXT, text_consent INTEGER DEFAULT 0, square_order_id TEXT, square_payment_id TEXT, paid_at TEXT, paid_cents INTEGER DEFAULT 0, tip_cents INTEGER DEFAULT 0, notified_at TEXT, ready_at TEXT, picked_up_at TEXT);
 CREATE INDEX IF NOT EXISTS coffee_created ON coffee_orders(created_at);`;
 // Columns added after the first release. Each ALTER is tried once and ignored if the column already exists.
-const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT"];
+const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT", "ALTER TABLE jobs ADD COLUMN email TEXT"];
 
 let migrated = false;
 async function ensureSchema(env) {
@@ -1217,6 +1217,8 @@ async function staffRoutes(request, env, cors, path, url) {
     const due = b.due ? new Date(b.due) : null;
     const r = await env.DB.prepare(`INSERT INTO jobs (created_at, staff_id, customer, phone, product, qty, minutes, amount_cents, due_at, status, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(now, me.id, String(b.customer || "").slice(0, 120), String(b.phone || "").slice(0, 40), product, qty, minutes, amount, due && !isNaN(due) ? due.toISOString() : null, "queued", String(b.note || "").slice(0, 500)).run();
+    const jemail = String(b.email || "").trim().toLowerCase().slice(0, 120);
+    if (jemail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(jemail)) await env.DB.prepare(`UPDATE jobs SET email = ? WHERE id = ?`).bind(jemail, r.meta && r.meta.last_row_id).run();
     await staffLog(env, me.id, "job_new", `${product} x${qty} ${minutes}m $${amount / 100}`);
     return json({ ok: true, id: r.meta && r.meta.last_row_id, minutes }, 200, cors);
   }
