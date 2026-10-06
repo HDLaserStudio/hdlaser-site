@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-06 v34"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-06 v35"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -104,7 +104,7 @@ export default {
     const path = url.pathname.replace(/\/+$/, "") || "/";
     try {
       await ensureSchema(env);
-      if (path === "/health") return json({ ok: true, version: WORKER_VERSION, env: env.SQUARE_ENV, db: !!env.DB }, 200, cors);
+      if (path === "/health") { const te = env.DB ? await env.DB.prepare(`SELECT v FROM meta WHERE k = 'terminal_tip_error'`).first().catch(() => null) : null; return json({ ok: true, version: WORKER_VERSION, env: env.SQUARE_ENV, db: !!env.DB, terminal_tip_error: te ? te.v : undefined }, 200, cors); }
 
       // ---- public, site-facing ----
       if (path === "/checkout" && request.method === "POST") return requireOrigin(cors) || checkout(request, env, cors);
@@ -2679,7 +2679,7 @@ async function orderCheckout(request, env, cors) {
   if (q.minimum_top_up_cents) lineItems.push({ name: "Shop minimum", quantity: "1", base_price_money: { amount: q.minimum_top_up_cents, currency: "USD" } });
   const order = { location_id: env.SQUARE_LOCATION_ID, reference_id: ref, line_items: lineItems };
   if (tax) order.taxes = [{ uid: "ca-sales-tax", name: "CA sales tax", percentage: String(+(taxRate * 100).toFixed(3)), scope: "ORDER" }];
-  let linkOk = false, data = {}, terminal = null;
+  let linkOk = false, data = {}, terminal = null, tipsOffReason = null;
   if (payHow === "terminal" && env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
     // the Square Terminal on the counter shows the amount; the customer taps there. Completion arrives by webhook or the page's status poll.
     let sqOrderId = null;
@@ -2687,9 +2687,17 @@ async function orderCheckout(request, env, cors) {
     const od = await or.json().catch(() => ({}));
     if (or.ok && od.order) sqOrderId = od.order.id; else console.error("Square order error", or.status, JSON.stringify(od).slice(0, 400));
     const tc = { idempotency_key: `${ref}-t-${Date.now()}`, checkout: { amount_money: { amount: total, currency: "USD" }, reference_id: ref, order_id: sqOrderId || undefined, note: `hdlaser.net ${ref}: ${q.summary}`.slice(0, 250), payment_type: "CARD_PRESENT",
-      device_options: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), skip_receipt_screen: false, collect_signature: false, tip_settings: env.TERMINAL_TIPS === "0" ? { allow_tipping: false } : { allow_tipping: true, separate_tip_screen: true, custom_tip_field: true, smart_tipping: true } } } };
-    const res = await squareFetch(env, "/v2/terminals/checkouts", { method: "POST", body: JSON.stringify(tc) });
+      device_options: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), skip_receipt_screen: false, collect_signature: false, tip_settings: env.TERMINAL_TIPS === "0" ? { allow_tipping: false } : { allow_tipping: true, separate_tip_screen: true, custom_tip_field: true } } } };
+    let res = await squareFetch(env, "/v2/terminals/checkouts", { method: "POST", body: JSON.stringify(tc) });
     data = await res.json().catch(() => ({}));
+    if (!(res.ok && data.checkout) && tc.checkout.device_options.tip_settings.allow_tipping) {
+      // Square refused the tip screen: never lose the sale over it, charge again without tips and keep the reason
+      tipsOffReason = squareErr(data) || String(res.status); console.error("Terminal refused tipping, retrying without", res.status, JSON.stringify(data).slice(0, 600));
+      if (env.DB) await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('terminal_tip_error', ?)`).bind(new Date().toISOString() + " " + tipsOffReason).run().catch(() => {});
+      tc.idempotency_key = `${ref}-t-${Date.now()}-nt`; tc.checkout.device_options.tip_settings = { allow_tipping: false };
+      res = await squareFetch(env, "/v2/terminals/checkouts", { method: "POST", body: JSON.stringify(tc) });
+      data = await res.json().catch(() => ({}));
+    }
     if (res.ok && data.checkout) terminal = { id: data.checkout.id, status: data.checkout.status, order_id: sqOrderId };
     else { console.error("Terminal error", res.status, JSON.stringify(data).slice(0, 600)); return json({ error: "The Terminal didn't answer: " + (squareErr(data) || res.status) + ". Is it on and online?" }, 502, cors); }
   } else if (env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
@@ -2761,7 +2769,7 @@ HD Laser Studio
 (858) 373-9866 · hdlaser.net` });
   }
   await sendAlert(env, `Order ${ref}: ${who}, ${q.summary}, ${$(total)}. ${terminal ? "Paying on the Terminal." : linkOk ? "Paying through Square." : "NEEDS A PAYMENT LINK."}`);
-  if (terminal) return json({ ok: true, ref, total: total / 100, terminal: terminal.id, status: terminal.status }, 200, cors);
+  if (terminal) return json({ ok: true, ref, total: total / 100, terminal: terminal.id, status: terminal.status, tips_off: tipsOffReason || undefined }, 200, cors);
   if (!linkOk) return json({ ok: true, url: null, ref, total: total / 100, error: env.SQUARE_ACCESS_TOKEN ? squareErr(data) || "Square did not return a checkout link" : "Online payment is not set up" }, 200, cors);
   return json({ ok: true, url: data.payment_link.url, ref, total: total / 100 }, 200, cors);
 }
