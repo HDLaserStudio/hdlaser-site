@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-06 v37"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v38"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -644,7 +644,7 @@ async function notifyPaidCustom(env, o) {
 Payment received, ${total}. Thank you.
 
 Your order (${o.ref}): ${spec.summary || ""}
-${(() => { let sp = {}; try { sp = JSON.parse(o.spec || "{}"); } catch {} return sp.art === "text" ? "Text to go on it, exactly as you typed it: \u201c" + sp.text + "\u201d" : sp.art === "file" ? "We'll use the logo we already have on file for " + sp.art_ref + "." : o.logo_asset_id ? "We have your logo file." : "If you haven't yet, send your logo or artwork to " + env.SUPPORT_EMAIL + " or text it to (858) 373-9866."; })()}
+${(() => { let sp = {}; try { sp = JSON.parse(o.spec || "{}"); } catch {} return sp.art === "text" && sp.text ? "Text to go on it, exactly as you typed it: \u201c" + sp.text + "\u201d" : sp.art === "file" ? "We'll use the logo we already have on file for " + sp.art_ref + "." : o.logo_asset_id ? "We have your logo file." : "If you haven't yet, send your logo or artwork to " + env.SUPPORT_EMAIL + " or text it to (858) 373-9866."; })()}
 
 What happens next:
 - Digital proof by email within 1-2 business days. Unlimited revisions until it's right.
@@ -2567,8 +2567,9 @@ function customQuote(book, spec) {
   const qty = parseInt(spec.qty, 10);
   if (!(qty >= 1 && qty <= 1000)) return { error: "Quantity must be 1 to 1000" };
   const taxable = !!c.we_supply_item;
+  const art = c.no_logo ? "text" : "logo"; // walk-ins need no logo, so they skip "waiting for logo" in the work queue
   const work = unit * qty;
-  return { custom: true, product: { key: "custom", name: description }, material: { key: "custom", name: "" }, service: { key: "custom", name: "Custom work", setup_cents: 0 }, inches: 0, qty, rush: false, sides: null, prints: 1, taxable, art: "logo", text: "", art_ref: "", flat_text: false,
+  return { custom: true, product: { key: "custom", name: description }, material: { key: "custom", name: "" }, service: { key: "custom", name: "Custom work", setup_cents: 0 }, inches: 0, qty, rush: false, sides: null, prints: 1, taxable, art, text: "", art_ref: "", flat_text: false,
     work_unit_cents: unit, work_unit_after_cents: unit, discount_pct: 0, discount_cents: 0, blank_unit_cents: 0, handling_unit_cents: 0, work_cents: work, blank_cents: 0, handling_cents: 0, rush_cents: 0, setup_cents: 0, minimum_top_up_cents: 0, subtotal_cents: work, next_break: null,
     summary: `${qty} × custom: ${description}${taxable ? " (we supply the item)" : ""}` };
 }
@@ -2675,9 +2676,9 @@ async function orderCheckout(request, env, cors) {
     const who = await verifyStaff(env, b.staff.name, b.staff.pin);
     if (!who) return json({ error: "That PIN doesn't match anyone on the team. Try again." }, 401, cors);
     takenBy = who.name; takenById = who.id;
-    if (q.custom && ROLE_RANK[who.role] < 2) return json({ error: "A manager or owner PIN is needed for a custom price" }, 403, cors);
+    // Hugh, Oct 7: anyone on the team may set a price at the counter (walk-ins, Set the price myself); the PIN records who did
   }
-  if (q.custom && !takenById) return json({ error: "Enter a manager or owner PIN for a custom price" }, 400, cors);
+  if (q.custom && !takenById) return json({ error: "Enter your employee PIN to set a price at the counter" }, 400, cors);
   if (payHow === "terminal" && !takenById) return json({ error: "Enter your employee PIN to charge the Terminal" }, 400, cors);
   if (payHow === "terminal" && !env.SQUARE_TERMINAL_DEVICE_ID) return json({ error: "The Terminal isn't connected yet (SQUARE_TERMINAL_DEVICE_ID)" }, 503, cors);
   const taxRate = parseFloat(env.TAX_RATE || "0.0775") || 0;

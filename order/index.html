@@ -123,6 +123,16 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   <p class="lead">Four quick choices and you&#8217;ll see your price and a preview of your logo on the item. Nothing is made until you approve a digital proof. <a href="/quote/">Rather talk it through? Ask for a quote.</a></p>
   <p class="err" id="loaderr" hidden></p>
 
+  <section class="step" id="s-walkin" hidden>
+    <h2>Walk-in job</h2>
+    <p class="sub">From Log a walk-in. Check the job and the amount, then the customer fills in steps 7 and 8.</p>
+    <div class="f"><label for="wdesc">What we&#8217;re making</label><input id="wdesc" type="text" maxlength="180"></div>
+    <div class="grid" style="margin-top:12px">
+      <div class="f"><label for="wamount">Amount for the whole job ($)</label><input id="wamount" type="text" inputmode="decimal" autocomplete="off"></div>
+      <label class="check" style="align-self:end"><input type="checkbox" id="wtax"><span><b>We supply the item</b><br><small style="color:var(--muted)">Adds sales tax. Leave unticked when it&#8217;s the customer&#8217;s own item.</small></span></label>
+    </div>
+  </section>
+
   <section class="step" id="s-product">
     <h2><span class="n">1</span>Are you bringing your own item?</h2>
     <div class="two" id="owntog">
@@ -172,7 +182,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     <p class="qcalc" id="qcalc"></p>
     <p class="nudge" id="qnudge"></p>
     <div id="ovwrap" hidden style="margin-top:16px;padding:14px 16px;border:2px dashed var(--ink);border-radius:14px;background:#fff">
-      <label class="check" style="background:transparent;border:0;padding:0"><input type="checkbox" id="ovon"><span><b>Set the price myself</b> <small style="color:var(--muted)">(counter only, needs a manager or owner PIN)</small></span></label>
+      <label class="check" style="background:transparent;border:0;padding:0"><input type="checkbox" id="ovon"><span><b>Set the price myself</b> <small style="color:var(--muted)">(counter only, your PIN records who set it)</small></span></label>
       <div id="ovbox" hidden style="margin-top:12px;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
         <div class="f" style="max-width:170px"><label for="ovprice">Price per spot</label><input id="ovprice" type="text" inputmode="decimal" placeholder="$40.00" autocomplete="off"></div>
         <div class="f" style="max-width:150px"><label for="ovspots">Spots on each piece</label><input id="ovspots" type="text" inputmode="numeric" value="1" autocomplete="off"></div>
@@ -396,20 +406,30 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     if (!(price >= 100 && price <= 2000000) || !(spots >= 1 && spots <= 20)) return { bad: true };
     return { price: price, spots: spots, unit: price*spots };
   }
+  // walk-in mode (from Log a walk-in): one job, one amount typed at the counter; charged like a custom price
+  var WALKIN = HUB && qs.get('walkin') === '1';
+  function walkin(){
+    var amt = Math.round(parseFloat(String($('#wamount').value).replace(/[$,\s]/g,''))*100), desc = $('#wdesc').value.trim();
+    if (!(amt >= 100 && amt <= 2000000) || desc.length < 3) return { ovBad: true, walkin: true, qty: 1 };
+    var taxable = $('#wtax').checked || TAX_OWN;
+    return { walkin: true, desc: desc, qty: 1, ov: { price: amt, spots: 1, unit: amt }, subtotal: amt, tax: taxable ? Math.round(amt*TAX) : 0, taxable: taxable, over: 0, product: { key: 'custom', name: desc } };
+  }
   function ovDescription(q){
+    if (q && q.walkin) return q.desc;
     var item = !q ? 'item' : q.product.key==='own' ? 'customer\u2019s own '+q.material.name.toLowerCase()+' item' : q.product.key==='garment' ? 'customer\u2019s own garment' : q.product.name.toLowerCase();
     var o = override(); var spots = o && !o.bad ? o.spots : 1;
     var d = (q ? lcName(q.service.name) : 'Custom work')+' on '+item+', '+spots+' spot'+(spots>1?'s':'')+(S.art==='text' && S.text.trim() ? ', text \u201c'+S.text.trim()+'\u201d' : '');
     return d.length > 190 ? d.slice(0,189)+'\u2026' : d;
   }
   function priced(){ // the quote the customer pays: the price book's, or the counter override on top of the same choices
+    if (WALKIN) return walkin();
     var q = quote(), o = override(); if (!q || !o) return q;
     if (o.bad) return Object.assign({}, q, { ovBad: true });
     var sub = o.unit*q.qty; return Object.assign({}, q, { ov: o, subtotal: sub, tax: q.taxable ? Math.round(sub*TAX) : 0, over: 0 });
   }
   function renderSummary(){
     var q = priced(); var dl = $('#lines');
-    if (q && q.ovBad) { dl.innerHTML = '<div><dt>Type the price per spot and the number of spots.</dt><dd></dd></div>'; $('#bartot').textContent = '$0'; $('#ovnote').textContent = ''; return; }
+    if (q && q.ovBad) { dl.innerHTML = '<div><dt>'+(q.walkin ? 'Say what we\u2019re making and the amount.' : 'Type the price per spot and the number of spots.')+'</dt><dd></dd></div>'; $('#bartot').textContent = '$0'; $('#ovnote').textContent = ''; return; }
     if (q && q.ov) {
       $('#ovnote').innerHTML = money(q.ov.price)+' \u00d7 '+q.ov.spots+' = <b>'+money(q.ov.unit)+' each</b>';
       var orows = [['<b>'+q.qty+' \u00d7 '+esc(ovDescription(q))+'</b> <small>(price set at the counter, '+money(q.ov.unit)+' each)</small>', money(q.subtotal)], q.taxable ? ['Sales tax, est.', money(q.tax)] : ['Sales tax', 'none <small>(your own item)</small>']];
@@ -497,7 +517,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   function fail(msg){ var e = $('#err'); e.textContent = msg; e.hidden = false; e.scrollIntoView({behavior:'smooth', block:'center'}); $('#pay').disabled = false; renderSummary(); }
   function checkForm(){
     $('#err').hidden = true; var q = priced();
-    if (q && q.ovBad) return fail('Type the price per spot and the number of spots, or untick Set the price myself.');
+    if (q && q.ovBad) return fail(q.walkin ? 'Say what we\u2019re making and type the amount (at the top).' : 'Type the price per spot and the number of spots, or untick Set the price myself.');
     if (!q) return fail('Finish steps 1 to 4 first: the item, the finish and the size.');
     if (q.over) return fail('For more than '+q.over+' of these we price it by hand. Ask for a quote and we\u2019ll come back with a number.');
     var name = $('#name').value.trim(), email = $('#email').value.trim(), phone = $('#phone').value.trim();
@@ -518,7 +538,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
       heard: $('#heard').value || null, src: HUB ? null : (window.hdSource ? hdSource() : null), from: (qs.get('from') || '').slice(0,40) || null,
       logo: S.logo ? { name: S.logoName, data: S.logo } : null };
     if (HUB && $('#staffpin').value) body.staff = { name: SERVER(), pin: $('#staffpin').value };
-    if (v.q.ov) { body.spec = { custom: { description: ovDescription(v.q), unit_cents: v.q.ov.unit, we_supply_item: v.q.taxable }, qty: v.q.qty }; body.notes = [body.notes, 'Price set at the counter: '+money(v.q.ov.price)+' x '+v.q.ov.spots+' spot'+(v.q.ov.spots>1?'s':'')+' = '+money(v.q.ov.unit)+' each. Choices: '+(S.inches+' in, ')+(S.art==='text'?'text only':S.art==='file'?'logo on file':'new logo')+'.'].filter(Boolean).join('\n'); }
+    if (v.q.ov) { body.spec = { custom: { description: ovDescription(v.q), unit_cents: v.q.ov.unit, we_supply_item: v.q.taxable }, qty: v.q.qty }; body.notes = [body.notes, v.q.walkin ? 'Walk-in job, amount set at the counter: '+money(v.q.ov.unit)+'.' : 'Price set at the counter: '+money(v.q.ov.price)+' x '+v.q.ov.spots+' spot'+(v.q.ov.spots>1?'s':'')+' = '+money(v.q.ov.unit)+' each. Choices: '+(S.inches+' in, ')+(S.art==='text'?'text only':S.art==='file'?'logo on file':'new logo')+'.'].filter(Boolean).join('\n'); if (v.q.walkin) { body.spec.custom.no_logo = true; body.from = 'walkin'; } }
     return body;
   }
   $('#pay').onclick = function(){
@@ -580,6 +600,15 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     var pin = parseFloat(qs.get('inches')); if (pin >= 0.5 && pin <= BOOK.max_inches) S.inches = Math.round(pin*2)/2;
     var pq = parseInt(qs.get('qty'), 10); if (pq >= 1 && pq <= 500) S.qty = pq;
     if (qs.get('art') === 'text' || qs.get('art') === 'file') S.art = qs.get('art');
+    if (WALKIN) {
+      ['s-product','s-service','s-sides','s-detail','s-size','s-qty','s-logo'].forEach(function(id){ var el = document.getElementById(id); if (el) el.style.display = 'none'; });
+      $('#s-walkin').hidden = false; var pv = $('#preview'); if (pv) pv.style.display = 'none';
+      $('#wdesc').value = (qs.get('desc') || '').slice(0,180); $('#wamount').value = qs.get('amount') || '';
+      if (qs.get('name')) $('#name').value = qs.get('name').slice(0,80); if (qs.get('phone')) $('#phone').value = qs.get('phone').slice(0,40);
+      if (qs.get('notes')) $('#notes').value = qs.get('notes').slice(0,2000); if (/^\d{4}-\d{2}-\d{2}$/.test(qs.get('needed') || '')) $('#needed').value = qs.get('needed');
+      ['wdesc','wamount','wtax'].forEach(function(id){ $('#'+id).addEventListener('input', function(){ renderSummary(); renderWords(); }); $('#'+id).addEventListener('change', function(){ renderSummary(); renderWords(); }); });
+      $('#hubwho').textContent = 'Walk-in job' + (BY ? ' · logged by ' + BY : '') + '. The customer fills in steps 7 and 8.';
+    }
     renderAll(); if (window.hdTrack) hdTrack('order_view'); }
   if (!BASE) { $('#loaderr').textContent = 'Online ordering isn’t switched on yet. Use the quote form or call (858) 373-9866.'; $('#loaderr').hidden = false; }
   else fetch(BASE + '/pricing?t=' + Date.now(), { cache: 'no-store' }).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }).then(boot).catch(function(){ $('#loaderr').innerHTML = 'Prices didn’t load. Refresh in a moment, or <a href="/quote/">ask for a quote</a> and we’ll price it by hand.'; $('#loaderr').hidden = false; });

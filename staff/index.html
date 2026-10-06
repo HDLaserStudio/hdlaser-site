@@ -108,7 +108,8 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
         <div class="row"><label>Promised for<select name="due"><option value="today">Today (same day)</option><option value="tomorrow">Tomorrow</option><option value="3">In 3 days</option><option value="7">In a week</option><option value="14">In 2 weeks</option></select></label><label style="flex:0 1 130px">Minutes<input name="minutes" type="number" min="1" inputmode="numeric" placeholder="auto"></label></div>
         <label>Notes<textarea name="note" rows="2" placeholder="Design, file name, special requests"></textarea></label>
         <p class="note" id="jobest"></p>
-        <button class="btn" type="submit">Add to queue</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" type="submit">Add to queue</button><button class="btn" type="button" id="jobcharge" style="background:#C8372A;border-color:#C8372A;color:#fff">Charge on the Terminal</button></div>
+        <p class="note" style="margin:0">Charge on the Terminal opens the order page with this job filled in. The customer signs, you pick your name and PIN, they tap the card, and the job goes into the queue already paid. Add to queue is for jobs paid another way.</p>
         <div id="jobmsg"></div>
       </form>
     </div>
@@ -195,6 +196,14 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
   function stat(l,n){ return '<div class="stat"><div class="l">'+l+'</div><div class="n">'+n+'</div></div>'; }
   function est(){ var f=$('#jobform'); var o=f.product.selectedOptions[0]; if(!o) return; var q=Math.max(1,parseInt(f.qty.value,10)||1); var mins=Math.round(+o.dataset.setup+(+o.dataset.each)*q); $('#jobest').textContent='Estimated '+mins+' minutes of shop time'+(f.minutes.value?' (you overrode it to '+f.minutes.value+')':'')+'.'; }
   $('#jobform').addEventListener('input',est);
+  // charge this walk-in on the Terminal: the order page asks the customer the same questions and puts the paid job in the queue
+  $('#jobcharge').addEventListener('click',function(){ var f=$('#jobform'), amt=parseFloat(f.amount.value);
+    if(!(amt>=1)){ $('#jobmsg').innerHTML='<div class="err">Type the amount for the job first.</div>'; return; }
+    var o=f.product.selectedOptions[0], qty=Math.max(1,parseInt(f.qty.value,10)||1), desc=(qty>1?qty+' \u00d7 ':'')+(o?o.textContent:'Custom job')+(f.note.value.trim()?': '+f.note.value.trim():'');
+    var due=new Date(), d=f.due.value; if(d==='tomorrow') due.setDate(due.getDate()+1); else if(d!=='today') due.setDate(due.getDate()+parseInt(d,10));
+    var ymd=due.getFullYear()+'-'+String(due.getMonth()+1).padStart(2,'0')+'-'+String(due.getDate()).padStart(2,'0');
+    var p=new URLSearchParams({via:'hub',by:(state&&state.me&&state.me.name)||'',walkin:'1',desc:desc.slice(0,180),amount:amt.toFixed(2),name:f.customer.value,phone:f.phone.value,needed:ymd});
+    location.href='/order/?'+p.toString(); });
   $('#jobform').addEventListener('submit',function(e){ e.preventDefault(); var f=e.target; var due=new Date(); var d=f.due.value; if(d==='tomorrow') due.setDate(due.getDate()+1); else if(d!=='today') due.setDate(due.getDate()+parseInt(d,10)); due.setHours(16,0,0,0);
     api('/staff/jobs',{customer:f.customer.value,phone:f.phone.value,product:f.product.value,qty:f.qty.value,amount:f.amount.value,minutes:f.minutes.value,due:due.toISOString(),note:f.note.value}).then(function(j){ $('#jobmsg').innerHTML='<div class="ok">Added, '+j.minutes+' min. It\'s in the work queue.</div>'; f.reset(); est(); load(); setTimeout(function(){$('#jobmsg').innerHTML='';},4000); }).catch(function(err){ $('#jobmsg').innerHTML='<div class="err">'+esc(err.message)+'</div>'; }); });
 
