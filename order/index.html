@@ -185,7 +185,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     <h2><span class="n">5</span>Your logo or artwork</h2>
     <p class="sub">A new logo carries a one-time setup for artwork prep. Text only, or a logo we already have on file, has no setup.</p>
     <div class="two" id="arts">
-      <button type="button" class="svc on" data-art="logo"><b>A new logo or design</b><span>Upload it now or email it after. One-time setup applies.</span></button>
+      <button type="button" class="svc on" data-art="logo"><b>A new logo or design</b><span>Upload it now or email it after. One-time logo digitizing and setup fee.</span></button>
       <button type="button" class="svc" data-art="text"><b>Text only</b><span>Names, dates, a line of text. No setup.</span></button>
       <button type="button" class="svc" data-art="file"><b>A logo you already have</b><span>We&#8217;ve made this for you before. No setup.</span></button>
     </div>
@@ -421,7 +421,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     var rows = [['<b>'+(q.qty*q.prints)+' × '+esc(lcName(q.service.name))+'</b>, '+(q.flatText ? 'text only, flat price' : S.inches+' in')+(q.detail ? ', '+esc(q.detail.name.toLowerCase()) : '')+(q.sides ? ', '+(q.sides==='both'?'front and back':q.sides) : '')+(q.off?' <small>('+q.off+'% off)</small>':q.flatOff?' <small>('+money(q.flatOff)+' off each)</small>':''), money(q.work)]];
     if (q.blankUnit) rows.push([q.qty+' × '+esc(q.product.name), money(q.blank)]);
     if (q.handUnit) rows.push([q.qty+' × handling your own item', money(q.hand)]);
-    if (q.art==='logo') { if (q.setup) rows.push(['Setup, artwork prep <small>(one time)</small>', money(q.setup)]); } else rows.push(['Setup', 'none <small>('+(q.art==='text'?'text only':'logo on file')+')</small>']);
+    if (q.art==='logo') { if (q.setup) rows.push(['Logo digitizing and setup <small>(one time)</small>', money(q.setup)]); } else rows.push(['Setup', 'none <small>('+(q.art==='text'?'text only':'logo on file')+')</small>']);
     if (q.rush) rows.push(['Rush, '+BOOK.rush_pct+'% on the work', money(q.rush)]);
     if (q.top) rows.push(['Shop minimum', money(q.top)]);
     rows.push(q.taxable ? ['Sales tax, est.', money(q.tax)] : ['Sales tax', 'none <small>(your own item)</small>']);

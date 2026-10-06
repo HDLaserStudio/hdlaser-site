@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-06 v36"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-06 v37"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2414,8 +2414,8 @@ const TARGET_MARGIN = 0.55;          // every piece should clear this after blan
 const DEFAULT_BOOK = {
   version: 1,
   services: [
-    { key: "engrave", name: "Laser engraving", blurb: "Etched into the surface. Permanent, one tone.", setup_cents: 0, min_per_piece: 4, per_inch: 2, consumable_cents: 8, max_inches: 12 },
-    { key: "uv", name: "UV printing", blurb: "Full color, printed onto the surface.", setup_cents: 0, min_per_piece: 3, per_inch: 1.5, consumable_cents: 35, max_inches: 12 },
+    { key: "engrave", name: "Laser engraving", blurb: "Etched into the surface. Permanent, one tone.", setup_cents: 5000, min_per_piece: 4, per_inch: 2, consumable_cents: 8, max_inches: 12 },
+    { key: "uv", name: "UV printing", blurb: "Full color, printed onto the surface.", setup_cents: 5000, min_per_piece: 3, per_inch: 1.5, consumable_cents: 35, max_inches: 12 },
     { key: "dtf", name: "DTF printing", blurb: "Full color pressed onto fabric. Shirts, hoodies, hats, totes.", setup_cents: 1000, min_per_piece: 3, per_inch: 0.5, consumable_cents: 60, max_inches: 12 },
     { key: "cut", name: "Laser cutting", blurb: "Cut right through. Shapes, letters, signs from wood, acrylic or leather.", setup_cents: 0, min_per_piece: 4, per_inch: 2.5, consumable_cents: 10, max_inches: 28 },
   ],
@@ -2690,7 +2690,7 @@ async function orderCheckout(request, env, cors) {
   const lineItems = [{ name: q.custom ? q.product.name : `${q.service.name}, ${q.inches} in on ${q.product.key === "own" ? "customer's " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "customer's own garment" : q.product.name.toLowerCase()}${q.sides ? ", " + (q.sides === "both" ? "front and back" : q.sides) : ""}${q.discount_pct ? ` (${q.discount_pct}% quantity discount)` : ""}`, quantity: String(q.qty * q.prints), base_price_money: { amount: q.work_unit_after_cents, currency: "USD" } }];
   if (q.blank_unit_cents) lineItems.push({ name: q.product.name, quantity: String(q.qty), base_price_money: { amount: q.blank_unit_cents, currency: "USD" } });
   if (q.handling_unit_cents) lineItems.push({ name: "Customer-supplied item handling", quantity: String(q.qty), base_price_money: { amount: q.handling_unit_cents, currency: "USD" } });
-  if (q.setup_cents) lineItems.push({ name: `${q.service.name} setup (artwork prep, one time)`, quantity: "1", base_price_money: { amount: q.setup_cents, currency: "USD" } });
+  if (q.setup_cents) lineItems.push({ name: `Logo digitizing and setup, ${lcName(q.service.name)} (one time)`, quantity: "1", base_price_money: { amount: q.setup_cents, currency: "USD" } });
   if (q.rush_cents) lineItems.push({ name: `Rush (+${book.rush_pct}% on the work)`, quantity: "1", base_price_money: { amount: q.rush_cents, currency: "USD" } });
   if (q.minimum_top_up_cents) lineItems.push({ name: "Shop minimum", quantity: "1", base_price_money: { amount: q.minimum_top_up_cents, currency: "USD" } });
   const order = { location_id: env.SQUARE_LOCATION_ID, reference_id: ref, line_items: lineItems };
