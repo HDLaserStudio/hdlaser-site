@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v38"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v39"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2550,6 +2550,7 @@ function quoteSpec(book, spec) {
 }
 // The exact words the customer initials. Rendered identically on the order page; the copy stored with the order is this one.
 function attestText(q, name) {
+  if (q.custom && q.lines) return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what we agreed at the counter: ${q.lines.map((l) => `${l.qty} × ${l.name} at $${(l.unit_cents / 100).toFixed(2)} each`).join("; ")}${q.setup_cents ? `; logo digitizing and setup $${(q.setup_cents / 100).toFixed(2)}` : ""}. I understand that engraving and printing are permanent and cannot be undone. If what I asked for turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
   if (q.custom) return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what we agreed at the counter: ${q.product.name}, quantity ${q.qty}, at ${"$" + (q.work_unit_cents / 100).toFixed(2)} each. I understand that engraving and printing are permanent and cannot be undone. If what I asked for turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
   return `I, ${name}, have checked this order myself. HD Laser Studio will make exactly what I have specified here: ${lcName(q.service.name)} on ${q.product.key === "own" ? "my own " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "my own garment" : "a " + q.product.name.toLowerCase()}, artwork ${q.inches} inches on its longest side${q.detail_name ? ", " + q.detail_name.toLowerCase() + " cut" : ""}${q.sides ? " on the " + (q.sides === "both" ? "front and the back" : q.sides) : ""}, quantity ${q.qty}${q.art === "text" ? ", reading exactly: \u201c" + q.text + "\u201d" : q.art === "file" ? ", using the logo we have on file for " + q.art_ref : ""}. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, any redo or replacement is at my expense.`;
 }
@@ -2560,6 +2561,7 @@ function initialsFor(name) { const w = String(name || "").trim().split(/\s+/).fi
 // A custom-priced job from the counter: a manager or owner names the work and the price. Same order record, Terminal and emails as everything else.
 function customQuote(book, spec) {
   const c = spec.custom || {};
+  if (Array.isArray(c.lines) && c.lines.length) return customLinesQuote(book, c);
   const description = String(c.description || "").trim().slice(0, 200);
   if (description.length < 3) return { error: "Describe the work" };
   const unit = Math.round(Number(c.unit_cents));
@@ -2575,6 +2577,28 @@ function customQuote(book, spec) {
 }
 // The PIN says who took the sale. The named person is tried first; if it isn't their PIN, any active employee whose
 // PIN it is takes the sale (Hugh, Oct 5: whoever served the customer types their own PIN, whoever is signed in).
+// A walk-in with several items (Hugh, Oct 7): each item its own line with quantity and price each, plus the optional
+// logo digitizing and setup. Every line goes to Square as its own line item.
+function customLinesQuote(book, c) {
+  if (c.lines.length > 20) return { error: "At most 20 items on one walk-in" };
+  const lines = [];
+  for (const l of c.lines) {
+    const name = String(l.name || "").trim().slice(0, 120), qty = parseInt(l.qty, 10), unit = Math.round(Number(l.unit_cents));
+    if (name.length < 2) return { error: "Every item needs a name" };
+    if (!(qty >= 1 && qty <= 1000)) return { error: `Quantity for ${name} must be 1 to 1000` };
+    if (!(unit >= 0 && unit <= 2000000)) return { error: `Price for ${name} must be between $0 and $20,000` };
+    lines.push({ name, qty, unit_cents: unit });
+  }
+  const eng = (book.services || []).find((s) => s.key === "engrave");
+  const setup = c.setup ? ((eng && eng.setup_cents) || 5000) : 0;
+  const items = lines.reduce((a, l) => a + l.qty * l.unit_cents, 0);
+  if (items + setup < 100) return { error: "The total must be at least $1" };
+  const qty = lines.reduce((a, l) => a + l.qty, 0), taxable = !!c.we_supply_item;
+  const description = lines.map((l) => `${l.qty} × ${l.name}`).join(", ").slice(0, 200);
+  return { custom: true, lines, product: { key: "custom", name: description }, material: { key: "custom", name: "" }, service: { key: "custom", name: "Custom work", setup_cents: setup }, inches: 0, qty, rush: false, sides: null, prints: 1, taxable, art: c.no_logo ? "text" : "logo", text: "", art_ref: "", flat_text: false,
+    work_unit_cents: items, work_unit_after_cents: items, discount_pct: 0, discount_cents: 0, blank_unit_cents: 0, handling_unit_cents: 0, work_cents: items, blank_cents: 0, handling_cents: 0, rush_cents: 0, setup_cents: setup, minimum_top_up_cents: 0, subtotal_cents: items + setup, next_break: null,
+    summary: `custom: ${description}${setup ? ", logo digitizing and setup" : ""}${taxable ? " (we supply the item)" : ""}` };
+}
 async function verifyStaff(env, name, pin) {
   name = String(name || "").trim(); pin = String(pin || "").trim();
   if (!env.DB || !/^\d{4,8}$/.test(pin)) return null;
@@ -2691,7 +2715,9 @@ async function orderCheckout(request, env, cors) {
   const lineItems = [{ name: q.custom ? q.product.name : `${q.service.name}, ${q.inches} in on ${q.product.key === "own" ? "customer's " + q.material.name.toLowerCase() + " item" : q.product.key === "garment" ? "customer's own garment" : q.product.name.toLowerCase()}${q.sides ? ", " + (q.sides === "both" ? "front and back" : q.sides) : ""}${q.discount_pct ? ` (${q.discount_pct}% quantity discount)` : ""}`, quantity: String(q.qty * q.prints), base_price_money: { amount: q.work_unit_after_cents, currency: "USD" } }];
   if (q.blank_unit_cents) lineItems.push({ name: q.product.name, quantity: String(q.qty), base_price_money: { amount: q.blank_unit_cents, currency: "USD" } });
   if (q.handling_unit_cents) lineItems.push({ name: "Customer-supplied item handling", quantity: String(q.qty), base_price_money: { amount: q.handling_unit_cents, currency: "USD" } });
-  if (q.setup_cents) lineItems.push({ name: `Logo digitizing and setup, ${lcName(q.service.name)} (one time)`, quantity: "1", base_price_money: { amount: q.setup_cents, currency: "USD" } });
+  if (q.lines) lineItems.splice(0, lineItems.length, ...q.lines.map((l) => ({ name: l.name, quantity: String(l.qty), base_price_money: { amount: l.unit_cents, currency: "USD" } })));
+  if (q.lines && q.setup_cents) lineItems.push({ name: "Logo digitizing and setup (one time)", quantity: "1", base_price_money: { amount: q.setup_cents, currency: "USD" } });
+  else if (q.setup_cents) lineItems.push({ name: `Logo digitizing and setup, ${lcName(q.service.name)} (one time)`, quantity: "1", base_price_money: { amount: q.setup_cents, currency: "USD" } });
   if (q.rush_cents) lineItems.push({ name: `Rush (+${book.rush_pct}% on the work)`, quantity: "1", base_price_money: { amount: q.rush_cents, currency: "USD" } });
   if (q.minimum_top_up_cents) lineItems.push({ name: "Shop minimum", quantity: "1", base_price_money: { amount: q.minimum_top_up_cents, currency: "USD" } });
   const order = { location_id: env.SQUARE_LOCATION_ID, reference_id: ref, line_items: lineItems };
@@ -2745,7 +2771,7 @@ async function orderCheckout(request, env, cors) {
   // tell the shop and the customer straight away; payment confirmation follows from the Square webhook
   const $ = (n) => "$" + (n / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const who = c.business ? `${c.business} (${name})` : name;
-  const breakdown = [q.custom ? `${q.qty} × ${q.product.name} @ ${$(q.work_unit_cents)} (custom price set by ${takenBy})` : `${q.qty * q.prints} × ${lcName(q.service.name)} ${q.inches} in${q.sides ? " (" + (q.sides === "both" ? "front and back" : q.sides) + ")" : ""} @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : q.discount_off_cents ? ` (${$(q.discount_off_cents)} off each for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", q.setup_cents ? `Setup ${$(q.setup_cents)}` : `Setup: none (${q.art === "text" ? "text only" : "logo on file"})`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
+  const breakdown = [q.custom && q.lines ? q.lines.map((l) => `${l.qty} × ${l.name} @ ${$(l.unit_cents)}`).join("\n") + ` (prices set by ${takenBy})` : q.custom ? `${q.qty} × ${q.product.name} @ ${$(q.work_unit_cents)} (custom price set by ${takenBy})` : `${q.qty * q.prints} × ${lcName(q.service.name)} ${q.inches} in${q.sides ? " (" + (q.sides === "both" ? "front and back" : q.sides) + ")" : ""} @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : q.discount_off_cents ? ` (${$(q.discount_off_cents)} off each for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", q.setup_cents ? `Setup ${$(q.setup_cents)}` : `Setup: none (${q.art === "text" ? "text only" : "logo on file"})`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
   if (env.RESEND_API_KEY) {
     await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
 `New order ${ref} from hdlaser.net${takenBy ? " (taken at the counter by " + takenBy + ")" : ""}

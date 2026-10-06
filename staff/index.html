@@ -51,6 +51,7 @@ ul.steps li.done{color:var(--muted);text-decoration:line-through}
 .stat{background:var(--bg);border-radius:12px;padding:10px 12px}.stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}.stat .n{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:24px;font-weight:700;margin-top:2px}
 table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:7px 6px;border-bottom:1px solid #EDE8DF;vertical-align:top}th{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}td.num,th.num{text-align:right;white-space:nowrap}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}.row label{flex:1 1 140px}
+.jl{border:1px solid #E4E0D8;border-radius:12px;padding:10px;margin-bottom:8px}.jl .jlt{font-weight:700;min-width:80px;padding-bottom:10px}.jl .jrm{background:none;border:0;font-size:20px;cursor:pointer;padding:0 6px 10px;color:#A32C21}
 .small{font-size:13px;color:var(--muted)}
 .ok{background:#E7F2EC;color:var(--green);border-radius:10px;padding:8px 12px;font-weight:600;margin-top:8px}
 [hidden]{display:none !important}
@@ -104,7 +105,10 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
       <h2>Log a walk-in or phone job</h2>
       <form id="jobform" style="display:flex;flex-direction:column;gap:10px">
         <div class="row"><label>Customer<input name="customer" placeholder="Name or business"></label><label>Phone<input name="phone" inputmode="tel" placeholder="For pickup texts"></label></div>
-        <div class="row"><label>Product<select name="product" id="product"></select></label><label style="flex:0 1 110px">Quantity<input name="qty" type="number" min="1" value="1" inputmode="numeric"></label><label style="flex:0 1 130px">Amount $<input name="amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0"></label></div>
+        <div id="jlines"></div>
+        <div><button type="button" class="btn ghost sm" id="jadd">+ Add another item</button></div>
+        <label style="display:flex;flex-direction:row;justify-content:flex-start;gap:10px;align-items:center;font-weight:700;font-size:16px;color:inherit;text-align:left"><input type="checkbox" id="jsetup" style="width:22px;height:22px;flex:none;margin:0"> <span>Logo digitizing and setup <span id="jsetupamt">($50, once)</span></span></label>
+        <p id="jtotal" style="font-size:20px;margin:4px 0"><b>Total $0.00</b></p>
         <div class="row"><label>Promised for<select name="due"><option value="today">Today (same day)</option><option value="tomorrow">Tomorrow</option><option value="3">In 3 days</option><option value="7">In a week</option><option value="14">In 2 weeks</option></select></label><label style="flex:0 1 130px">Minutes<input name="minutes" type="number" min="1" inputmode="numeric" placeholder="auto"></label></div>
         <label>Notes<textarea name="note" rows="2" placeholder="Design, file name, special requests"></textarea></label>
         <p class="note" id="jobest"></p>
@@ -185,7 +189,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
       var acts=i.kind==='job'?('<button class="btn sm" data-job="'+i.id+'" data-status="'+(i.status==='started'?'done':'started')+'">'+(i.status==='started'?'Done':'Start')+'</button><button class="btn sm ghost" data-job="'+i.id+'" data-status="cancelled">Cancel</button>')
         :(i.stage==='waiting for logo'?'<button class="btn sm" data-ref="'+i.id+'" data-field="logo_received_at">Logo received</button>':i.stage==='send proof'?'<button class="btn sm" data-ref="'+i.id+'" data-field="proof_approved_at">Proof approved</button>':'<button class="btn sm" data-ref="'+i.id+'" data-field="completed_at">Done</button>');
       return '<div class="q"><div class="sc '+cls+'">'+i.score+'</div><div class="d"><b>'+esc(i.title)+'</b><small>'+(i.kind==='order'?'<span class="pill y">web order '+esc(i.id)+'</span>':'')+'<span class="pill '+(i.status==='started'?'g':'')+'">'+esc(i.status)+'</span>'+due+' · '+(i.minutes||0)+' min · '+money(i.amount_cents)+(i.phone?' · '+esc(i.phone):'')+'</small>'+(i.note?'<small>'+esc(i.note)+'</small>':'')+'</div><div class="a">'+acts+'</div></div>'; }).join(''):'<p class="note">Nothing in the queue. Nice.</p>';
-    var sel=$('#product'); if(!sel.options.length){ s.products.forEach(function(p){ var o=document.createElement('option'); o.value=p.key; o.textContent=p.name; o.dataset.setup=p.setup; o.dataset.each=p.each; sel.appendChild(o); }); est(); }
+    if(!PRODS.length){ PRODS=s.products||[]; if(!document.querySelector('#jlines .jl')) addLine(); }
     var w=s.week; $('#mystats').innerHTML=stat('Hours',w.hours)+stat('Shifts',w.shifts)+stat('On-time opens',w.opens?w.on_time_opens+'/'+w.opens:'–')+stat('Checklist',w.checklist_pct==null?'–':w.checklist_pct+'%')+stat('Jobs done',w.jobs_done)+stat('Job value',money(w.jobs_done_amount_cents))+stat('Jobs logged',w.jobs_logged)+stat('Order updates',w.order_updates);
     var p=s.pay; if(p){ $('#payperiod').textContent=dt(p.period_from)+' to '+dt(new Date(new Date(p.period_to).getTime()-1).toISOString())+' · '+p.days_left+' day'+(p.days_left===1?'':'s')+' left';
       $('#paystats').innerHTML=stat('Hours so far',p.hours)+stat('Earned so far',money(p.earned_cents))+stat('Commission',money(p.commission_cents))+stat('Projected',money(p.projected_cents));
@@ -194,18 +198,33 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
     $('#teamtab').hidden=!s.is_manager; if(s.is_manager) loadTeam();
   }
   function stat(l,n){ return '<div class="stat"><div class="l">'+l+'</div><div class="n">'+n+'</div></div>'; }
-  function est(){ var f=$('#jobform'); var o=f.product.selectedOptions[0]; if(!o) return; var q=Math.max(1,parseInt(f.qty.value,10)||1); var mins=Math.round(+o.dataset.setup+(+o.dataset.each)*q); $('#jobest').textContent='Estimated '+mins+' minutes of shop time'+(f.minutes.value?' (you overrode it to '+f.minutes.value+')':'')+'.'; }
-  $('#jobform').addEventListener('input',est);
-  // charge this walk-in on the Terminal: the order page asks the customer the same questions and puts the paid job in the queue
-  $('#jobcharge').addEventListener('click',function(){ var f=$('#jobform'), amt=parseFloat(f.amount.value);
-    if(!(amt>=1)){ $('#jobmsg').innerHTML='<div class="err">Type the amount for the job first.</div>'; return; }
-    var o=f.product.selectedOptions[0], qty=Math.max(1,parseInt(f.qty.value,10)||1), desc=(qty>1?qty+' \u00d7 ':'')+(o?o.textContent:'Custom job')+(f.note.value.trim()?': '+f.note.value.trim():'');
-    var due=new Date(), d=f.due.value; if(d==='tomorrow') due.setDate(due.getDate()+1); else if(d!=='today') due.setDate(due.getDate()+parseInt(d,10));
-    var ymd=due.getFullYear()+'-'+String(due.getMonth()+1).padStart(2,'0')+'-'+String(due.getDate()).padStart(2,'0');
-    var p=new URLSearchParams({via:'hub',by:(state&&state.me&&state.me.name)||'',walkin:'1',desc:desc.slice(0,180),amount:amt.toFixed(2),name:f.customer.value,phone:f.phone.value,needed:ymd});
+  var money2=function(c){return '$'+((c||0)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});};
+  // ---- walk-in items: one row per item (product, quantity, price each), optional logo setup, running total
+  var PRODS=[], SETUP=5000;
+  fetch(BASE+'/pricing',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ var e=d&&d.book&&d.book.services.filter(function(x){return x.key==='engrave';})[0]; if(e&&e.setup_cents>0) SETUP=e.setup_cents; $('#jsetupamt').textContent='('+money2(SETUP)+', once)'; total(); }).catch(function(){});
+  function addLine(){ var d=document.createElement('div'); d.className='row jl';
+    d.innerHTML='<label>Product<select class="jp">'+PRODS.map(function(p){ return '<option value="'+esc(p.key)+'" data-setup="'+p.setup+'" data-each="'+p.each+'">'+esc(p.name)+'</option>'; }).join('')+'</select></label><label style="flex:0 1 90px">Qty<input class="jq" type="number" min="1" value="1" inputmode="numeric"></label><label style="flex:0 1 130px">Price each $<input class="ju" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0"></label><span class="jlt">$0.00</span><button type="button" class="jrm" title="Remove">&#10005;</button>';
+    $('#jlines').appendChild(d); total(); }
+  function lines(){ return [].slice.call(document.querySelectorAll('#jlines .jl')).map(function(d){ var sel=d.querySelector('.jp'), o=sel.selectedOptions[0]; var q=Math.max(1,parseInt(d.querySelector('.jq').value,10)||1), u=Math.round((parseFloat(d.querySelector('.ju').value)||0)*100);
+    return { el:d, key:sel.value, name:o?o.textContent:'Item', qty:q, unit:u, line:q*u, mins:o?Math.round(+o.dataset.setup+(+o.dataset.each)*q):0 }; }); }
+  function total(){ var L=lines(), sum=0; L.forEach(function(l){ l.el.querySelector('.jlt').textContent=money2(l.line); sum+=l.line; }); if($('#jsetup').checked) sum+=SETUP;
+    $('#jtotal').innerHTML='<b>Total '+money2(sum)+'</b>'+(L.length>1||$('#jsetup').checked?' <span class="note">('+L.length+' item'+(L.length>1?'s':'')+($('#jsetup').checked?' + logo setup':'')+')</span>':''); est(); return sum; }
+  function est(){ var f=$('#jobform'), mins=lines().reduce(function(a,l){return a+l.mins;},0); $('#jobest').textContent='Estimated '+mins+' minutes of shop time'+(f.minutes.value?' (you overrode it to '+f.minutes.value+')':'')+'.'; }
+  $('#jadd').addEventListener('click',addLine);
+  $('#jobform').addEventListener('input',total); $('#jobform').addEventListener('change',total);
+  $('#jlines').addEventListener('click',function(e){ var b=e.target.closest('.jrm'); if(!b) return; if(document.querySelectorAll('#jlines .jl').length>1) b.closest('.jl').remove(); total(); });
+  function dueDate(f){ var due=new Date(), d=f.due.value; if(d==='tomorrow') due.setDate(due.getDate()+1); else if(d!=='today') due.setDate(due.getDate()+parseInt(d,10)); due.setHours(16,0,0,0); return due; }
+  function resetJob(f){ f.reset(); $('#jlines').innerHTML=''; addLine(); }
+  // Add to queue: one job per item (for jobs paid another way); the logo setup rides on the first item
+  $('#jobform').addEventListener('submit',function(e){ e.preventDefault(); var f=e.target, L=lines(), due=dueDate(f), setup=$('#jsetup').checked;
+    var posts=L.map(function(l,i){ return api('/staff/jobs',{customer:f.customer.value,phone:f.phone.value,product:l.key,qty:l.qty,amount:((l.line+(i===0&&setup?SETUP:0))/100).toFixed(2),minutes:(L.length===1?f.minutes.value:''),due:due.toISOString(),note:[f.note.value,(i===0&&setup?'Logo digitizing and setup '+money2(SETUP):'')].filter(Boolean).join(' · ')}); });
+    Promise.all(posts).then(function(r){ $('#jobmsg').innerHTML='<div class="ok">Added '+r.length+' job'+(r.length>1?'s':'')+'. '+(r.length>1?'They\'re':'It\'s')+' in the work queue.</div>'; resetJob(f); load(); setTimeout(function(){$('#jobmsg').innerHTML='';},4000); }).catch(function(err){ $('#jobmsg').innerHTML='<div class="err">'+esc(err.message)+'</div>'; }); });
+  // Charge on the Terminal: the order page asks the customer the same questions, shows each item, and puts the paid job in the queue
+  $('#jobcharge').addEventListener('click',function(){ var f=$('#jobform'), L=lines(), sum=total();
+    if(!(sum>=100)){ $('#jobmsg').innerHTML='<div class="err">Type a price for each item first.</div>'; return; }
+    var due=dueDate(f), ymd=due.getFullYear()+'-'+String(due.getMonth()+1).padStart(2,'0')+'-'+String(due.getDate()).padStart(2,'0');
+    var p=new URLSearchParams({via:'hub',by:(state&&state.me&&state.me.name)||'',walkin:'1',lines:JSON.stringify(L.map(function(l){ return {n:l.name.slice(0,100),q:l.qty,u:l.unit}; })),setup:$('#jsetup').checked?'1':'0',name:f.customer.value,phone:f.phone.value,notes:f.note.value,needed:ymd});
     location.href='/order/?'+p.toString(); });
-  $('#jobform').addEventListener('submit',function(e){ e.preventDefault(); var f=e.target; var due=new Date(); var d=f.due.value; if(d==='tomorrow') due.setDate(due.getDate()+1); else if(d!=='today') due.setDate(due.getDate()+parseInt(d,10)); due.setHours(16,0,0,0);
-    api('/staff/jobs',{customer:f.customer.value,phone:f.phone.value,product:f.product.value,qty:f.qty.value,amount:f.amount.value,minutes:f.minutes.value,due:due.toISOString(),note:f.note.value}).then(function(j){ $('#jobmsg').innerHTML='<div class="ok">Added, '+j.minutes+' min. It\'s in the work queue.</div>'; f.reset(); est(); load(); setTimeout(function(){$('#jobmsg').innerHTML='';},4000); }).catch(function(err){ $('#jobmsg').innerHTML='<div class="err">'+esc(err.message)+'</div>'; }); });
 
   $('#clockbtn').onclick=function(){ var b=$('#clockbtn'); b.disabled=true; var out=!!(state&&state.shift); var note=out?(prompt('Anything to note about the shift? (optional)')||''):'';
     api('/staff/clock',{action:out?'out':'in',note:note}).then(load).catch(function(e){alert(e.message);}).then(function(){b.disabled=false;}); };

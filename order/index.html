@@ -126,9 +126,10 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   <section class="step" id="s-walkin" hidden>
     <h2>Walk-in job</h2>
     <p class="sub">From Log a walk-in. Check the job and the amount, then the customer fills in steps 7 and 8.</p>
-    <div class="f"><label for="wdesc">What we&#8217;re making</label><input id="wdesc" type="text" maxlength="180"></div>
+    <div id="wlist" hidden></div>
+    <div id="wsingle"><div class="f"><label for="wdesc">What we&#8217;re making</label><input id="wdesc" type="text" maxlength="180"></div></div>
     <div class="grid" style="margin-top:12px">
-      <div class="f"><label for="wamount">Amount for the whole job ($)</label><input id="wamount" type="text" inputmode="decimal" autocomplete="off"></div>
+      <div class="f" id="wamountf"><label for="wamount">Amount for the whole job ($)</label><input id="wamount" type="text" inputmode="decimal" autocomplete="off"></div>
       <label class="check" style="align-self:end"><input type="checkbox" id="wtax"><span><b>We supply the item</b><br><small style="color:var(--muted)">Adds sales tax. Leave unticked when it&#8217;s the customer&#8217;s own item.</small></span></label>
     </div>
   </section>
@@ -408,7 +409,15 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   }
   // walk-in mode (from Log a walk-in): one job, one amount typed at the counter; charged like a custom price
   var WALKIN = HUB && qs.get('walkin') === '1';
+  var WLINES = null, WSETUP = 0;
+  try { var wl = JSON.parse(qs.get('lines') || 'null'); if (Array.isArray(wl) && wl.length) WLINES = wl.slice(0,20).map(function(l){ return { name: String(l.n||'Item').slice(0,120), qty: Math.max(1, parseInt(l.q,10)||1), unit: Math.max(0, Math.round(+l.u||0)) }; }); } catch (e) {}
   function walkin(){
+    if (WLINES) {
+      var items = WLINES.reduce(function(a,l){ return a + l.qty*l.unit; }, 0), amt2 = items + WSETUP, tx = $('#wtax').checked || TAX_OWN;
+      if (!(amt2 >= 100)) return { ovBad: true, walkin: true, qty: 1 };
+      var d2 = WLINES.map(function(l){ return l.qty+' \u00d7 '+l.name; }).join(', ');
+      return { walkin: true, lines: WLINES, setupW: WSETUP, desc: d2.slice(0,190), qty: 1, ov: { price: amt2, spots: 1, unit: amt2 }, subtotal: amt2, tax: tx ? Math.round(amt2*TAX) : 0, taxable: tx, over: 0, product: { key: 'custom', name: d2 } };
+    }
     var amt = Math.round(parseFloat(String($('#wamount').value).replace(/[$,\s]/g,''))*100), desc = $('#wdesc').value.trim();
     if (!(amt >= 100 && amt <= 2000000) || desc.length < 3) return { ovBad: true, walkin: true, qty: 1 };
     var taxable = $('#wtax').checked || TAX_OWN;
@@ -432,7 +441,8 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     if (q && q.ovBad) { dl.innerHTML = '<div><dt>'+(q.walkin ? 'Say what we\u2019re making and the amount.' : 'Type the price per spot and the number of spots.')+'</dt><dd></dd></div>'; $('#bartot').textContent = '$0'; $('#ovnote').textContent = ''; return; }
     if (q && q.ov) {
       $('#ovnote').innerHTML = money(q.ov.price)+' \u00d7 '+q.ov.spots+' = <b>'+money(q.ov.unit)+' each</b>';
-      var orows = [['<b>'+q.qty+' \u00d7 '+esc(ovDescription(q))+'</b> <small>(price set at the counter, '+money(q.ov.unit)+' each)</small>', money(q.subtotal)], q.taxable ? ['Sales tax, est.', money(q.tax)] : ['Sales tax', 'none <small>(your own item)</small>']];
+      var orows = q.lines ? q.lines.map(function(l){ return ['<b>'+l.qty+' \u00d7 '+esc(l.name)+'</b> <small>@ '+money(l.unit)+'</small>', money(l.qty*l.unit)]; }).concat(q.setupW ? [['Logo digitizing and setup <small>(one time)</small>', money(q.setupW)]] : []).concat([q.taxable ? ['Sales tax, est.', money(q.tax)] : ['Sales tax', 'none <small>(your own item)</small>']])
+        : [['<b>'+q.qty+' \u00d7 '+esc(ovDescription(q))+'</b> <small>(price set at the counter, '+money(q.ov.unit)+' each)</small>', money(q.subtotal)], q.taxable ? ['Sales tax, est.', money(q.tax)] : ['Sales tax', 'none <small>(your own item)</small>']];
       dl.innerHTML = orows.map(function(r){ return '<div><dt>'+r[0]+'</dt><dd>'+r[1]+'</dd></div>'; }).join('') + '<div class="tot"><dt>Total</dt><dd>'+money(q.subtotal+q.tax)+'</dd></div>';
       $('#bartot').textContent = money(q.subtotal+q.tax); $('#pay').textContent = 'Pay by card online instead'; return;
     }
@@ -451,6 +461,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   function renderWords(){
     var q = priced(); var name = $('#name').value.trim() || 'I';
     if (!q || q.ovBad) { $('#words').innerHTML = 'Finish steps 1 to 4 and your confirmation appears here.'; return; }
+    if (q.ov && q.lines) { $('#words').innerHTML = 'I, <b>'+esc(name==='I'?'(your name)':name)+'</b>, have checked this order myself. HD Laser Studio will make exactly what we agreed at the counter: <b>'+q.lines.map(function(l){ return esc(l.qty+' \u00d7 '+l.name)+' at '+money(l.unit)+' each'; }).join('; ')+(q.setupW ? '; logo digitizing and setup '+money(q.setupW) : '')+'</b>. I understand that engraving and printing are permanent and cannot be undone. If what I asked for turns out to be wrong, or I change my mind after approving the proof, <b>any redo or replacement is at my expense.</b>'; return; }
     if (q.ov) { $('#words').innerHTML = 'I, <b>'+esc(name==='I'?'(your name)':name)+'</b>, have checked this order myself. HD Laser Studio will make exactly what we agreed at the counter: <b>'+esc(ovDescription(q))+'</b>, quantity <b>'+q.qty+'</b>, at <b>'+money(q.ov.unit)+'</b> each. I understand that engraving and printing are permanent and cannot be undone. If what I asked for turns out to be wrong, or I change my mind after approving the proof, <b>any redo or replacement is at my expense.</b>'; return; }
     var item = q.product.key==='own' ? 'my own '+q.material.name.toLowerCase()+' item' : q.product.key==='garment' ? 'my own garment' : 'a '+q.product.name.toLowerCase();
     $('#words').innerHTML = 'I, <b>'+esc(name==='I'?'(your name)':name)+'</b>, have checked this order myself. HD Laser Studio will make exactly what I have specified here: <b>'+esc(lcName(q.service.name))+'</b> on <b>'+esc(item)+'</b>, artwork <b>'+S.inches+' inches</b> on its longest side'+(q.detail ? ', <b>'+esc(q.detail.name.toLowerCase())+' cut</b>' : '')+(q.sides ? ' on the <b>'+(q.sides==='both'?'front and the back':q.sides)+'</b>' : '')+', quantity <b>'+q.qty+'</b>'+(S.art==='text' ? ', reading exactly: <b>&#8220;'+esc(S.text.trim()||'(type the text in step 5)')+'&#8221;</b>' : S.art==='file' ? ', using the logo we have on file for <b>'+esc(S.artRef.trim()||'(say which in step 5)')+'</b>' : '')+'. I understand that engraving and printing are permanent and cannot be undone. If the size, spelling, artwork or quantity I chose turns out to be wrong, or I change my mind after approving the proof, <b>any redo or replacement is at my expense.</b>';
@@ -538,7 +549,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
       heard: $('#heard').value || null, src: HUB ? null : (window.hdSource ? hdSource() : null), from: (qs.get('from') || '').slice(0,40) || null,
       logo: S.logo ? { name: S.logoName, data: S.logo } : null };
     if (HUB && $('#staffpin').value) body.staff = { name: SERVER(), pin: $('#staffpin').value };
-    if (v.q.ov) { body.spec = { custom: { description: ovDescription(v.q), unit_cents: v.q.ov.unit, we_supply_item: v.q.taxable }, qty: v.q.qty }; body.notes = [body.notes, v.q.walkin ? 'Walk-in job, amount set at the counter: '+money(v.q.ov.unit)+'.' : 'Price set at the counter: '+money(v.q.ov.price)+' x '+v.q.ov.spots+' spot'+(v.q.ov.spots>1?'s':'')+' = '+money(v.q.ov.unit)+' each. Choices: '+(S.inches+' in, ')+(S.art==='text'?'text only':S.art==='file'?'logo on file':'new logo')+'.'].filter(Boolean).join('\n'); if (v.q.walkin) { body.spec.custom.no_logo = true; body.from = 'walkin'; } }
+    if (v.q.ov) { body.spec = { custom: { description: ovDescription(v.q), unit_cents: v.q.ov.unit, we_supply_item: v.q.taxable }, qty: v.q.qty }; body.notes = [body.notes, v.q.walkin ? 'Walk-in job, amount set at the counter: '+money(v.q.ov.unit)+'.' : 'Price set at the counter: '+money(v.q.ov.price)+' x '+v.q.ov.spots+' spot'+(v.q.ov.spots>1?'s':'')+' = '+money(v.q.ov.unit)+' each. Choices: '+(S.inches+' in, ')+(S.art==='text'?'text only':S.art==='file'?'logo on file':'new logo')+'.'].filter(Boolean).join('\n'); if (v.q.walkin) { body.spec.custom.no_logo = true; body.from = 'walkin'; if (v.q.lines) { body.spec.custom.lines = v.q.lines.map(function(l){ return { name: l.name, qty: l.qty, unit_cents: l.unit }; }); body.spec.custom.setup = !!v.q.setupW; } } }
     return body;
   }
   $('#pay').onclick = function(){
@@ -604,6 +615,9 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
       ['s-product','s-service','s-sides','s-detail','s-size','s-qty','s-logo'].forEach(function(id){ var el = document.getElementById(id); if (el) el.style.display = 'none'; });
       $('#s-walkin').hidden = false; var pv = $('#preview'); if (pv) pv.style.display = 'none';
       $('#wdesc').value = (qs.get('desc') || '').slice(0,180); $('#wamount').value = qs.get('amount') || '';
+      if (WLINES) { WSETUP = qs.get('setup') === '1' ? ((BOOK.services.filter(function(x){ return x.key==='engrave'; })[0] || {}).setup_cents || 5000) : 0;
+        $('#wsingle').hidden = true; $('#wamountf').hidden = true; $('#wlist').hidden = false;
+        $('#wlist').innerHTML = '<table style="width:100%;border-collapse:collapse">' + WLINES.map(function(l){ return '<tr><td style="padding:6px 0">'+l.qty+' \u00d7 '+esc(l.name)+'</td><td style="text-align:right">'+money(l.unit)+' each</td><td style="text-align:right;font-weight:700">'+money(l.qty*l.unit)+'</td></tr>'; }).join('') + (WSETUP ? '<tr><td style="padding:6px 0">Logo digitizing and setup</td><td></td><td style="text-align:right;font-weight:700">'+money(WSETUP)+'</td></tr>' : '') + '<tr><td style="padding:8px 0;border-top:1px solid var(--line)"><b>Total before tax</b></td><td style="border-top:1px solid var(--line)"></td><td style="text-align:right;border-top:1px solid var(--line);font-size:20px"><b>'+money(WLINES.reduce(function(a,l){ return a+l.qty*l.unit; },0)+WSETUP)+'</b></td></tr></table>'; }
       if (qs.get('name')) $('#name').value = qs.get('name').slice(0,80); if (qs.get('phone')) $('#phone').value = qs.get('phone').slice(0,40);
       if (qs.get('notes')) $('#notes').value = qs.get('notes').slice(0,2000); if (/^\d{4}-\d{2}-\d{2}$/.test(qs.get('needed') || '')) $('#needed').value = qs.get('needed');
       ['wdesc','wamount','wtax'].forEach(function(id){ $('#'+id).addEventListener('input', function(){ renderSummary(); renderWords(); }); $('#'+id).addEventListener('change', function(){ renderSummary(); renderWords(); }); });
