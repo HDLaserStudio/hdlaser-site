@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-06 v35"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-06 v36"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS plaid_items (item_id TEXT PRIMARY KEY, access_token T
 CREATE TABLE IF NOT EXISTS coffee_orders (ref TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, name TEXT, phone TEXT, email TEXT, items TEXT, summary TEXT, total_cents INTEGER, pickup TEXT, note TEXT, text_consent INTEGER DEFAULT 0, square_order_id TEXT, square_payment_id TEXT, paid_at TEXT, paid_cents INTEGER DEFAULT 0, tip_cents INTEGER DEFAULT 0, notified_at TEXT, ready_at TEXT, picked_up_at TEXT);
 CREATE INDEX IF NOT EXISTS coffee_created ON coffee_orders(created_at);`;
 // Columns added after the first release. Each ALTER is tried once and ignored if the column already exists.
-const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0"];
+const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT"];
 
 let migrated = false;
 async function ensureSchema(env) {
@@ -131,6 +131,7 @@ export default {
         const b = await request.json().catch(() => ({}));
         const p = await env.DB.prepare(`SELECT * FROM staff WHERE id = ? AND active = 1`).bind(+b.id || 0).first();
         if (!p || !p.pin_hash || !/^\d{4,8}$/.test(String(b.pin || "")) || !timingSafeEqual(await pbkdf(String(b.pin), p.pin_salt), p.pin_hash)) { await staffLog(env, p && p.id, "pin_failed", "time clock"); return json({ error: "That PIN doesn't match " + (p ? p.name : "that person") + "." }, 401); }
+        await rememberPin(env, p.id, b.pin);
         const r = await clockPunch(env, p, b.action, b.note);
         return json({ ...r.body, board: await clockBoard(env) }, r.status);
       }
@@ -1032,6 +1033,14 @@ async function pbkdf(pin, saltHex) {
   const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 100000 }, key, 256);
   return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+// A fast keyed fingerprint of a PIN (HMAC with a server secret), so the checkout can find whose PIN was typed with one
+// lookup instead of running the slow PIN check once per person, which runs past Cloudflare's CPU limit and drops the request.
+// Filled in whenever someone's PIN is checked the slow way or set.
+async function pinKey(env, pin) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode("hd-pin:" + (env.PIN_PEPPER || env.ADMIN_KEY || "hdlaser")), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return [...new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(String(pin))))].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function rememberPin(env, id, pin) { if (env.DB && id) await env.DB.prepare(`UPDATE staff SET pin_key = ? WHERE id = ?`).bind(await pinKey(env, pin), id).run().catch(() => {}); }
 function randomHex(n) { return [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join(""); }
 const ROLE_RANK = { staff: 1, manager: 2, owner: 3 };
 
@@ -1138,6 +1147,7 @@ async function staffRoutes(request, env, cors, path, url) {
     if (!name || !/^\d{4,8}$/.test(pin)) return json({ error: "Enter your name and your PIN" }, 400, cors);
     const p = await env.DB.prepare(`SELECT * FROM staff WHERE lower(name) = lower(?) AND active = 1`).bind(name).first();
     if (!p || !p.pin_hash || !timingSafeEqual(await pbkdf(pin, p.pin_salt), p.pin_hash)) { await staffLog(env, p && p.id, "login_failed", name); return json({ error: "Name or PIN doesn't match" }, 401, cors); }
+    await rememberPin(env, p.id, pin);
     const token = randomHex(32);
     await env.DB.prepare(`INSERT INTO staff_sessions (token, staff_id, created_at, expires_at, ip) VALUES (?,?,?,?,?)`).bind(token, p.id, now, new Date(Date.now() + 14 * 3600000).toISOString(), ip).run();
     if (b.smsConsent === true && !p.sms_consent_at) { await env.DB.prepare(`UPDATE staff SET sms_consent_at = ? WHERE id = ?`).bind(now, p.id).run(); await staffLog(env, p.id, "sms_consent", ip); p.sms_consent_at = now; }
@@ -1250,7 +1260,8 @@ function pub(p) { return { id: p.id, name: p.name, role: p.role, phone: p.phone 
 
 // At checkout a PIN alone says who took the sale, so no two active people may share one.
 async function pinTaken(env, pin, exceptId) {
-  for (const s of (await env.DB.prepare(`SELECT id, pin_salt, pin_hash FROM staff WHERE active = 1 AND pin_hash IS NOT NULL AND id != ?`).bind(+exceptId || 0).all()).results)
+  if (await env.DB.prepare(`SELECT 1 FROM staff WHERE active = 1 AND pin_key = ? AND id != ?`).bind(await pinKey(env, pin), +exceptId || 0).first()) return true;
+  for (const s of (await env.DB.prepare(`SELECT id, pin_salt, pin_hash FROM staff WHERE active = 1 AND pin_hash IS NOT NULL AND pin_key IS NULL AND id != ?`).bind(+exceptId || 0).all()).results)
     if (timingSafeEqual(await pbkdf(String(pin), s.pin_salt), s.pin_hash)) return true;
   return false;
 }
@@ -1267,7 +1278,7 @@ async function upsertStaff(env, b) {
     if ("commission_pct" in b) { sets.push("commission_pct = ?"); args.push(Math.max(0, Math.min(100, +b.commission_pct || 0))); }
     if ("on_call" in b) { sets.push("on_call = ?"); args.push(b.on_call ? 1 : 0); }
     if ("active" in b) { sets.push("active = ?"); args.push(b.active ? 1 : 0); if (!b.active) await env.DB.prepare(`DELETE FROM staff_sessions WHERE staff_id = ?`).bind(+b.id).run(); }
-    if (b.pin) { if (!/^\d{4,8}$/.test(String(b.pin))) return { ok: false, error: "PIN must be 4 to 8 digits" }; const salt = randomHex(16); sets.push("pin_salt = ?", "pin_hash = ?"); args.push(salt, await pbkdf(String(b.pin), salt)); }
+    if (b.pin) { if (!/^\d{4,8}$/.test(String(b.pin))) return { ok: false, error: "PIN must be 4 to 8 digits" }; const salt = randomHex(16); sets.push("pin_salt = ?", "pin_hash = ?", "pin_key = ?"); args.push(salt, await pbkdf(String(b.pin), salt), await pinKey(env, b.pin)); }
     if (!sets.length) return { ok: false, error: "Nothing to update" };
     args.push(+b.id);
     await env.DB.prepare(`UPDATE staff SET ${sets.join(", ")} WHERE id = ?`).bind(...args).run();
@@ -1280,6 +1291,7 @@ async function upsertStaff(env, b) {
   const salt = randomHex(16);
   const r = await env.DB.prepare(`INSERT INTO staff (name, role, phone, email, pin_hash, pin_salt, on_call, active, created_at, hourly_rate_cents, commission_pct) VALUES (?,?,?,?,?,?,?,1,?,?,?)`)
     .bind(name, role, String(b.phone || "").slice(0, 40), String(b.email || "").slice(0, 120), await pbkdf(String(b.pin), salt), salt, b.on_call ? 1 : 0, new Date().toISOString(), Math.max(0, Math.round(+b.hourly_rate_cents || 0)), Math.max(0, Math.min(100, +b.commission_pct || 0))).run();
+  if (r.meta && r.meta.last_row_id) await rememberPin(env, r.meta.last_row_id, b.pin);
   return { ok: true, id: r.meta && r.meta.last_row_id };
 }
 
@@ -2565,12 +2577,16 @@ function customQuote(book, spec) {
 async function verifyStaff(env, name, pin) {
   name = String(name || "").trim(); pin = String(pin || "").trim();
   if (!env.DB || !/^\d{4,8}$/.test(pin)) return null;
+  // fast path: one lookup by the PIN's fingerprint, no slow checks at all
+  const byKey = (await env.DB.prepare(`SELECT * FROM staff WHERE active = 1 AND pin_key = ?`).bind(await pinKey(env, pin)).all()).results;
+  if (byKey.length === 1) return byKey[0];
   const p = name ? await env.DB.prepare(`SELECT * FROM staff WHERE lower(name) = lower(?) AND active = 1`).bind(name).first() : null;
-  if (p && p.pin_hash && timingSafeEqual(await pbkdf(pin, p.pin_salt), p.pin_hash)) return p;
+  if (p && p.pin_hash && timingSafeEqual(await pbkdf(pin, p.pin_salt), p.pin_hash)) { await rememberPin(env, p.id, pin); return p; }
+  // people whose fingerprint isn't stored yet (they haven't signed in since v36): at most one more slow check, to stay inside the CPU limit
   const matches = [];
-  for (const s of (await env.DB.prepare(`SELECT * FROM staff WHERE active = 1 AND pin_hash IS NOT NULL`).all()).results)
+  for (const s of (await env.DB.prepare(`SELECT * FROM staff WHERE active = 1 AND pin_hash IS NOT NULL AND pin_key IS NULL AND id != ? LIMIT 1`).bind(p ? p.id : 0).all()).results)
     if (timingSafeEqual(await pbkdf(pin, s.pin_salt), s.pin_hash)) matches.push(s);
-  if (matches.length === 1) return matches[0];
+  if (matches.length === 1) { await rememberPin(env, matches[0].id, pin); return matches[0]; }
   await staffLog(env, p && p.id, "pin_failed", matches.length > 1 ? "checkout: PIN shared by " + matches.length + " people" : "checkout");
   return null;
 }
