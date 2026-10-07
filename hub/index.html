@@ -42,6 +42,12 @@ main{max-width:1240px;margin:0 auto;padding:16px 32px 60px}
 .app.primary .ic{background:var(--red);box-shadow:0 0 0 4px #F6F4EF,0 0 0 5px var(--red)}.app.primary .ic svg{stroke:var(--cream)}
 .app.primary::before{border-color:rgba(200,55,42,.45)}.app.primary::after{border-color:rgba(200,55,42,.14)}
 .app.primary:hover,.app.primary:focus-visible{box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 20px 36px rgba(21,25,30,.24)}
+/* The two counter jobs sit alone on top, bigger and the same size (Hugh, Oct 7): New order and Log a walk-in. */
+.apps.big2{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:18px}
+.apps.big2 .app{min-height:232px;gap:14px;padding:26px 22px}
+.apps.big2 .app .ic{width:84px;height:84px}.apps.big2 .app .ic svg{width:42px;height:42px}
+.apps.big2 .app b{font-size:30px}
+.apps.big2 .app small{font-size:15.5px;max-width:380px}
 .app .tag{position:absolute;top:14px;right:14px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#fff;background:var(--red);border-radius:999px;padding:3px 8px}
 .sect{margin:34px 0 12px;display:flex;align-items:center;gap:14px;color:var(--redd);font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:14px;letter-spacing:.2em;text-transform:uppercase}
 .sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,rgba(242,182,61,.6),transparent)}
@@ -68,7 +74,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
 .btn{display:inline-flex;align-items:center;justify-content:center;min-height:50px;padding:12px 24px;border-radius:999px;border:0;font:inherit;font-weight:700;font-size:17px;cursor:pointer;background:var(--red);color:#fff;width:100%}
 .err{background:#FBE9E6;border:1px solid #E8B4AE;border-radius:12px;padding:10px 12px;color:var(--redd);font-weight:600;margin-top:10px}
 .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.92);display:grid;place-items:center;z-index:20;cursor:zoom-out}.lightbox img{max-width:96vw;max-height:92vh;border-radius:8px}
-@media (max-width:700px){.top{padding:16px 18px 8px}.hello{padding:16px 18px 4px}.hello h1{font-size:28px}main{padding:12px 18px 60px}.apps{grid-template-columns:repeat(2,1fr);gap:12px}.app{min-height:160px;padding:16px 10px}.app b{font-size:17px}.pcols{grid-template-columns:1fr}.clock b{font-size:22px}.panel{padding:18px 16px}}
+@media (max-width:700px){.top{padding:16px 18px 8px}.hello{padding:16px 18px 4px}.hello h1{font-size:28px}main{padding:12px 18px 60px}.apps{grid-template-columns:repeat(2,1fr);gap:12px}.app{min-height:160px;padding:16px 10px}.app b{font-size:17px}.apps.big2{margin-bottom:12px}.apps.big2 .app{min-height:196px;padding:20px 12px}.apps.big2 .app .ic{width:68px;height:68px}.apps.big2 .app .ic svg{width:34px;height:34px}.apps.big2 .app b{font-size:22px}.apps.big2 .app small{font-size:13.5px}.pcols{grid-template-columns:1fr}.clock b{font-size:22px}.panel{padding:18px 16px}}
 </style>
 </head>
 <body>
@@ -95,6 +101,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
   <div class="hello"><div><h1 id="greet">Hello</h1><p id="sub">Pick what you need. Every order, walk-in or online, starts from the same page the customer sees.</p></div><div><a href="/staff/" id="clocklink">Clock in</a> <button type="button" id="signout">Sign out</button></div></div>
   <main>
     <div id="home">
+      <div class="apps big2" id="topapps"></div>
       <div class="apps" id="apps"></div>
     </div>
     <div id="view" hidden></div>
@@ -145,12 +152,12 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
     var mgr=me&&['manager','owner'].indexOf(me.role)>=0, own=me&&me.role==='owner';
     var by=encodeURIComponent(me?me.name:'');
     var list=[
-      {href:'/order/?via=hub&by='+by,ic:'order',t:'New order',s:'Every job starts here: price it, preview it, charge the Terminal with your PIN. Anything it can’t price links to the quote form.',cls:'primary',tag:'start here'},
+      {href:'/order/?via=hub&by='+by,ic:'order',t:'New order',s:'Every job starts here: price it, preview it, charge the Terminal with your PIN. Anything it can’t price links to the quote form.',cls:'primary',tag:'start here',top:1},
+      {href:'/staff/#job',ic:'walkin',t:'Log a walk-in',s:'Same-day job at the counter: add the items, then charge the Terminal or add it to the queue.',top:1},
       {view:'samples',ic:'samples',t:'Samples',s:'Show what we’ve made, by category'},
       {view:'prices',ic:'prices',t:'Price list',s:'Sizes, items, quantity breaks'},
       {view:'receipts',ic:'receipt',t:'Receipts',s:'Print any past sale on the Terminal'},
       {href:'/staff/#queue',ic:'queue',t:'Work queue',s:'What’s waiting, most urgent first'},
-      {href:'/staff/#job',ic:'walkin',t:'Log a walk-in',s:'Same-day job taken at the counter'},
       {href:'https://hdlaser-checkout.yellow-smoke-9c0e.workers.dev/clock',ic:'clock',t:'Time clock',s:'Everyone clocks in and out here with their own PIN'},
       {href:'/staff/',ic:'clock',t:'Checklists & my shift',s:'Opening, closing, your shift'},
       {href:'/staff/#me',ic:'me',t:'My numbers',s:'Hours, jobs, pay this period'},
@@ -163,7 +170,9 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
       {href:'/',ic:'web',t:'The website',s:'What customers see'},
       {href:'/terms/',ic:'terms',t:'Terms of sale',s:'What every customer agrees to'}
     ].filter(Boolean);
-    $('#apps').innerHTML=list.map(function(a){ var inner='<span class="ic">'+I[a.ic]+'</span><b>'+esc(a.t)+'</b><small>'+esc(a.s)+'</small>'+(a.tag?'<span class="tag">'+esc(a.tag)+'</span>':''); return a.view?'<button type="button" class="app'+(a.cls?' '+a.cls:'')+'" data-view="'+a.view+'">'+inner+'</button>':'<a class="app'+(a.cls?' '+a.cls:'')+'" href="'+esc(a.href)+'">'+inner+'</a>'; }).join('');
+    var tile=function(a){ var inner='<span class="ic">'+I[a.ic]+'</span><b>'+esc(a.t)+'</b><small>'+esc(a.s)+'</small>'+(a.tag?'<span class="tag">'+esc(a.tag)+'</span>':''); return a.view?'<button type="button" class="app'+(a.cls?' '+a.cls:'')+'" data-view="'+a.view+'">'+inner+'</button>':'<a class="app'+(a.cls?' '+a.cls:'')+'" href="'+esc(a.href)+'">'+inner+'</a>'; };
+    $('#topapps').innerHTML=list.filter(function(a){ return a.top; }).map(tile).join('');
+    $('#apps').innerHTML=list.filter(function(a){ return !a.top; }).map(tile).join('');
   }
 
   // Samples: photos already on the website, grouped the way customers ask for them
