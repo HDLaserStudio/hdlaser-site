@@ -58,6 +58,25 @@ h1{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:44px;li
 .svc b{display:block;font-size:17px;margin-bottom:3px}.svc span{color:var(--muted);font-size:14px;line-height:1.4}
 .svc.on{border-color:var(--red);background:var(--sel)}
 .svc:disabled{opacity:.45;cursor:not-allowed}
+/* Options look like buttons (Hugh, Oct 7: "the option buttons blend in"): a darker edge and a soft shadow, a round
+   pick-one circle that fills red with a check when chosen, a lift on hover. The step to do next gets a red outline. */
+.svc,.tile,.chip{border-color:#CFC8BC;box-shadow:0 2px 0 #E4E0D8,0 4px 14px rgba(21,25,30,.06);transition:border-color .15s,box-shadow .15s,transform .15s}
+.svc{position:relative;padding-left:54px}
+.svc::before{content:"";position:absolute;left:16px;top:50%;margin-top:-13px;width:26px;height:26px;border-radius:50%;border:2px solid var(--field);background:#fff}
+.svc.on::before{content:"\2713";border-color:var(--red);background:var(--red);color:#fff;font-size:15px;font-weight:800;display:grid;place-items:center}
+.svc:disabled::before{border-style:dashed}
+.tile::before{content:"";position:absolute;top:8px;right:10px;width:22px;height:22px;border-radius:50%;border:2px solid var(--field);background:#fff}
+.tile.on::before{display:none}
+.tile.flat{padding:32px 12px 14px}
+.svc.on,.tile.on,.chip.on{border-color:var(--red);box-shadow:0 0 0 3px rgba(200,55,42,.18)}
+.chip.on{background:var(--red);color:#fff}
+@media (hover:hover){.svc:not(:disabled):not(.on):hover,.tile:not(.on):hover,.chip:not(:disabled):not(.on):hover{border-color:var(--red);transform:translateY(-1px);box-shadow:0 3px 0 #E4E0D8,0 8px 20px rgba(21,25,30,.10)}}
+.svc:not(:disabled):active,.tile:active,.chip:not(:disabled):active{transform:translateY(1px)}
+.step.next{border:2px solid var(--red);box-shadow:0 0 0 4px rgba(200,55,42,.10)}
+.step.next h2 .n{background:var(--red)}
+.step.next::before{content:"Next";display:inline-block;margin-bottom:10px;background:var(--red);color:#fff;font-weight:800;font-size:13px;letter-spacing:1px;text-transform:uppercase;border-radius:999px;padding:4px 12px}
+#s-product.next::before{content:"Start here"}
+@media (prefers-reduced-motion:reduce){.svc,.tile,.chip{transition:none}.svc:hover,.tile:hover,.chip:hover,.svc:active,.tile:active,.chip:active{transform:none !important}}
 .sizerow{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
 .readout{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:40px;font-weight:700;line-height:1;min-width:120px}
 .readout small{font-size:16px;color:var(--muted);font-family:Figtree,sans-serif;font-weight:500;display:block;margin-top:4px}
@@ -484,6 +503,9 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     var garment = S.product==='garment'; document.getElementById('s-sides').hidden = !garment; document.querySelectorAll('[data-side]').forEach(function(b){ b.classList.toggle('on', b.dataset.side===S.sides); });
     renderProducts(); renderServices(); renderSize(); renderQty(); renderPreview(); renderSummary(); renderWords(); renderInitials();
     ['s-product','s-service','s-size','s-qty'].forEach(function(id, i){ var ok = [S.product && (S.product!=='own' || S.material), S.service, S.service && S.product, S.service && S.product][i]; document.getElementById(id).classList.toggle('done', !!ok); });
+    // The first choice step still to do gets a red outline and "Start here" / "Next" so the customer sees where to tap.
+    var nx = ['s-product','s-service'].filter(function(id){ var e = document.getElementById(id); return !e.hidden && !e.classList.contains('done'); })[0];
+    ['s-product','s-service'].forEach(function(id){ document.getElementById(id).classList.toggle('next', id===nx); });
     var q = quote(); var key = q ? S.product+'|'+S.service+'|'+S.inches : '';
     if (key && key!==lastSpec) { lastSpec = key; clearTimeout(specTimer); specTimer = setTimeout(function(){ if (seen[key] || !window.hdTrack) return; seen[key] = 1; hdTrack('spec_view', null, { product:S.product, service:S.service, inches:S.inches, qty:S.qty }); }, 2500); }
   }

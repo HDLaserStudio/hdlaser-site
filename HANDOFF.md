@@ -39,6 +39,8 @@ Public: `/` home (engraving, UV, DTF, cutting sections), `/order/` the single or
 
 ## The order page, step by step (as a customer sees it)
 
+Option buttons (Hugh, Oct 7: "the option buttons blend in"): every choice has a darker edge and a soft shadow, a round pick-one circle that fills red with a check when chosen, and a lift on hover; the first of steps 1-2 still to do gets a red outline and a "Start here" / "Next" label (`.step.next`, set next to the step-done code).
+
 1. Are you bringing your own item? Yes shows material tiles (wood, metal, glass, leather, acrylic, stone, fabric, your own garment). No shows the shop's items (tumbler, 12 oz cup, 16 oz cup, bottle, pint, cutting board, plaque, plaque with 7x9 plate, tag, patch, cut from our wood, cut from our acrylic).
 2. How should we put it on? Laser engraving, UV printing, DTF printing, Laser cutting. Greyed out when the material or item doesn't allow it.
    - Garments: front, back, or both (both = two prints). Cutting: simple / detailed / intricate.
