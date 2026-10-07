@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v45"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v46"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -3224,10 +3224,26 @@ async function unsubToken(env, email) {
   return [...new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(email)))].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// The designed version of a customer email (Hugh, Oct 7): logo band, the message, the gift photo grid, a big button to the
+// first link in the message, and the address and unsubscribe link. Images are hosted on hdlaser.net so every inbox can load them.
+function campaignHtml(body, unsubLink) {
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const firstUrl = (body.match(/https?:\/\/[^\s<>"]+/) || [])[0] || "https://hdlaser.net/?src=email";
+  const linkify = (t) => esc(t).replace(/https?:\/\/[^\s<>"]+/g, (u) => `<a href="${u}" style="color:#A32C21;font-weight:700">${u.replace(/^https?:\/\//, "").replace(/\?.*$/, "")}</a>`);
+  const paras = body.split(/\n\s*\n/).map((p) => `<p style="margin:0 0 16px;font-size:17px;line-height:1.55;color:#15191E">${linkify(p.trim()).replace(/\n/g, "<br>")}</p>`).join("");
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#F6F4EF">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F6F4EF"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#FFFFFF;border-radius:16px;overflow:hidden;font-family:Helvetica,Arial,sans-serif">
+<tr><td style="background:#15191E;padding:18px 24px"><a href="https://hdlaser.net/?src=email" style="text-decoration:none"><img src="https://hdlaser.net/assets/icon-512.png" width="48" height="48" alt="HD" style="vertical-align:middle;border:0;border-radius:10px"><span style="color:#FFFFFF;font-weight:800;font-size:18px;letter-spacing:2px;vertical-align:middle;padding-left:12px">LASER STUDIO</span></a></td></tr>
+<tr><td style="padding:28px 28px 8px">${paras}</td></tr>
+<tr><td style="padding:0 28px"><a href="${firstUrl}"><img src="https://hdlaser.net/assets/email-holiday-gifts.jpg" width="544" alt="Logo tumblers, engraved cups, water bottles and cutting boards made at HD Laser Studio" style="width:100%;max-width:544px;height:auto;border:0;border-radius:12px;display:block"></a></td></tr>
+<tr><td align="center" style="padding:24px 28px 30px"><a href="${firstUrl}" style="display:inline-block;background:#C8372A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:18px;padding:16px 30px;border-radius:999px">See the holiday gifts</a></td></tr>
+<tr><td style="background:#F6F4EF;padding:18px 28px;font-size:13px;line-height:1.5;color:#545B63;text-align:center">HD Laser Studio &middot; 759 Turquoise St, Pacific Beach, San Diego, CA 92109 &middot; (858) 373-9866<br><a href="https://hdlaser.net/?src=email" style="color:#545B63">hdlaser.net</a> &middot; <a href="${unsubLink}" style="color:#545B63">Unsubscribe</a></td></tr>
+</table></td></tr></table></body></html>`;
+}
 // One email to everyone who hasn't unsubscribed, through Resend in batches of 100; a campaign remembers who already got it,
 // so "Send to the rest" picks up where a daily limit stopped it. Every email carries the shop address and an unsubscribe link.
 async function sendCampaign(env, b, origin) {
-  if (!env.RESEND_API_KEY) return { ok: false, error: "Sending email isn't set up yet (RESEND_API_KEY). Use Copy all emails and send from your email app." };
   await ensureCustomers(env);
   const subject = String(b.subject || "").trim().slice(0, 150), body = String(b.body || "").trim().slice(0, 20000);
   if (subject.length < 2 || body.length < 5) return { ok: false, error: "Write a subject and a message" };
@@ -3235,10 +3251,15 @@ async function sendCampaign(env, b, origin) {
   const build = async (email, name) => {
     const link = `${origin}/unsubscribe?e=${encodeURIComponent(email)}&t=${await unsubToken(env, email)}`;
     const first = String(name || "").trim().split(/\s+/)[0] || "there";
-    return { from, to: [email], reply_to: replyTo, subject: subject.replace(/\{first_name\}/g, first), headers: { "List-Unsubscribe": `<${link}>` },
-      text: `${body.replace(/\{first_name\}/g, first)}\n\n--\nHD Laser Studio · 759 Turquoise St, Pacific Beach, San Diego, CA 92109 · (858) 373-9866 · hdlaser.net\nDon't want these emails? Unsubscribe: ${link}` };
+    const msg = body.replace(/\{first_name\}/g, first);
+    const e = { from, to: [email], reply_to: replyTo, subject: subject.replace(/\{first_name\}/g, first), headers: { "List-Unsubscribe": `<${link}>` },
+      text: `${msg}\n\n--\nHD Laser Studio · 759 Turquoise St, Pacific Beach, San Diego, CA 92109 · (858) 373-9866 · hdlaser.net\nDon't want these emails? Unsubscribe: ${link}` };
+    if (b.design !== "plain") e.html = campaignHtml(msg, link);
+    return e;
   };
   const post = async (batch) => { const res = await fetch("https://api.resend.com/emails/batch", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify(batch) }); const d = await res.json().catch(() => ({})); return res.ok ? { ok: true } : { ok: false, error: (d && d.message) || "Resend " + res.status }; };
+  if (!b.preview && !env.RESEND_API_KEY) return { ok: false, error: "Sending email isn't set up yet (RESEND_API_KEY). Use Copy all emails and send from your email app." };
+  if (b.preview) return { ok: true, html: b.design === "plain" ? null : campaignHtml(body.replace(/\{first_name\}/g, "there"), "#"), text: body };
   if (b.test) { const r = await post([await build(replyTo, "Hugh")]); return r.ok ? { ok: true, test: true, to: replyTo } : r; }
   let id = +b.campaign_id || 0;
   if (!id) { const r = await env.DB.prepare(`INSERT INTO campaigns (created_at, subject, body) VALUES (?,?,?)`).bind(new Date().toISOString(), subject, body).run(); id = r.meta && r.meta.last_row_id; }
@@ -3301,8 +3322,10 @@ tr.off td{color:#9AA0A6}tr.off td b{text-decoration:line-through}.pill{display:i
   <p class="small" style="margin-top:0">For a sale, a holiday or a celebration. Goes to everyone with an email who hasn't unsubscribed. Type {first_name} to use each person's first name. The shop address and an unsubscribe link are added at the bottom of every email, as the law requires. Send a test to yourself first.</p>
   <input id="subject" placeholder="Subject, e.g. 20% off engraved gifts this week" style="width:100%">
   <textarea id="body" rows="8" placeholder="Hi {first_name}," style="margin-top:8px"></textarea>
-  <div class="bar" style="margin-top:10px"><button class="act" id="test">Send a test to me</button><button class="act red" id="sendall">Send to everyone</button><span class="msg" id="smsg"></span></div>
+  <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-weight:700"><input type="checkbox" id="design" checked style="width:20px;height:20px"> Add my logo and the gift photos</label>
+  <div class="bar" style="margin-top:10px"><button class="act" id="preview">Preview</button><button class="act" id="test">Send a test to me</button><button class="act red" id="sendall">Send to everyone</button><span class="msg" id="smsg"></span></div>
   <div id="camps" class="small" style="margin-top:10px"></div>
+  <iframe id="pv" title="Email preview" style="display:none;width:100%;height:900px;border:1px solid var(--line);border-radius:12px;margin-top:12px;background:#fff"></iframe>
 </div>
 </main>
 <script>
@@ -3341,13 +3364,16 @@ document.addEventListener('click',function(e){ var b=e.target.closest('[data-edi
 function send(test){ var s=$('#subject').value.trim(), m=$('#body').value.trim(); if(s.length<2||m.length<5){ $('#smsg').textContent='Write a subject and a message first.'; $('#smsg').className='msg bad'; return; }
   if(!test){ var n=D.customers.filter(function(c){return c.email&&!c.unsubscribed;}).length; if(!confirm('Send this email to '+n+' customers now?')) return; }
   $('#smsg').textContent='Sending…'; $('#smsg').className='msg';
-  api('/api/customers/send',{subject:s,body:m,test:!!test,campaign_id:test?undefined:(CAMPAIGN||undefined)}).then(function(r){
+  api('/api/customers/send',{subject:s,body:m,test:!!test,design:$('#design').checked?'photos':'plain',campaign_id:test?undefined:(CAMPAIGN||undefined)}).then(function(r){
     if(r.test){ $('#smsg').textContent='Test sent to '+r.to+'. Check your inbox.'; $('#smsg').className='msg ok'; return; }
     if(!r.ok){ $('#smsg').textContent=r.error||'Could not send'; $('#smsg').className='msg bad'; return; }
     CAMPAIGN=r.remaining>0?r.campaign_id:0;
     $('#smsg').textContent='Sent to '+r.sent+'.'+(r.remaining>0?' '+r.remaining+' still to go'+(r.error?' (stopped: '+r.error+')':'')+'. Click Send again later to send to the rest; nobody gets it twice.':' Everyone has it.'); $('#smsg').className='msg '+(r.error?'bad':'ok'); load(); }); }
 fetch('/reviews',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ if(d&&d.count){ $('#gcount').value=d.count; $('#grating').value=Number(d.rating).toFixed(1); } }).catch(function(){});
 $('#gsave').onclick=function(){ api('/api/reviews/set',{rating:$('#grating').value,count:$('#gcount').value}).then(function(r){ $('#gmsg').textContent=r.ok?'Saved. The website shows '+Number(r.rating).toFixed(1)+' stars from '+r.count+' reviews.':(r.error||'Failed'); $('#gmsg').className='msg '+(r.ok?'ok':'bad'); }); };
+$('#preview').onclick=function(){ var m=$('#body').value.trim(); if(m.length<5){ $('#smsg').textContent='Write the message first.'; $('#smsg').className='msg bad'; return; }
+  api('/api/customers/send',{subject:$('#subject').value||'Preview',body:m,preview:true,design:$('#design').checked?'photos':'plain'}).then(function(r){ var f=$('#pv'); f.style.display='block';
+    f.srcdoc=r.html||('<pre style="font:16px Helvetica,Arial,sans-serif;white-space:pre-wrap;padding:20px">'+esc(m)+'</pre>'); f.scrollIntoView({behavior:'smooth'}); }); };
 $('#test').onclick=function(){ send(true); }; $('#sendall').onclick=function(){ send(false); };
 load();
 </script></body></html>`;
