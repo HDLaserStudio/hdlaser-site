@@ -192,9 +192,10 @@ button[type=submit]:hover{background:var(--redd)}
   // From the holiday page (?gift=...): say which gift in the notes so we know what they're asking about
   var gift = (qs.get('gift') || '').slice(0, 80);
   if (gift) {
-    var nt = document.getElementById('notes'); if (nt && !nt.value) nt.value = (gift === 'Holiday gifts' ? 'Holiday gifts. ' : 'Holiday gift: ' + gift + '. ');
-    document.getElementById('side-h1').textContent = 'Tell us about your holiday gifts.';
-    document.getElementById('side-p').textContent = 'Your logo, a design, a message or a name, on our gifts or on anything you bring in. We\u2019ll get back to you with ideas and a free digital proof.';
+    var halloween = /^Halloween/.test(gift);
+    var nt = document.getElementById('notes'); if (nt && !nt.value) nt.value = (halloween ? gift + '. ' : gift === 'Holiday gifts' ? 'Holiday gifts. ' : 'Holiday gift: ' + gift + '. ');
+    document.getElementById('side-h1').textContent = halloween ? 'Tell us about your Halloween idea.' : 'Tell us about your holiday gifts.';
+    document.getElementById('side-p').textContent = halloween ? 'Party cups, a spooky sign, names on glasses, or anything you bring in. We\u2019ll get back to you with ideas and a free digital proof.' : 'Your logo, a design, a message or a name, on our gifts or on anything you bring in. We\u2019ll get back to you with ideas and a free digital proof.';
   }
   // An order built with the calculator on the Grounds for Profit page: show it, skip the questions it already answered
   if (qs.get('order')) {

@@ -18,6 +18,15 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <meta name="theme-color" content="#15191E">
+<script>
+// Halloween look every October (Hugh, Oct 7): the page goes dark with bats, ghosts, a spider and a pumpkin, and on
+// November 1 it is the holiday page again by itself. ?theme=halloween or ?theme=holiday previews either look.
+(function(){ var t = (location.search.match(/[?&]theme=(\w+)/) || [])[1];
+  if (t !== 'halloween' && (t === 'holiday' || new Date().getMonth() !== 9)) return;
+  document.documentElement.classList.add('halloween');
+  document.querySelector('meta[name=theme-color]').setAttribute('content', '#15111F');
+  var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Creepster&display=swap'; document.head.appendChild(l); })();
+</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&amp;family=Figtree:wght@400;500;700;800&amp;display=swap">
 <style>
 :root{--bg:#F6F4EF;--ink:#15191E;--muted:#545B63;--red:#C8372A;--redd:#A32C21;--line:#E4E0D8;--gold:#F2B63D}
@@ -69,9 +78,80 @@ section h2{font-size:34px;margin-bottom:18px}
 footer{max-width:1200px;margin:0 auto;padding:24px;border-top:1px solid var(--line);font-size:14px;color:var(--muted);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 @media (max-width:1000px){.packs,.what,.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}.hero{grid-template-columns:1fr}.hero img{height:280px}}
 @media (max-width:640px){.packs,.steps{grid-template-columns:1fr}.hero h1{font-size:38px}header{padding:14px 16px}main{padding:0 16px 56px}section h2{font-size:28px}.more{padding:24px}}
+.himg{position:relative;isolation:isolate}
+
+/* Halloween (html.halloween, set by the script in the head). Decorations never take a tap except the pumpkin, and all
+   motion stops for people who turn animations off on their phone or computer. */
+.hw{display:none}
+html.halloween .hw{display:block}
+html.halloween{--bg:#15111F;--muted:#C2B8D1;--line:#3A2E52;--pump:#FF8A2A;--pumpd:#F26A10;--night:#0E0B16;--card:#211A33;--txt:#F4EEE4}
+html.halloween body{background:var(--bg);color:var(--txt);overflow-x:clip}
+html.halloween body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.8;animation:hw-twinkle 3.5s ease-in-out infinite alternate;background-image:radial-gradient(1.5px 1.5px at 7% 14%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 18% 62%,#fff 50%,transparent 51%),radial-gradient(1.5px 1.5px at 29% 31%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 41% 82%,#fff 50%,transparent 51%),radial-gradient(1.5px 1.5px at 53% 9%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 64% 47%,#fff 50%,transparent 51%),radial-gradient(1.5px 1.5px at 76% 71%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 87% 23%,#fff 50%,transparent 51%),radial-gradient(1.5px 1.5px at 94% 88%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 12% 93%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 47% 56%,#fff 50%,transparent 51%),radial-gradient(1.5px 1.5px at 71% 4%,#fff 50%,transparent 51%)}
+html.halloween a{color:var(--pump)}
+html.halloween header,html.halloween footer{border-color:var(--line)}
+html.halloween .brand,html.halloween .call,html.halloween .hero p.lead b{color:var(--txt)}
+html.halloween .eyebrow{color:#C6A2FF}
+html.halloween .hero p.lead,html.halloween .intro,html.halloween .pack p,html.halloween .step p,html.halloween .what span,html.halloween footer{color:var(--muted)}
+html.halloween .boo{font-family:Creepster,"Bricolage Grotesque",cursive;font-size:46px;line-height:1;color:var(--pump);margin:0 0 12px;letter-spacing:1px;text-shadow:0 0 18px rgba(255,138,42,.55);transform-origin:left center;animation:hw-wobble 3s ease-in-out infinite}
+html.halloween .deadline{background:#2A2140;border:1px solid var(--pumpd)}
+html.halloween .deadline::before{background:var(--pump);box-shadow:0 0 10px var(--pump);animation:hw-pulse 1.6s ease-in-out infinite}
+html.halloween .btn{background:var(--pump);color:#1A1206}
+html.halloween .btn:hover{background:#FFA552;box-shadow:0 0 22px rgba(255,138,42,.55)}
+html.halloween .btn.ghost{background:transparent;color:var(--txt);border-color:var(--txt)}
+html.halloween .btn.ghost:hover{background:var(--txt);color:var(--night);box-shadow:none}
+html.halloween .hero .cta .btn:first-child{animation:hw-glow 2.4s ease-in-out infinite}
+html.halloween .pack,html.halloween .step,html.halloween .what div{background:var(--card);border-color:var(--line)}
+html.halloween .pack{transition:transform .25s,box-shadow .25s}
+html.halloween .pack:hover{transform:translateY(-4px) rotate(-1deg);box-shadow:0 12px 30px rgba(255,138,42,.25)}
+html.halloween .pack:nth-child(even):hover{transform:translateY(-4px) rotate(1deg)}
+html.halloween .pack img{background:#2A2140}
+html.halloween .what b{color:var(--pump)}
+html.halloween .step::before{background:var(--pump);color:#1A1206}
+html.halloween .more{background:var(--night);border:1px solid #4B3A6B}
+html.halloween .gh{padding-right:60px}
+.hw-sky{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:30}
+.bat{position:absolute;left:0;top:var(--y);width:calc(58px * var(--s));transform:translateX(-140px);animation:hw-fly var(--d) linear var(--w) infinite}
+.bat.back{animation-name:hw-fly-back}
+.bat i{display:block;animation:hw-bob 1.7s ease-in-out infinite alternate}
+.bat svg,.hw-pop svg{display:block;width:100%;height:auto;fill:#1A1228;filter:drop-shadow(0 0 2px #D9C2FF) drop-shadow(0 0 9px rgba(255,138,42,.7));transform-origin:50% 45%;animation:hw-flap .2s ease-in-out infinite alternate}
+html.halloween .hw-moon{position:absolute;right:-44px;top:-52px;width:124px;height:124px;border-radius:50%;z-index:-1;background:radial-gradient(circle at 36% 34%,#FFF7DA,#F6E3A1 58%,#E6CB78);box-shadow:0 0 44px 14px rgba(255,236,170,.32),0 0 110px 40px rgba(255,236,170,.12)}
+.hw-moon::before,.hw-moon::after{content:"";position:absolute;border-radius:50%;background:rgba(150,120,60,.18)}
+.hw-moon::before{width:22px;height:22px;left:30%;top:52%}.hw-moon::after{width:14px;height:14px;left:60%;top:30%}
+html.halloween .hw-web{position:absolute;left:0;top:0;width:118px;height:118px;pointer-events:none;z-index:1}
+html.halloween .hw-spider{position:absolute;top:0;right:26%;width:2px;height:0;z-index:2;pointer-events:none}
+.hw-spider b{position:absolute;left:0;top:0;width:1px;height:30px;background:rgba(255,255,255,.75);animation:hw-thread 6s ease-in-out infinite}
+.hw-spider svg{position:absolute;left:-16px;top:24px;width:32px;height:32px;animation:hw-drop 6s ease-in-out infinite}
+html.halloween .hw-ghost{position:absolute;left:-30px;bottom:26px;width:72px;z-index:2;pointer-events:none;animation:hw-float 4.5s ease-in-out infinite}
+html.halloween .hw-ghost2{position:absolute;right:2px;top:-8px;width:48px;pointer-events:none;animation:hw-float 3.8s ease-in-out -1s infinite}
+html.halloween .hw-pumpkin{position:absolute;right:-12px;bottom:-26px;width:100px;height:90px;border:0;background:none;padding:0;cursor:pointer;z-index:3;animation:hw-sit 3.2s ease-in-out infinite}
+.hw-pumpkin svg{display:block;width:100%;height:100%;filter:drop-shadow(0 6px 16px rgba(255,138,42,.5))}
+.hw-pumpkin .face{animation:hw-flicker 2.4s infinite}
+.hw-pumpkin .say{position:absolute;right:78px;bottom:66px;background:#fff;color:#15111F;font-family:Creepster,"Bricolage Grotesque",cursive;font-size:28px;line-height:1;padding:8px 14px;border-radius:16px 16px 4px 16px;opacity:0;transform:scale(.3);transform-origin:right bottom;transition:opacity .2s,transform .25s cubic-bezier(.3,1.6,.6,1);pointer-events:none;white-space:nowrap}
+.hw-pumpkin.on .say{opacity:1;transform:scale(1)}
+.hw-pumpkin.on{animation:hw-jump .5s ease-out}
+.hw-pop{position:absolute;left:34px;top:20px;width:34px;pointer-events:none;animation:hw-pop 1.2s ease-out forwards}
+.hw-ideas h2{position:relative}
+@keyframes hw-fly{0%{transform:translateX(-140px)}55%,100%{transform:translateX(calc(100vw + 140px))}}
+@keyframes hw-fly-back{0%{transform:translateX(calc(100vw + 140px)) scaleX(-1)}55%,100%{transform:translateX(-140px) scaleX(-1)}}
+@keyframes hw-bob{from{transform:translateY(-16px)}to{transform:translateY(16px)}}
+@keyframes hw-flap{from{transform:scaleY(1)}to{transform:scaleY(.35)}}
+@keyframes hw-float{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-16px) rotate(4deg)}}
+@keyframes hw-thread{0%,100%{height:30px}50%{height:118px}}
+@keyframes hw-drop{0%,100%{transform:translateY(0)}50%{transform:translateY(88px)}}
+@keyframes hw-flicker{0%,100%{opacity:1}8%{opacity:.55}10%{opacity:1}48%{opacity:.8}52%{opacity:1}70%{opacity:.6}72%{opacity:1}}
+@keyframes hw-sit{0%,100%{transform:rotate(-3deg)}50%{transform:rotate(3deg)}}
+@keyframes hw-jump{0%{transform:translateY(0) scale(1)}35%{transform:translateY(-22px) scale(1.08,.94)}70%{transform:translateY(0) scale(.96,1.05)}100%{transform:translateY(0) scale(1)}}
+@keyframes hw-pop{0%{transform:translate(0,0) scale(.3);opacity:1}100%{transform:translate(var(--x),-150px) scale(1);opacity:0}}
+@keyframes hw-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.5)}}
+@keyframes hw-glow{0%,100%{box-shadow:0 0 0 rgba(255,138,42,0)}50%{box-shadow:0 0 26px rgba(255,138,42,.6)}}
+@keyframes hw-wobble{0%,100%{transform:rotate(-1.5deg)}50%{transform:rotate(1.5deg)}}
+@keyframes hw-twinkle{from{opacity:.45}to{opacity:.9}}
+@media (max-width:640px){html.halloween .boo{font-size:38px}.bat:nth-child(n+4){display:none}html.halloween .hw-moon{right:4px;top:-40px;width:84px;height:84px}html.halloween .hw-ghost{left:-12px;width:58px}html.halloween .hw-pumpkin{right:-6px;width:84px;height:76px}.hw-pumpkin .say{right:62px;bottom:54px}}
+@media (prefers-reduced-motion:reduce){html.halloween .hw-sky{display:none}html.halloween *,html.halloween body::before{animation:none !important;transition:none !important}html.halloween .pack:hover{transform:none}}
 </style>
 </head>
 <body>
+<div class="hw hw-sky" aria-hidden="true"><span class="bat" style="--y:9vh;--d:15s;--w:1s;--s:1"><i><svg viewBox="0 0 100 44"><path d="M50 13C47 7 44 7 43 12C38 7 28 3 13 5C19 10 19 16 13 21C21 19 28 22 31 27C34 23 39 23 42 28L50 37L58 28C61 23 66 23 69 27C72 22 79 19 87 21C81 16 81 10 87 5C72 3 62 7 57 12C56 7 53 7 50 13ZM45 11L44 4L48 9ZM55 11L56 4L52 9Z"/></svg></i></span><span class="bat back" style="--y:26vh;--d:19s;--w:6s;--s:.8"><i><svg viewBox="0 0 100 44"><path d="M50 13C47 7 44 7 43 12C38 7 28 3 13 5C19 10 19 16 13 21C21 19 28 22 31 27C34 23 39 23 42 28L50 37L58 28C61 23 66 23 69 27C72 22 79 19 87 21C81 16 81 10 87 5C72 3 62 7 57 12C56 7 53 7 50 13ZM45 11L44 4L48 9ZM55 11L56 4L52 9Z"/></svg></i></span><span class="bat" style="--y:44vh;--d:17s;--w:11s;--s:.65"><i><svg viewBox="0 0 100 44"><path d="M50 13C47 7 44 7 43 12C38 7 28 3 13 5C19 10 19 16 13 21C21 19 28 22 31 27C34 23 39 23 42 28L50 37L58 28C61 23 66 23 69 27C72 22 79 19 87 21C81 16 81 10 87 5C72 3 62 7 57 12C56 7 53 7 50 13ZM45 11L44 4L48 9ZM55 11L56 4L52 9Z"/></svg></i></span><span class="bat back" style="--y:14vh;--d:22s;--w:15s;--s:1.15"><i><svg viewBox="0 0 100 44"><path d="M50 13C47 7 44 7 43 12C38 7 28 3 13 5C19 10 19 16 13 21C21 19 28 22 31 27C34 23 39 23 42 28L50 37L58 28C61 23 66 23 69 27C72 22 79 19 87 21C81 16 81 10 87 5C72 3 62 7 57 12C56 7 53 7 50 13ZM45 11L44 4L48 9ZM55 11L56 4L52 9Z"/></svg></i></span><span class="bat" style="--y:62vh;--d:20s;--w:20s;--s:.75"><i><svg viewBox="0 0 100 44"><path d="M50 13C47 7 44 7 43 12C38 7 28 3 13 5C19 10 19 16 13 21C21 19 28 22 31 27C34 23 39 23 42 28L50 37L58 28C61 23 66 23 69 27C72 22 79 19 87 21C81 16 81 10 87 5C72 3 62 7 57 12C56 7 53 7 50 13ZM45 11L44 4L48 9ZM55 11L56 4L52 9Z"/></svg></i></span></div>
 <header>
   <a class="brand" href="/" aria-label="HD Laser Studio home"><svg width="78" height="26" viewBox="220 115 1930 640" aria-hidden="true"><path fill="#C8372A" d="M510 125 L730 125 L636 371 L963 371 L1072 125 L2000 125 C2100 125 2160 210 2130 300 L2010 610 C1970 700 1880 742 1790 742 L1115 742 L1283 341 L1525 341 L1425 595 L1800 595 L1938 272 L1222 272 L1030 742 L808 742 L907 523 L572 523 L483 742 L232 742 Z"></path></svg><span>LASER STUDIO</span></a>
   <a class="call" href="tel:+18583739866">(858) 373-9866</a>
@@ -79,13 +159,21 @@ footer{max-width:1200px;margin:0 auto;padding:24px;border-top:1px solid var(--li
 <main>
   <div class="hero">
     <div>
+      <p class="hw boo">Happy Halloween!</p>
       <p class="eyebrow">Holiday gifts for your team and clients</p>
       <h1>A gift with your logo that they&#8217;ll use every day.</h1>
       <p class="lead">Tumblers, cups, bottles, cutting boards, or <b>any gift you bring in</b>. We engrave your logo, a design, a message or a name, right here in our Pacific Beach shop. Tell us your idea and we&#8217;ll send a free digital proof before we make anything.</p>
       <div class="cta"><a class="btn" href="/quote/?gift=Holiday%20gifts">Get a free quote</a> <a class="btn ghost" href="tel:+18583739866">Call or text (858) 373-9866</a></div>
       <div class="deadline" id="deadline">Holiday orders are open until December 31</div>
     </div>
-    <img src="/assets/corp-fritolay-yetis.jpg" alt="Row of five tumblers engraved with a company logo" width="1400" height="788">
+    <div class="himg">
+      <span class="hw hw-moon" aria-hidden="true"></span>
+      <img src="/assets/corp-fritolay-yetis.jpg" alt="Row of five tumblers engraved with a company logo" width="1400" height="788">
+      <svg class="hw hw-web" viewBox="0 0 100 100" aria-hidden="true"><path fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1" d="M0 0L100 0M0 0L93 37M0 0L71 71M0 0L37 93M0 0L0 100M26 0Q21 4 24 10Q18 12 18 18Q12 18 10 24Q4 21 0 26M50 0Q40 8 46 19Q34 23 35 35Q23 34 19 46Q8 40 0 50M74 0Q60 12 69 28Q51 33 52 52Q33 51 28 69Q12 60 0 74M98 0Q79 15 91 37Q67 44 69 69Q44 67 37 91Q15 79 0 98"/></svg>
+      <span class="hw hw-spider" aria-hidden="true"><b></b><svg viewBox="0 0 40 40"><g stroke="#0D0A14" stroke-width="2.2" fill="none" stroke-linecap="round"><path d="M14 18L4 10M14 21L2 20M14 24L4 31M15 26L8 37M26 18L36 10M26 21L38 20M26 24L36 31M25 26L32 37"/></g><ellipse cx="20" cy="22" rx="8" ry="9" fill="#0D0A14"/><circle cx="20" cy="12" r="5.5" fill="#0D0A14"/><circle cx="18" cy="11.5" r="1.4" fill="#FF6B3D"/><circle cx="22" cy="11.5" r="1.4" fill="#FF6B3D"/></svg></span>
+      <svg class="hw hw-ghost" viewBox="0 0 60 70" aria-hidden="true"><path fill="#F7F4FF" d="M30 2C14 2 6 14 6 30V62L13 56L20 64L27 56L34 64L41 56L48 64L54 58V30C54 14 46 2 30 2Z"/><ellipse cx="22" cy="28" rx="3.6" ry="5" fill="#2A2140"/><ellipse cx="38" cy="28" rx="3.6" ry="5" fill="#2A2140"/><ellipse cx="30" cy="42" rx="4" ry="5" fill="#2A2140"/><circle cx="16" cy="36" r="3" fill="#FFB3C7" opacity=".7"/><circle cx="44" cy="36" r="3" fill="#FFB3C7" opacity=".7"/></svg>
+      <button type="button" class="hw hw-pumpkin" id="hwpumpkin" aria-label="Boo! Tap the pumpkin"><svg viewBox="0 0 100 90" aria-hidden="true"><path d="M47 20C46 12 48 6 55 3L58 7C53 9 53 14 54 20Z" fill="#4B6B2A"/><ellipse cx="31" cy="53" rx="23" ry="33" fill="#E2650E"/><ellipse cx="69" cy="53" rx="23" ry="33" fill="#E2650E"/><ellipse cx="50" cy="53" rx="22" ry="35" fill="#FF8A2A"/><g class="face" fill="#FFD45A"><path d="M30 42L40 42L35 32Z"/><path d="M60 42L70 42L65 32Z"/><path d="M46 52L54 52L50 45Z"/><path d="M26 60Q50 80 74 60L68 62L64 58L58 64L54 59L50 65L46 59L42 64L36 58L32 62Z"/></g></svg><span class="say">Boo!</span></button>
+    </div>
   </div>
 
   <div class="packs" id="packs">
@@ -110,6 +198,13 @@ footer{max-width:1200px;margin:0 auto;padding:24px;border-top:1px solid var(--li
         <a class="btn" href="/quote/?gift=Client%20cutting%20board">Ask about this gift</a></div>
     </article>
   </div>
+
+  <section class="hw hw-ideas">
+    <h2 class="gh">Halloween party coming up?<svg class="hw hw-ghost2" viewBox="0 0 60 70" aria-hidden="true"><path fill="#F7F4FF" d="M30 2C14 2 6 14 6 30V62L13 56L20 64L27 56L34 64L41 56L48 64L54 58V30C54 14 46 2 30 2Z"/><ellipse cx="22" cy="28" rx="3.6" ry="5" fill="#2A2140"/><ellipse cx="38" cy="28" rx="3.6" ry="5" fill="#2A2140"/><ellipse cx="30" cy="42" rx="4" ry="5" fill="#2A2140"/><circle cx="16" cy="36" r="3" fill="#FFB3C7" opacity=".7"/><circle cx="44" cy="36" r="3" fill="#FFB3C7" opacity=".7"/></svg></h2>
+    <p class="intro">We make Halloween things too, right here in Pacific Beach.</p>
+    <div class="what"><div><b>Party cups</b><span>Each guest&#8217;s name on their cup</span></div><div><b>A spooky sign</b><span>Cut from wood for the front door</span></div><div><b>Party glasses</b><span>Bring yours, we add the names</span></div><div><b>Your idea</b><span>Tell us and we&#8217;ll make it spooky</span></div></div>
+    <p style="margin-top:18px"><a class="btn" href="/quote/?gift=Halloween%20idea">Ask about a Halloween idea</a></p>
+  </section>
 
   <section>
     <h2>Bring any gift. We&#8217;ll make it personal.</h2>
@@ -141,6 +236,15 @@ footer{max-width:1200px;margin:0 auto;padding:24px;border-top:1px solid var(--li
   </section>
 </main>
 <footer><div>&#169; 2026 HD Laser Studio Inc. &#183; 759 Turquoise St, Pacific Beach, San Diego</div><div><a href="/quote/">Free quote</a> &#183; <a href="/terms/">Terms &amp; privacy</a></div></footer>
+<script>
+// Tap the pumpkin: it hops, says Boo! and lets three bats out.
+(function(){ var p = document.getElementById('hwpumpkin'), bat = document.querySelector('.bat i'); if (!p || !bat) return;
+  p.addEventListener('click', function(){
+    p.classList.remove('on'); void p.offsetWidth; p.classList.add('on'); clearTimeout(p.t); p.t = setTimeout(function(){ p.classList.remove('on'); }, 1600);
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    [-70, 0, 70].forEach(function(x, i){ var b = document.createElement('span'); b.className = 'hw-pop'; b.style.setProperty('--x', x + 'px'); b.style.animationDelay = (i * 0.08) + 's'; b.innerHTML = bat.innerHTML; p.appendChild(b); setTimeout(function(){ b.remove(); }, 1500); });
+  }); })();
+</script>
 <script src="/assets/site-config.js?v=7"></script>
 </body>
 </html>
