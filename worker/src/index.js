@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v43"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v44"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -151,6 +151,13 @@ export default {
         if (path === "/api/customers/square-import" && request.method === "POST") return json(await importSquareCustomers(env), 200);
         if (path === "/api/customers/send" && request.method === "POST") return json(await sendCampaign(env, await request.json().catch(() => ({})), url.origin), 200);
         if (path === "/api/reviews/refresh") return json(await googleReviews(env, true), 200, { "Cache-Control": "no-store" });
+        if (path === "/api/reviews/set" && request.method === "POST") { // Hugh types the count himself (no Google key, no cost)
+          const b = await request.json().catch(() => ({})); const count = parseInt(b.count, 10), rating = Math.round(parseFloat(b.rating) * 10) / 10;
+          if (!(count >= 1 && count <= 100000) || !(rating >= 1 && rating <= 5)) return json({ ok: false, error: "Type the rating (1.0 to 5.0) and the number of reviews" }, 200);
+          const v = { rating, count, manual: true, at: new Date().toISOString() };
+          await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('google_reviews', ?)`).bind(JSON.stringify(v)).run();
+          return json({ ok: true, ...v }, 200);
+        }
         if (path === "/api/kpis") return json(await kpis(env, url.searchParams.get("from"), url.searchParams.get("to")), 200, { "Cache-Control": "no-store" });
         if (path === "/api/orders.csv") return ordersCsv(env);
         if (path === "/api/sync" && request.method === "POST") {
@@ -3275,6 +3282,8 @@ tr.off td{color:#9AA0A6}tr.off td b{text-decoration:line-through}.pill{display:i
 <header><h1>Customers</h1><div class="bar"><a class="act" href="/admin">Sales dashboard</a><a class="act" href="/admin/money">Money</a></div></header>
 <main>
 <div class="tiles" id="tiles"></div>
+<div class="card"><div class="bar"><b>Google reviews on the website</b><input id="grating" placeholder="5.0" style="width:80px" inputmode="decimal"> stars from <input id="gcount" placeholder="156" style="width:100px" inputmode="numeric"> reviews <button class="act dark" id="gsave">Update the website</button><span class="msg" id="gmsg"></span></div>
+<p class="small" style="margin:6px 0 0">When your Google review count goes up, type the new numbers here. The home page shows them within the hour.</p></div>
 <div class="card">
   <div class="bar"><input id="q" placeholder="Search name, email, phone" style="flex:1 1 240px">
   <button class="act dark" id="copyemails">Copy all emails</button><button class="act" id="copyphones">Copy all phone numbers</button><button class="act" id="csv">Download CSV</button><button class="act" id="square">Import from Square</button></div>
@@ -3336,6 +3345,8 @@ function send(test){ var s=$('#subject').value.trim(), m=$('#body').value.trim()
     if(!r.ok){ $('#smsg').textContent=r.error||'Could not send'; $('#smsg').className='msg bad'; return; }
     CAMPAIGN=r.remaining>0?r.campaign_id:0;
     $('#smsg').textContent='Sent to '+r.sent+'.'+(r.remaining>0?' '+r.remaining+' still to go'+(r.error?' (stopped: '+r.error+')':'')+'. Click Send again later to send to the rest; nobody gets it twice.':' Everyone has it.'); $('#smsg').className='msg '+(r.error?'bad':'ok'); load(); }); }
+fetch('/reviews',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ if(d&&d.count){ $('#gcount').value=d.count; $('#grating').value=Number(d.rating).toFixed(1); } }).catch(function(){});
+$('#gsave').onclick=function(){ api('/api/reviews/set',{rating:$('#grating').value,count:$('#gcount').value}).then(function(r){ $('#gmsg').textContent=r.ok?'Saved. The website shows '+Number(r.rating).toFixed(1)+' stars from '+r.count+' reviews.':(r.error||'Failed'); $('#gmsg').className='msg '+(r.ok?'ok':'bad'); }); };
 $('#test').onclick=function(){ send(true); }; $('#sendall').onclick=function(){ send(false); };
 load();
 </script></body></html>`;
