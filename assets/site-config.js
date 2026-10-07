@@ -50,3 +50,17 @@ window.hdTrack = function (name, ref, detail) {
     }
   } catch (e) {}
 })();
+
+// Google rating and review count, kept current by the worker (it asks Google once a day). Any element with
+// data-g-rating or data-g-count gets the live number; the number written in the page stays if this can't load.
+(function () {
+  try {
+    var els = document.querySelectorAll('[data-g-rating],[data-g-count]'); if (!els.length) return;
+    var base = (window.HD_CONFIG || {}).WORKER_BASE; if (!base) return;
+    fetch(base + '/reviews').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.count) return;
+      document.querySelectorAll('[data-g-count]').forEach(function (e) { e.textContent = Number(d.count).toLocaleString('en-US'); });
+      if (d.rating) document.querySelectorAll('[data-g-rating]').forEach(function (e) { e.textContent = Number(d.rating).toFixed(1); });
+    }).catch(function () {});
+  } catch (e) {}
+})();

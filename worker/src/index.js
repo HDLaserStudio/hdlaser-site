@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v42"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v43"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -123,6 +123,7 @@ export default {
       if (path === "/webhooks/square" && request.method === "POST") return squareWebhook(request, env);
       if (path === "/webhooks/twilio" && request.method === "POST") return twilioInbound(request, env);
       if (path === "/unsubscribe") return unsubscribePage(env, url);
+      if (path === "/reviews") return json(await googleReviews(env, false), 200, { ...cors, "Cache-Control": "public, max-age=3600" });
       // ---- shop iPad time clock: everyone on one screen, each person punches with their own PIN ----
       if (path === "/clock") return new Response(CLOCK_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } });
       if (path === "/clock/status") return json(await clockBoard(env), 200, { "Cache-Control": "no-store" });
@@ -149,6 +150,7 @@ export default {
         if (path === "/api/customers" && request.method === "POST") return json(await saveCustomer(env, await request.json().catch(() => ({}))), 200);
         if (path === "/api/customers/square-import" && request.method === "POST") return json(await importSquareCustomers(env), 200);
         if (path === "/api/customers/send" && request.method === "POST") return json(await sendCampaign(env, await request.json().catch(() => ({})), url.origin), 200);
+        if (path === "/api/reviews/refresh") return json(await googleReviews(env, true), 200, { "Cache-Control": "no-store" });
         if (path === "/api/kpis") return json(await kpis(env, url.searchParams.get("from"), url.searchParams.get("to")), 200, { "Cache-Control": "no-store" });
         if (path === "/api/orders.csv") return ordersCsv(env);
         if (path === "/api/sync" && request.method === "POST") {
@@ -219,6 +221,7 @@ export default {
       const d = new Date(event.scheduledTime || Date.now());
       await noShowCheck(env);                                              // staffing watchdog: every tick during open hours
       if (d.getUTCMinutes() >= 10) return;                                 // the :15 crons exist only for the 10:15 check
+      await googleReviews(env, false).catch((e) => console.error("reviews", e)); // refreshes itself at most once a day
       await syncSquare(env, 3);
       if (env.PLAID_CLIENT_ID) await plaidSync(env, null, 12);
       if (d.getUTCDay() === 1 && d.getUTCHours() === 15) { await analyzePricing(env).catch((e) => console.error("pricing review", e)); await sendDigest(env); }
@@ -3336,3 +3339,31 @@ function send(test){ var s=$('#subject').value.trim(), m=$('#body').value.trim()
 $('#test').onclick=function(){ send(true); }; $('#sendall').onclick=function(){ send(false); };
 load();
 </script></body></html>`;
+
+// ---------------------------------------------------------------- Google rating (Hugh, Oct 7)
+// The website's "5.0 on Google (156 reviews)" comes from here. Once a day the worker asks Google Places for the shop's
+// rating and review count and keeps the answer in meta.google_reviews; the site reads it from GET /reviews.
+// Needs GOOGLE_PLACES_KEY in Cloudflare (a Google Cloud API key with Places API (New) on). The shop's place is found by
+// name and address the first time (or set GOOGLE_PLACE_ID). Without the key, the pages keep the number written in them.
+async function googleReviews(env, force) {
+  const row = env.DB ? await env.DB.prepare(`SELECT v FROM meta WHERE k = 'google_reviews'`).first().catch(() => null) : null;
+  let cur = null; try { cur = row ? JSON.parse(row.v) : null; } catch {}
+  const fresh = cur && cur.at && Date.now() - new Date(cur.at).getTime() < 20 * 3600000;
+  if (!env.GOOGLE_PLACES_KEY || (fresh && !force)) return cur ? { rating: cur.rating, count: cur.count, url: cur.url, at: cur.at } : { configured: !!env.GOOGLE_PLACES_KEY };
+  const h = { "X-Goog-Api-Key": env.GOOGLE_PLACES_KEY, "Content-Type": "application/json" };
+  try {
+    let id = env.GOOGLE_PLACE_ID || (cur && cur.place_id);
+    if (!id) {
+      const r = await fetch("https://places.googleapis.com/v1/places:searchText", { method: "POST", headers: { ...h, "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress" }, body: JSON.stringify({ textQuery: "HD Laser Studio, 759 Turquoise St, San Diego, CA 92109" }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.places || !d.places.length) return { ...(cur || {}), error: "Google search: " + ((d.error && d.error.message) || r.status) };
+      id = d.places[0].id;
+    }
+    const r = await fetch("https://places.googleapis.com/v1/places/" + encodeURIComponent(id), { headers: { ...h, "X-Goog-FieldMask": "rating,userRatingCount,googleMapsUri,displayName" } });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.userRatingCount) return { ...(cur || {}), error: "Google details: " + ((d.error && d.error.message) || r.status) };
+    const next = { rating: d.rating, count: d.userRatingCount, url: d.googleMapsUri || null, name: d.displayName && d.displayName.text, place_id: id, at: new Date().toISOString() };
+    if (env.DB) await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('google_reviews', ?)`).bind(JSON.stringify(next)).run();
+    return { rating: next.rating, count: next.count, url: next.url, at: next.at, name: force ? next.name : undefined };
+  } catch (e) { return { ...(cur || {}), error: "Google: " + (e && e.message || e) }; }
+}
