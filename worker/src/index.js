@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v41"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v42"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -3114,7 +3114,9 @@ const CUSTOMER_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS campaign_sends (campaign_id INTEGER, email TEXT, sent_at TEXT, PRIMARY KEY (campaign_id, email))`,
 ];
 let customersReady = false;
-async function ensureCustomers(env) { if (customersReady) return; for (const s of CUSTOMER_SCHEMA) await env.DB.prepare(s).run(); customersReady = true; }
+async function ensureCustomers(env) { if (customersReady) return; for (const s of CUSTOMER_SCHEMA) await env.DB.prepare(s).run();
+  try { await env.DB.prepare(`ALTER TABLE customers ADD COLUMN deleted_at TEXT`).run(); } catch {} // already there
+  customersReady = true; }
 const normEmail = (e) => { e = String(e || "").trim().toLowerCase(); return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) ? e.slice(0, 120) : ""; };
 const normPhone = (p) => { const d = String(p || "").replace(/\D/g, ""); const t = d.length === 11 && d[0] === "1" ? d.slice(1) : d; return t.length === 10 ? t : ""; };
 const fmtPhone = (p) => (p && p.length === 10 ? `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}` : p || "");
@@ -3186,7 +3188,7 @@ async function importSquareCustomers(env) {
 
 async function customerList(env) {
   await syncCustomers(env);
-  const rows = (await env.DB.prepare(`SELECT * FROM customers ORDER BY COALESCE(last_seen, first_seen) DESC`).all()).results;
+  const rows = (await env.DB.prepare(`SELECT * FROM customers WHERE deleted_at IS NULL ORDER BY COALESCE(last_seen, first_seen) DESC`).all()).results;
   return { customers: rows.map((r) => ({ id: r.id, name: r.name || "", business: r.business || "", email: r.email || "", phone: fmtPhone(r.phone), sources: r.sources || "", first_seen: r.first_seen, last_seen: r.last_seen, orders: r.orders || 0, spent_cents: r.spent_cents || 0, unsubscribed: !!r.unsubscribed_at, note: r.note || "" })),
     email_configured: !!env.RESEND_API_KEY, campaigns: (await env.DB.prepare(`SELECT id, created_at, subject, sent, failed FROM campaigns ORDER BY id DESC LIMIT 10`).all()).results };
 }
@@ -3194,12 +3196,14 @@ async function customerList(env) {
 async function saveCustomer(env, b) {
   await ensureCustomers(env);
   const email = normEmail(b.email), phone = normPhone(b.phone), name = String(b.name || "").trim().slice(0, 80), business = String(b.business || "").trim().slice(0, 120), note = String(b.note || "").slice(0, 500), now = new Date().toISOString();
-  if (b.delete && b.id) { await env.DB.prepare(`DELETE FROM customers WHERE id = ?`).bind(+b.id).run(); return { ok: true }; }
+  // Delete hides the person for good: the row stays so the automatic sync matches it and doesn't add them back from their orders
+  if (b.delete && b.id) { await env.DB.prepare(`UPDATE customers SET deleted_at = ?, updated_at = ? WHERE id = ?`).bind(now, now, +b.id).run(); return { ok: true }; }
   if ("unsubscribed" in b && b.id && Object.keys(b).length <= 3) { await env.DB.prepare(`UPDATE customers SET unsubscribed_at = ?, updated_at = ? WHERE id = ?`).bind(b.unsubscribed ? now : null, now, +b.id).run(); return { ok: true }; }
   if (!email && !phone) return { ok: false, error: "Add an email or a phone number" };
   if (String(b.email || "").trim() && !email) return { ok: false, error: "That email doesn't look right" };
   if (b.id) { await env.DB.prepare(`UPDATE customers SET email = ?, phone = ?, name = ?, business = ?, note = ?, manual = 1, updated_at = ? WHERE id = ?`).bind(email || null, phone || null, name || null, business || null, note || null, now, +b.id).run(); return { ok: true, id: +b.id }; }
-  const dup = (email && await env.DB.prepare(`SELECT id FROM customers WHERE email = ?`).bind(email).first()) || (phone && await env.DB.prepare(`SELECT id FROM customers WHERE phone = ?`).bind(phone).first());
+  const dup = (email && await env.DB.prepare(`SELECT id, deleted_at FROM customers WHERE email = ?`).bind(email).first()) || (phone && await env.DB.prepare(`SELECT id, deleted_at FROM customers WHERE phone = ?`).bind(phone).first());
+  if (dup && dup.deleted_at) { await env.DB.prepare(`UPDATE customers SET deleted_at = NULL, email = COALESCE(?, email), phone = COALESCE(?, phone), name = COALESCE(?, name), business = COALESCE(?, business), note = COALESCE(?, note), manual = 1, updated_at = ? WHERE id = ?`).bind(email || null, phone || null, name || null, business || null, note || null, now, dup.id).run(); return { ok: true, id: dup.id, restored: true }; }
   if (dup) return { ok: false, error: "That customer is already on the list" };
   const r = await env.DB.prepare(`INSERT INTO customers (email, phone, name, business, sources, first_seen, last_seen, manual, note, updated_at) VALUES (?,?,?,?,?,?,?,1,?,?)`).bind(email || null, phone || null, name || null, business || null, "added by hand", now, now, note || null, now).run();
   return { ok: true, id: r.meta && r.meta.last_row_id };
@@ -3228,7 +3232,7 @@ async function sendCampaign(env, b, origin) {
   if (b.test) { const r = await post([await build(replyTo, "Hugh")]); return r.ok ? { ok: true, test: true, to: replyTo } : r; }
   let id = +b.campaign_id || 0;
   if (!id) { const r = await env.DB.prepare(`INSERT INTO campaigns (created_at, subject, body) VALUES (?,?,?)`).bind(new Date().toISOString(), subject, body).run(); id = r.meta && r.meta.last_row_id; }
-  const people = (await env.DB.prepare(`SELECT email, name FROM customers WHERE email IS NOT NULL AND email != '' AND unsubscribed_at IS NULL AND email NOT IN (SELECT email FROM campaign_sends WHERE campaign_id = ?) ORDER BY id`).bind(id).all()).results;
+  const people = (await env.DB.prepare(`SELECT email, name FROM customers WHERE email IS NOT NULL AND email != '' AND unsubscribed_at IS NULL AND deleted_at IS NULL AND email NOT IN (SELECT email FROM campaign_sends WHERE campaign_id = ?) ORDER BY id`).bind(id).all()).results;
   let sent = 0, error = null;
   for (let i = 0; i < people.length && i < 1000; i += 100) {
     const chunk = people.slice(i, i + 100), r = await post(await Promise.all(chunk.map((p) => build(p.email, p.name))));
@@ -3317,8 +3321,8 @@ $('#q').addEventListener('input',function(){ if(D) render(); });
 var F=$('#form');
 function fill(c){ F.id.value=c?c.id:''; F.name.value=c?c.name:''; F.business.value=c?c.business:''; F.email.value=c?c.email:''; F.phone.value=c?c.phone:''; F.note.value=c?c.note:''; $('#save').textContent=c?'Save changes':'Add customer'; $('#del').hidden=!c; $('#fmsg').textContent=''; }
 $('#clear').onclick=function(){ fill(null); };
-F.onsubmit=function(e){ e.preventDefault(); api('/api/customers',{id:F.id.value||undefined,name:F.name.value,business:F.business.value,email:F.email.value,phone:F.phone.value,note:F.note.value}).then(function(r){ $('#fmsg').textContent=r.ok?'Saved.':(r.error||'Failed'); $('#fmsg').className='msg '+(r.ok?'ok':'bad'); if(r.ok){ fill(null); load(); } }); };
-$('#del').onclick=function(){ if(!F.id.value||!confirm('Delete this customer from the list?')) return; api('/api/customers',{id:F.id.value,delete:true}).then(function(){ fill(null); load(); }); };
+F.onsubmit=function(e){ e.preventDefault(); api('/api/customers',{id:F.id.value||undefined,name:F.name.value,business:F.business.value,email:F.email.value,phone:F.phone.value,note:F.note.value}).then(function(r){ if(r.ok){ fill(null); load(); } $('#fmsg').textContent=r.ok?(r.restored?'Added back to the list.':'Saved.'):(r.error||'Failed'); $('#fmsg').className='msg '+(r.ok?'ok':'bad'); }); };
+$('#del').onclick=function(){ if(!F.id.value||!confirm('Delete this customer from the list?')) return; api('/api/customers',{id:F.id.value,delete:true}).then(function(){ fill(null); load(); $('#fmsg').textContent='Deleted. They stay off the list and off emails.'; $('#fmsg').className='msg ok'; }); };
 document.addEventListener('click',function(e){ var b=e.target.closest('[data-edit]'); if(b){ fill(D.customers.filter(function(c){return String(c.id)===b.dataset.edit;})[0]); F.scrollIntoView({behavior:'smooth'}); return; }
   var u=e.target.closest('[data-unsub]'); if(u){ api('/api/customers',{id:u.dataset.unsub,unsubscribed:u.dataset.v==='1'}).then(load); } });
 function send(test){ var s=$('#subject').value.trim(), m=$('#body').value.trim(); if(s.length<2||m.length<5){ $('#smsg').textContent='Write a subject and a message first.'; $('#smsg').className='msg bad'; return; }
