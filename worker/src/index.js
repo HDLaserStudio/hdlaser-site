@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v49"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v50"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -3245,7 +3245,7 @@ function campaignHtml(body, unsubLink, subject) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#FFFFFF;border-radius:16px;overflow:hidden;font-family:Helvetica,Arial,sans-serif">
 <tr><td style="background:#15191E;padding:18px 24px"><a href="https://hdlaser.net/?src=email" style="text-decoration:none"><img src="https://hdlaser.net/assets/icon-512.png" width="48" height="48" alt="HD" style="vertical-align:middle;border:0;border-radius:10px"><span style="color:#FFFFFF;font-weight:800;font-size:18px;letter-spacing:2px;vertical-align:middle;padding-left:12px">LASER STUDIO</span></a>
 <div style="padding-top:12px;font-size:14px;line-height:1.7;color:#D9D4CA"><a href="mailto:contact@hdlaser.net" style="color:#FFFFFF;text-decoration:none">contact@hdlaser.net</a> &middot; <a href="tel:+18583739866" style="color:#FFFFFF;text-decoration:none">(858) 373-9866</a><br><a href="https://maps.google.com/?q=759+Turquoise+St,+San+Diego,+CA+92109" style="color:#D9D4CA;text-decoration:none">759 Turquoise St, Pacific Beach, San Diego</a></div></td></tr>
-<tr><td align="center" style="background:#F2B63D;padding:10px 12px;font-size:12px;font-weight:800;letter-spacing:1px;color:#15191E">&#10052; HOLIDAY GIFTS &middot; ORDER BY DEC 1 &#10052;</td></tr>
+<tr><td align="center" style="background:#F2B63D;padding:10px 12px;font-size:12px;font-weight:800;letter-spacing:1px;color:#15191E">&#10052; HOLIDAY GIFTS &middot; ORDER BY DEC 31 &#10052;</td></tr>
 ${head}
 <tr><td style="padding:${subject ? "0" : "28px"} 28px 0"><a href="${firstUrl}"><img src="https://hdlaser.net/assets/email-holiday-gifts.jpg" width="544" alt="Logo tumblers, engraved wine glasses, a flask and a heart box made at HD Laser Studio" style="width:100%;max-width:544px;height:auto;border:0;border-radius:12px;display:block"></a></td></tr>
 <tr><td style="padding:26px 28px 4px">${paras}</td></tr>
