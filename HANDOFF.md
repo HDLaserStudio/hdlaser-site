@@ -108,7 +108,7 @@ The container cannot reach hdlaser.net or workers.dev. Test the worker by import
 5. Add `terminal.checkout.updated` to the Square webhook subscription.
 6. Press "Load the price list from the code" after any pricing change so Hugh's saved book matches the code.
 7. Twilio and Apple decisions arrive by email; forward to the session.
-8. Google Business Profile photos, order link, first post; Search Console indexing.
+8. Google Business Profile photos, order link, first post. Search Console (checked Oct 7 after Google's "new reasons preventing your pages from being indexed" email): `sitemap.xml` reads fine (6 pages, read Oct 7); Hugh requested indexing for `/quote/` and `/holiday/` on Oct 7. The 404 `/m/create-account` and the crawled-not-indexed `/m/login` are pages of the old Square Online site, so leave them; blocked-by-robots (private pages) and alternate-with-canonical (`?src=` and `?gift=` links) are on purpose; two 2019 sitemaps from the old site show "Couldn't fetch" and can be removed.
 9. Compare Square charges to the price matrix once Jake sends the Items Detail CSV export (Transactions, Export).
 10. Pricing gaps: coffee-shop cup tiers still hard-coded; artwork-help charge not priced; per-employee sales-per-hour on the Team tab not built; clock-in tile on the hub not built.
 11. Accountant question: is work on customer-owned items taxable in California? If yes, set TAX_OWN_ITEMS=1.
