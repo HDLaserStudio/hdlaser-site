@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v40"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v41"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -122,6 +122,7 @@ export default {
       if (path === "/coffee/status") return requireOrigin(cors) || coffeeStatus(env, url.searchParams.get("ref"), cors);
       if (path === "/webhooks/square" && request.method === "POST") return squareWebhook(request, env);
       if (path === "/webhooks/twilio" && request.method === "POST") return twilioInbound(request, env);
+      if (path === "/unsubscribe") return unsubscribePage(env, url);
       // ---- shop iPad time clock: everyone on one screen, each person punches with their own PIN ----
       if (path === "/clock") return new Response(CLOCK_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } });
       if (path === "/clock/status") return json(await clockBoard(env), 200, { "Cache-Control": "no-store" });
@@ -143,6 +144,11 @@ export default {
         const denied = requireAdmin(request, env);
         if (denied) return denied;
         if (path === "/admin") return new Response(dashboardHtml(env), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+        if (path === "/admin/customers") return new Response(CUSTOMERS_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+        if (path === "/api/customers" && request.method === "GET") return json(await customerList(env), 200, { "Cache-Control": "no-store" });
+        if (path === "/api/customers" && request.method === "POST") return json(await saveCustomer(env, await request.json().catch(() => ({}))), 200);
+        if (path === "/api/customers/square-import" && request.method === "POST") return json(await importSquareCustomers(env), 200);
+        if (path === "/api/customers/send" && request.method === "POST") return json(await sendCampaign(env, await request.json().catch(() => ({})), url.origin), 200);
         if (path === "/api/kpis") return json(await kpis(env, url.searchParams.get("from"), url.searchParams.get("to")), 200, { "Cache-Control": "no-store" });
         if (path === "/api/orders.csv") return ordersCsv(env);
         if (path === "/api/sync" && request.method === "POST") {
@@ -831,7 +837,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
 </style></head><body>
 <header><h1>HD Laser numbers</h1>
 <div class="ranges" id="ranges"><button data-d="7">7 days</button><button data-d="30" class="on">30 days</button><button data-d="90">90 days</button><button data-d="365">12 months</button><input type="date" id="from"><input type="date" id="to"><button id="go">Apply</button></div>
-<div><a class="act" href="/admin/money" style="text-decoration:none;color:inherit;background:var(--ink);color:#fff;border-color:var(--ink)">Money</a> <button class="act" id="sync">Sync Square now</button> <button class="act" id="backfill">Import 2 years of history</button> <a class="act" href="/api/orders.csv" style="text-decoration:none;color:inherit">Download CSV</a> <button class="act" id="digest">Email digest</button></div></header>
+<div><a class="act" href="/admin/customers" style="text-decoration:none;color:inherit">Customers</a> <a class="act" href="/admin/money" style="text-decoration:none;color:inherit;background:var(--ink);color:#fff;border-color:var(--ink)">Money</a> <button class="act" id="sync">Sync Square now</button> <button class="act" id="backfill">Import 2 years of history</button> <a class="act" href="/api/orders.csv" style="text-decoration:none;color:inherit">Download CSV</a> <button class="act" id="digest">Email digest</button></div></header>
 <main>
 <div id="err"></div>
 <p class="small" id="meta"></p>
@@ -3095,3 +3101,234 @@ window.addEventListener('beforeunload',e=>{ if(document.querySelector('input.cha
 load();
 </script></body></html>`;
 }
+
+// ---------------------------------------------------------------- customers (Hugh, Oct 7)
+// One list of everyone who has bought or asked: web and counter orders, quote requests, walk-in jobs, coffee orders, and
+// Square's own customer directory (Import from Square). People are matched by email first, then by phone, so the same
+// person from two places is one row. Manual edits and unsubscribes are never overwritten by a sync.
+const CUSTOMER_SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT, phone TEXT, name TEXT, business TEXT, sources TEXT, first_seen TEXT, last_seen TEXT, orders INTEGER DEFAULT 0, spent_cents INTEGER DEFAULT 0, unsubscribed_at TEXT, manual INTEGER DEFAULT 0, note TEXT, updated_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS customers_email ON customers(email)`,
+  `CREATE INDEX IF NOT EXISTS customers_phone ON customers(phone)`,
+  `CREATE TABLE IF NOT EXISTS campaigns (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, subject TEXT, body TEXT, sent INTEGER DEFAULT 0, failed INTEGER DEFAULT 0)`,
+  `CREATE TABLE IF NOT EXISTS campaign_sends (campaign_id INTEGER, email TEXT, sent_at TEXT, PRIMARY KEY (campaign_id, email))`,
+];
+let customersReady = false;
+async function ensureCustomers(env) { if (customersReady) return; for (const s of CUSTOMER_SCHEMA) await env.DB.prepare(s).run(); customersReady = true; }
+const normEmail = (e) => { e = String(e || "").trim().toLowerCase(); return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) ? e.slice(0, 120) : ""; };
+const normPhone = (p) => { const d = String(p || "").replace(/\D/g, ""); const t = d.length === 11 && d[0] === "1" ? d.slice(1) : d; return t.length === 10 ? t : ""; };
+const fmtPhone = (p) => (p && p.length === 10 ? `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}` : p || "");
+
+// merge a list of {name, business, email, phone, at, source, unsub, orders, spent} into the customers table
+async function mergeCustomers(env, records, recomputeStats) {
+  await ensureCustomers(env);
+  const rows = (await env.DB.prepare(`SELECT * FROM customers`).all()).results;
+  const byEmail = new Map(), byPhone = new Map(), dirty = new Set();
+  for (const r of rows) { r._src = new Set(String(r.sources || "").split(",").filter(Boolean)); if (r.email) byEmail.set(r.email, r); if (r.phone) byPhone.set(r.phone, r); }
+  if (recomputeStats) for (const r of rows) { r._orders = 0; r._spent = 0; }
+  const created = [];
+  for (const x of records) {
+    const email = normEmail(x.email), phone = normPhone(x.phone);
+    if (!email && !phone) continue;
+    let c = (email && byEmail.get(email)) || (phone && byPhone.get(phone));
+    if (!c) { c = { id: null, email: "", phone: "", name: "", business: "", _src: new Set(), first_seen: x.at || null, last_seen: x.at || null, orders: 0, spent_cents: 0, unsubscribed_at: null, manual: 0, _orders: 0, _spent: 0 }; created.push(c); }
+    if (email && !c.email) { c.email = email; byEmail.set(email, c); dirty.add(c); }
+    if (phone && !c.phone) { c.phone = phone; byPhone.set(phone, c); dirty.add(c); }
+    const nm = String(x.name || "").trim().slice(0, 80), bz = String(x.business || "").trim().slice(0, 120);
+    if (nm && !c.name) { c.name = nm; dirty.add(c); }
+    if (bz && !c.business) { c.business = bz; dirty.add(c); }
+    if (x.source && !c._src.has(x.source)) { c._src.add(x.source); dirty.add(c); }
+    if (x.at && (!c.first_seen || x.at < c.first_seen)) { c.first_seen = x.at; dirty.add(c); }
+    if (x.at && (!c.last_seen || x.at > c.last_seen)) { c.last_seen = x.at; dirty.add(c); }
+    if (x.unsub && !c.unsubscribed_at) { c.unsubscribed_at = x.at || new Date().toISOString(); dirty.add(c); }
+    if (recomputeStats) { c._orders = (c._orders || 0) + (x.orders || 0); c._spent = (c._spent || 0) + (x.spent || 0); }
+  }
+  const all = rows.concat(created);
+  if (recomputeStats) for (const c of all) if (c.orders !== c._orders || c.spent_cents !== c._spent) { c.orders = c._orders; c.spent_cents = c._spent; dirty.add(c); }
+  const now = new Date().toISOString(), stmts = [];
+  for (const c of dirty) {
+    const src = [...c._src].join(",");
+    if (c.id) stmts.push(env.DB.prepare(`UPDATE customers SET email = ?, phone = ?, name = ?, business = ?, sources = ?, first_seen = ?, last_seen = ?, orders = ?, spent_cents = ?, unsubscribed_at = ?, updated_at = ? WHERE id = ?`).bind(c.email || null, c.phone || null, c.name || null, c.business || null, src, c.first_seen, c.last_seen, c.orders || 0, c.spent_cents || 0, c.unsubscribed_at, now, c.id));
+    else stmts.push(env.DB.prepare(`INSERT INTO customers (email, phone, name, business, sources, first_seen, last_seen, orders, spent_cents, unsubscribed_at, manual, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,0,?)`).bind(c.email || null, c.phone || null, c.name || null, c.business || null, src, c.first_seen, c.last_seen, c.orders || 0, c.spent_cents || 0, c.unsubscribed_at, now));
+  }
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  return { added: created.length, updated: dirty.size - created.filter((c) => dirty.has(c)).length };
+}
+
+// everyone the system already knows about, from every table that holds customer details
+async function syncCustomers(env) {
+  const q = async (sql) => { try { return (await env.DB.prepare(sql).all()).results; } catch { return []; } };
+  const recs = [];
+  for (const o of await q(`SELECT name, business, email, phone, created_at, status, paid_cents, refunded_cents, tip_cents, taken_by FROM orders`)) {
+    const paid = o.status === "paid" || o.status === "refunded";
+    recs.push({ name: o.name, business: o.business, email: o.email, phone: o.phone, at: o.created_at, source: o.taken_by ? "counter" : "online order", orders: paid ? 1 : 0, spent: paid ? Math.max(0, (o.paid_cents || 0) - (o.refunded_cents || 0) - (o.tip_cents || 0)) : 0 });
+  }
+  for (const i of await q(`SELECT name, business, email, phone, created_at FROM inquiries`)) recs.push({ name: i.name, business: i.business, email: i.email, phone: i.phone, at: i.created_at, source: "quote request" });
+  for (const j of await q(`SELECT customer, phone, email, created_at FROM jobs WHERE status != 'cancelled'`)) recs.push({ name: j.customer, email: j.email, phone: j.phone, at: j.created_at, source: "walk-in" });
+  for (const c of await q(`SELECT name, email, phone, created_at, paid_cents, tip_cents, status FROM coffee_orders`)) recs.push({ name: c.name, email: c.email, phone: c.phone, at: c.created_at, source: "coffee" });
+  return mergeCustomers(env, recs, true);
+}
+
+// Square's customer directory (people saved at the register); needs the CUSTOMERS_READ permission on the access token
+async function importSquareCustomers(env) {
+  if (!env.SQUARE_ACCESS_TOKEN) return { ok: false, error: "Square is not connected (SQUARE_ACCESS_TOKEN)" };
+  const recs = []; let cursor = null, pages = 0;
+  do {
+    const res = await squareFetch(env, "/v2/customers?limit=100" + (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""));
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: "Square said: " + (squareErr(d) || res.status) + (res.status === 401 || res.status === 403 ? ". The Square access token needs the Customers read permission." : ""), imported: recs.length };
+    for (const c of d.customers || []) recs.push({ name: [c.given_name, c.family_name].filter(Boolean).join(" ") || c.nickname || "", business: c.company_name, email: c.email_address, phone: c.phone_number, at: c.created_at, source: "square", unsub: !!(c.preferences && c.preferences.email_unsubscribed) });
+    cursor = d.cursor || null; pages++;
+  } while (cursor && pages < 20);
+  const r = await mergeCustomers(env, recs, false);
+  return { ok: true, found: recs.length, ...r, more: !!cursor };
+}
+
+async function customerList(env) {
+  await syncCustomers(env);
+  const rows = (await env.DB.prepare(`SELECT * FROM customers ORDER BY COALESCE(last_seen, first_seen) DESC`).all()).results;
+  return { customers: rows.map((r) => ({ id: r.id, name: r.name || "", business: r.business || "", email: r.email || "", phone: fmtPhone(r.phone), sources: r.sources || "", first_seen: r.first_seen, last_seen: r.last_seen, orders: r.orders || 0, spent_cents: r.spent_cents || 0, unsubscribed: !!r.unsubscribed_at, note: r.note || "" })),
+    email_configured: !!env.RESEND_API_KEY, campaigns: (await env.DB.prepare(`SELECT id, created_at, subject, sent, failed FROM campaigns ORDER BY id DESC LIMIT 10`).all()).results };
+}
+
+async function saveCustomer(env, b) {
+  await ensureCustomers(env);
+  const email = normEmail(b.email), phone = normPhone(b.phone), name = String(b.name || "").trim().slice(0, 80), business = String(b.business || "").trim().slice(0, 120), note = String(b.note || "").slice(0, 500), now = new Date().toISOString();
+  if (b.delete && b.id) { await env.DB.prepare(`DELETE FROM customers WHERE id = ?`).bind(+b.id).run(); return { ok: true }; }
+  if ("unsubscribed" in b && b.id && Object.keys(b).length <= 3) { await env.DB.prepare(`UPDATE customers SET unsubscribed_at = ?, updated_at = ? WHERE id = ?`).bind(b.unsubscribed ? now : null, now, +b.id).run(); return { ok: true }; }
+  if (!email && !phone) return { ok: false, error: "Add an email or a phone number" };
+  if (String(b.email || "").trim() && !email) return { ok: false, error: "That email doesn't look right" };
+  if (b.id) { await env.DB.prepare(`UPDATE customers SET email = ?, phone = ?, name = ?, business = ?, note = ?, manual = 1, updated_at = ? WHERE id = ?`).bind(email || null, phone || null, name || null, business || null, note || null, now, +b.id).run(); return { ok: true, id: +b.id }; }
+  const dup = (email && await env.DB.prepare(`SELECT id FROM customers WHERE email = ?`).bind(email).first()) || (phone && await env.DB.prepare(`SELECT id FROM customers WHERE phone = ?`).bind(phone).first());
+  if (dup) return { ok: false, error: "That customer is already on the list" };
+  const r = await env.DB.prepare(`INSERT INTO customers (email, phone, name, business, sources, first_seen, last_seen, manual, note, updated_at) VALUES (?,?,?,?,?,?,?,1,?,?)`).bind(email || null, phone || null, name || null, business || null, "added by hand", now, now, note || null, now).run();
+  return { ok: true, id: r.meta && r.meta.last_row_id };
+}
+
+async function unsubToken(env, email) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode("hd-unsub:" + (env.PIN_PEPPER || env.ADMIN_KEY || "hdlaser")), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return [...new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(email)))].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// One email to everyone who hasn't unsubscribed, through Resend in batches of 100; a campaign remembers who already got it,
+// so "Send to the rest" picks up where a daily limit stopped it. Every email carries the shop address and an unsubscribe link.
+async function sendCampaign(env, b, origin) {
+  if (!env.RESEND_API_KEY) return { ok: false, error: "Sending email isn't set up yet (RESEND_API_KEY). Use Copy all emails and send from your email app." };
+  await ensureCustomers(env);
+  const subject = String(b.subject || "").trim().slice(0, 150), body = String(b.body || "").trim().slice(0, 20000);
+  if (subject.length < 2 || body.length < 5) return { ok: false, error: "Write a subject and a message" };
+  const from = env.FROM_EMAIL || "HD Laser Studio <contact@hdlaser.net>", replyTo = env.SUPPORT_EMAIL || "contact@hdlaser.net";
+  const build = async (email, name) => {
+    const link = `${origin}/unsubscribe?e=${encodeURIComponent(email)}&t=${await unsubToken(env, email)}`;
+    const first = String(name || "").trim().split(/\s+/)[0] || "there";
+    return { from, to: [email], reply_to: replyTo, subject: subject.replace(/\{first_name\}/g, first), headers: { "List-Unsubscribe": `<${link}>` },
+      text: `${body.replace(/\{first_name\}/g, first)}\n\n--\nHD Laser Studio · 759 Turquoise St, Pacific Beach, San Diego, CA 92109 · (858) 373-9866 · hdlaser.net\nDon't want these emails? Unsubscribe: ${link}` };
+  };
+  const post = async (batch) => { const res = await fetch("https://api.resend.com/emails/batch", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify(batch) }); const d = await res.json().catch(() => ({})); return res.ok ? { ok: true } : { ok: false, error: (d && d.message) || "Resend " + res.status }; };
+  if (b.test) { const r = await post([await build(replyTo, "Hugh")]); return r.ok ? { ok: true, test: true, to: replyTo } : r; }
+  let id = +b.campaign_id || 0;
+  if (!id) { const r = await env.DB.prepare(`INSERT INTO campaigns (created_at, subject, body) VALUES (?,?,?)`).bind(new Date().toISOString(), subject, body).run(); id = r.meta && r.meta.last_row_id; }
+  const people = (await env.DB.prepare(`SELECT email, name FROM customers WHERE email IS NOT NULL AND email != '' AND unsubscribed_at IS NULL AND email NOT IN (SELECT email FROM campaign_sends WHERE campaign_id = ?) ORDER BY id`).bind(id).all()).results;
+  let sent = 0, error = null;
+  for (let i = 0; i < people.length && i < 1000; i += 100) {
+    const chunk = people.slice(i, i + 100), r = await post(await Promise.all(chunk.map((p) => build(p.email, p.name))));
+    if (!r.ok) { error = r.error; break; }
+    const now = new Date().toISOString();
+    await env.DB.batch(chunk.map((p) => env.DB.prepare(`INSERT OR IGNORE INTO campaign_sends (campaign_id, email, sent_at) VALUES (?,?,?)`).bind(id, p.email, now)));
+    sent += chunk.length;
+  }
+  await env.DB.prepare(`UPDATE campaigns SET sent = sent + ? WHERE id = ?`).bind(sent, id).run();
+  return { ok: !error || sent > 0, campaign_id: id, sent, remaining: people.length - sent, error };
+}
+
+async function unsubscribePage(env, url) {
+  const email = normEmail(url.searchParams.get("e")), t = url.searchParams.get("t") || "";
+  let done = false;
+  if (email && t && t === await unsubToken(env, email)) { await ensureCustomers(env); await env.DB.prepare(`UPDATE customers SET unsubscribed_at = COALESCE(unsubscribed_at, ?) WHERE email = ?`).bind(new Date().toISOString(), email).run(); done = true; }
+  const msg = done ? "You're unsubscribed. You won't get these emails from HD Laser Studio again. Order emails (proofs, receipts) still come when you order." : "That unsubscribe link didn't work. Reply to any of our emails or call (858) 373-9866 and we'll take you off the list.";
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Unsubscribe | HD Laser Studio</title><style>body{margin:0;background:#F6F4EF;color:#15191E;font-family:-apple-system,Helvetica,Arial,sans-serif}main{max-width:520px;margin:12vh auto;padding:0 16px}h1{font-size:28px}</style></head><body><main><h1>HD Laser Studio</h1><p style="font-size:18px;line-height:1.5">${msg}</p><p><a href="https://hdlaser.net" style="color:#A32C21">hdlaser.net</a></p></main></body></html>`, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+}
+const CUSTOMERS_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Customers | HD Laser</title>
+<style>
+:root{--bg:#F6F4EF;--ink:#15191E;--muted:#545B63;--red:#C8372A;--line:#E4E0D8;--card:#fff;--green:#2F6B4F}
+[hidden]{display:none !important}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 20px;background:#fff;border-bottom:1px solid var(--line)}h1{font-size:20px;margin:0}
+main{max-width:1200px;margin:0 auto;padding:16px 16px 60px}h2{font-size:17px;margin:22px 0 10px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}.tile{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}.tile .l{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}.tile .n{font-size:26px;font-weight:700;margin-top:4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-top:14px;overflow:auto}
+.act{font:inherit;padding:9px 14px;border:1px solid var(--line);background:#fff;border-radius:999px;cursor:pointer;text-decoration:none;color:inherit;display:inline-block}.act.dark{background:var(--ink);color:#fff;border-color:var(--ink)}.act.red{background:var(--red);color:#fff;border-color:var(--red)}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,textarea,select{font:inherit;padding:9px 11px;border:1px solid #A9A196;border-radius:10px;background:#fff;color:var(--ink)}textarea{width:100%}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:8px;border-bottom:1px solid #EDE8DF;vertical-align:top}th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}td.num,th.num{text-align:right;white-space:nowrap}
+tr.off td{color:#9AA0A6}tr.off td b{text-decoration:line-through}.pill{display:inline-block;font-size:11px;padding:2px 7px;border-radius:999px;background:#EDE8DF;margin:1px}
+.small{font-size:12px;color:var(--muted)}.msg{margin:8px 0;font-weight:700}.ok{color:var(--green)}.bad{color:var(--red)}
+.btn{font:inherit;font-size:12px;padding:4px 9px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+</style></head><body>
+<header><h1>Customers</h1><div class="bar"><a class="act" href="/admin">Sales dashboard</a><a class="act" href="/admin/money">Money</a></div></header>
+<main>
+<div class="tiles" id="tiles"></div>
+<div class="card">
+  <div class="bar"><input id="q" placeholder="Search name, email, phone" style="flex:1 1 240px">
+  <button class="act dark" id="copyemails">Copy all emails</button><button class="act" id="copyphones">Copy all phone numbers</button><button class="act" id="csv">Download CSV</button><button class="act" id="square">Import from Square</button></div>
+  <p class="msg" id="msg"></p>
+  <p class="small" style="margin:0">The list fills itself from online orders, counter sales, walk-ins, quote requests and coffee orders every time this page opens. Square's register customers come in with Import from Square. Copy all emails leaves out anyone who unsubscribed; paste it into the BCC line of your email so customers don't see each other's addresses.</p>
+</div>
+<div class="card"><table id="list"></table></div>
+<h2>Add or edit a customer</h2>
+<div class="card"><form id="form"><input type="hidden" name="id"><div class="grid">
+  <input name="name" placeholder="Name"><input name="business" placeholder="Business (optional)"><input name="email" type="email" placeholder="Email"><input name="phone" placeholder="Phone"></div>
+  <input name="note" placeholder="Note (optional)" style="width:100%;margin-top:8px">
+  <div class="bar" style="margin-top:10px"><button class="act dark" type="submit" id="save">Add customer</button><button class="act" type="button" id="clear">Clear</button><button class="act" type="button" id="del" hidden>Delete this customer</button><span class="msg" id="fmsg"></span></div></form></div>
+<h2>Email everyone</h2>
+<div class="card">
+  <p class="small" style="margin-top:0">For a sale, a holiday or a celebration. Goes to everyone with an email who hasn't unsubscribed. Type {first_name} to use each person's first name. The shop address and an unsubscribe link are added at the bottom of every email, as the law requires. Send a test to yourself first.</p>
+  <input id="subject" placeholder="Subject, e.g. 20% off engraved gifts this week" style="width:100%">
+  <textarea id="body" rows="8" placeholder="Hi {first_name}," style="margin-top:8px"></textarea>
+  <div class="bar" style="margin-top:10px"><button class="act" id="test">Send a test to me</button><button class="act red" id="sendall">Send to everyone</button><span class="msg" id="smsg"></span></div>
+  <div id="camps" class="small" style="margin-top:10px"></div>
+</div>
+</main>
+<script>
+var $=function(s){return document.querySelector(s);}, D=null, CAMPAIGN=0, NL=String.fromCharCode(10);
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function money(c){return '$'+Math.round((c||0)/100).toLocaleString('en-US');}
+function day(s){return s?new Date(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';}
+function api(path,body){ return fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store'}).then(function(r){return r.json();}); }
+function shown(){ var q=$('#q').value.trim().toLowerCase(); return D.customers.filter(function(c){ return !q || (c.name+' '+c.business+' '+c.email+' '+c.phone+' '+c.phone.replace(/[^0-9]/g,'')).toLowerCase().indexOf(q)>=0; }); }
+function render(){ var all=D.customers, em=all.filter(function(c){return c.email&&!c.unsubscribed;}).length;
+  $('#tiles').innerHTML=[['Customers',all.length],['With email',all.filter(function(c){return c.email;}).length],['Can email',em],['With phone',all.filter(function(c){return c.phone;}).length],['Unsubscribed',all.filter(function(c){return c.unsubscribed;}).length]].map(function(t){return '<div class="tile"><div class="l">'+t[0]+'</div><div class="n">'+t[1]+'</div></div>';}).join('');
+  $('#sendall').textContent='Send to everyone ('+em+')';
+  var rows=shown();
+  $('#list').innerHTML='<tr><th>Name</th><th>Email</th><th>Phone</th><th>From</th><th class="num">Orders</th><th class="num">Spent</th><th>Last seen</th><th></th></tr>'+(rows.length?rows.map(function(c){ return '<tr class="'+(c.unsubscribed?'off':'')+'"><td><b>'+esc(c.name||'(no name)')+'</b>'+(c.business?'<div class="small">'+esc(c.business)+'</div>':'')+(c.note?'<div class="small">'+esc(c.note)+'</div>':'')+'</td><td>'+esc(c.email)+(c.unsubscribed?'<div class="small">unsubscribed</div>':'')+'</td><td style="white-space:nowrap">'+esc(c.phone)+'</td><td>'+c.sources.split(',').filter(Boolean).map(function(s){return '<span class="pill">'+esc(s)+'</span>';}).join('')+'</td><td class="num">'+c.orders+'</td><td class="num">'+money(c.spent_cents)+'</td><td class="small">'+day(c.last_seen)+'</td><td style="white-space:nowrap"><button class="btn" data-edit="'+c.id+'">Edit</button> '+(c.email?'<button class="btn" data-unsub="'+c.id+'" data-v="'+(c.unsubscribed?0:1)+'">'+(c.unsubscribed?'Resubscribe':'Unsubscribe')+'</button>':'')+'</td></tr>'; }).join(''):'<tr><td colspan="8" class="small">No customers match.</td></tr>');
+  $('#camps').innerHTML=D.campaigns.length?'Sent before: '+D.campaigns.map(function(c){return esc(c.subject)+' ('+c.sent+' sent, '+day(c.created_at)+')';}).join(' · '):''; }
+function load(){ $('#msg').textContent='Loading…'; $('#msg').className='msg'; api('/api/customers').then(function(d){ if(d.error){ $('#msg').textContent=d.error; $('#msg').className='msg bad'; return; } D=d; $('#msg').textContent=''; render(); }).catch(function(e){ $('#msg').textContent='Could not load: '+e.message; $('#msg').className='msg bad'; }); }
+function copy(text,label){ var done=function(){ $('#msg').textContent=label; $('#msg').className='msg ok'; };
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done,function(){ fallback(); }); } else fallback();
+  function fallback(){ var t=document.createElement('textarea'); t.value=text; document.body.appendChild(t); t.select(); try{document.execCommand('copy'); done();}catch(e){ $('#msg').textContent='Select and copy these: '+text; } t.remove(); } }
+$('#copyemails').onclick=function(){ var e=D.customers.filter(function(c){return c.email&&!c.unsubscribed;}).map(function(c){return c.email;}); copy(e.join(', '),'Copied '+e.length+' emails. Paste them into the BCC line of a new email.'); };
+$('#copyphones').onclick=function(){ var p=D.customers.filter(function(c){return c.phone;}).map(function(c){return c.phone;}); copy(p.join(', '),'Copied '+p.length+' phone numbers.'); };
+$('#csv').onclick=function(){ var q=function(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; };
+  var lines=[['Name','Business','Email','Phone','From','Orders','Spent','First seen','Last seen','Unsubscribed','Note'].map(q).join(',')].concat(D.customers.map(function(c){ return [c.name,c.business,c.email,c.phone,c.sources,c.orders,(c.spent_cents/100).toFixed(2),day(c.first_seen),day(c.last_seen),c.unsubscribed?'yes':'',c.note].map(q).join(','); }));
+  var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([lines.join(NL)],{type:'text/csv'})); a.download='hd-laser-customers.csv'; a.click(); };
+$('#square').onclick=function(){ var b=$('#square'); b.disabled=true; b.textContent='Importing…'; api('/api/customers/square-import',{}).then(function(r){ b.disabled=false; b.textContent='Import from Square';
+  $('#msg').textContent=r.ok?('Square: '+r.found+' customers found, '+r.added+' new added.'+(r.more?' There are more; click again.':'')):(r.error||'Import failed'); $('#msg').className='msg '+(r.ok?'ok':'bad'); if(r.ok) load(); }); };
+$('#q').addEventListener('input',function(){ if(D) render(); });
+var F=$('#form');
+function fill(c){ F.id.value=c?c.id:''; F.name.value=c?c.name:''; F.business.value=c?c.business:''; F.email.value=c?c.email:''; F.phone.value=c?c.phone:''; F.note.value=c?c.note:''; $('#save').textContent=c?'Save changes':'Add customer'; $('#del').hidden=!c; $('#fmsg').textContent=''; }
+$('#clear').onclick=function(){ fill(null); };
+F.onsubmit=function(e){ e.preventDefault(); api('/api/customers',{id:F.id.value||undefined,name:F.name.value,business:F.business.value,email:F.email.value,phone:F.phone.value,note:F.note.value}).then(function(r){ $('#fmsg').textContent=r.ok?'Saved.':(r.error||'Failed'); $('#fmsg').className='msg '+(r.ok?'ok':'bad'); if(r.ok){ fill(null); load(); } }); };
+$('#del').onclick=function(){ if(!F.id.value||!confirm('Delete this customer from the list?')) return; api('/api/customers',{id:F.id.value,delete:true}).then(function(){ fill(null); load(); }); };
+document.addEventListener('click',function(e){ var b=e.target.closest('[data-edit]'); if(b){ fill(D.customers.filter(function(c){return String(c.id)===b.dataset.edit;})[0]); F.scrollIntoView({behavior:'smooth'}); return; }
+  var u=e.target.closest('[data-unsub]'); if(u){ api('/api/customers',{id:u.dataset.unsub,unsubscribed:u.dataset.v==='1'}).then(load); } });
+function send(test){ var s=$('#subject').value.trim(), m=$('#body').value.trim(); if(s.length<2||m.length<5){ $('#smsg').textContent='Write a subject and a message first.'; $('#smsg').className='msg bad'; return; }
+  if(!test){ var n=D.customers.filter(function(c){return c.email&&!c.unsubscribed;}).length; if(!confirm('Send this email to '+n+' customers now?')) return; }
+  $('#smsg').textContent='Sending…'; $('#smsg').className='msg';
+  api('/api/customers/send',{subject:s,body:m,test:!!test,campaign_id:test?undefined:(CAMPAIGN||undefined)}).then(function(r){
+    if(r.test){ $('#smsg').textContent='Test sent to '+r.to+'. Check your inbox.'; $('#smsg').className='msg ok'; return; }
+    if(!r.ok){ $('#smsg').textContent=r.error||'Could not send'; $('#smsg').className='msg bad'; return; }
+    CAMPAIGN=r.remaining>0?r.campaign_id:0;
+    $('#smsg').textContent='Sent to '+r.sent+'.'+(r.remaining>0?' '+r.remaining+' still to go'+(r.error?' (stopped: '+r.error+')':'')+'. Click Send again later to send to the rest; nobody gets it twice.':' Everyone has it.'); $('#smsg').className='msg '+(r.error?'bad':'ok'); load(); }); }
+$('#test').onclick=function(){ send(true); }; $('#sendall').onclick=function(){ send(false); };
+load();
+</script></body></html>`;
