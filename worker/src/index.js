@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v44"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v45"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -3188,7 +3188,7 @@ async function importSquareCustomers(env) {
   do {
     const res = await squareFetch(env, "/v2/customers?limit=100" + (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""));
     const d = await res.json().catch(() => ({}));
-    if (!res.ok) return { ok: false, error: "Square said: " + (squareErr(d) || res.status) + (res.status === 401 || res.status === 403 ? ". The Square access token needs the Customers read permission." : ""), imported: recs.length };
+    if (!res.ok) return { ok: false, error: "Square said: " + String(squareErr(d) || res.status).replace(/\.$/, "") + (res.status === 401 || res.status === 403 ? ". The Square access token needs the Customers read permission." : ""), imported: recs.length };
     for (const c of d.customers || []) recs.push({ name: [c.given_name, c.family_name].filter(Boolean).join(" ") || c.nickname || "", business: c.company_name, email: c.email_address, phone: c.phone_number, at: c.created_at, source: "square", unsub: !!(c.preferences && c.preferences.email_unsubscribed) });
     cursor = d.cursor || null; pages++;
   } while (cursor && pages < 20);
@@ -3318,7 +3318,7 @@ function render(){ var all=D.customers, em=all.filter(function(c){return c.email
   var rows=shown();
   $('#list').innerHTML='<tr><th>Name</th><th>Email</th><th>Phone</th><th>From</th><th class="num">Orders</th><th class="num">Spent</th><th>Last seen</th><th></th></tr>'+(rows.length?rows.map(function(c){ return '<tr class="'+(c.unsubscribed?'off':'')+'"><td><b>'+esc(c.name||'(no name)')+'</b>'+(c.business?'<div class="small">'+esc(c.business)+'</div>':'')+(c.note?'<div class="small">'+esc(c.note)+'</div>':'')+'</td><td>'+esc(c.email)+(c.unsubscribed?'<div class="small">unsubscribed</div>':'')+'</td><td style="white-space:nowrap">'+esc(c.phone)+'</td><td>'+c.sources.split(',').filter(Boolean).map(function(s){return '<span class="pill">'+esc(s)+'</span>';}).join('')+'</td><td class="num">'+c.orders+'</td><td class="num">'+money(c.spent_cents)+'</td><td class="small">'+day(c.last_seen)+'</td><td style="white-space:nowrap"><button class="btn" data-edit="'+c.id+'">Edit</button> '+(c.email?'<button class="btn" data-unsub="'+c.id+'" data-v="'+(c.unsubscribed?0:1)+'">'+(c.unsubscribed?'Resubscribe':'Unsubscribe')+'</button>':'')+'</td></tr>'; }).join(''):'<tr><td colspan="8" class="small">No customers match.</td></tr>');
   $('#camps').innerHTML=D.campaigns.length?'Sent before: '+D.campaigns.map(function(c){return esc(c.subject)+' ('+c.sent+' sent, '+day(c.created_at)+')';}).join(' · '):''; }
-function load(){ $('#msg').textContent='Loading…'; $('#msg').className='msg'; api('/api/customers').then(function(d){ if(d.error){ $('#msg').textContent=d.error; $('#msg').className='msg bad'; return; } D=d; $('#msg').textContent=''; render(); }).catch(function(e){ $('#msg').textContent='Could not load: '+e.message; $('#msg').className='msg bad'; }); }
+function load(after){ $('#msg').textContent='Loading…'; $('#msg').className='msg'; api('/api/customers').then(function(d){ if(d.error){ $('#msg').textContent=d.error; $('#msg').className='msg bad'; return; } D=d; $('#msg').textContent=''; render(); if(after) after(); }).catch(function(e){ $('#msg').textContent='Could not load: '+e.message; $('#msg').className='msg bad'; }); }
 function copy(text,label){ var done=function(){ $('#msg').textContent=label; $('#msg').className='msg ok'; };
   if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done,function(){ fallback(); }); } else fallback();
   function fallback(){ var t=document.createElement('textarea'); t.value=text; document.body.appendChild(t); t.select(); try{document.execCommand('copy'); done();}catch(e){ $('#msg').textContent='Select and copy these: '+text; } t.remove(); } }
@@ -3328,7 +3328,8 @@ $('#csv').onclick=function(){ var q=function(v){ return '"'+String(v==null?'':v)
   var lines=[['Name','Business','Email','Phone','From','Orders','Spent','First seen','Last seen','Unsubscribed','Note'].map(q).join(',')].concat(D.customers.map(function(c){ return [c.name,c.business,c.email,c.phone,c.sources,c.orders,(c.spent_cents/100).toFixed(2),day(c.first_seen),day(c.last_seen),c.unsubscribed?'yes':'',c.note].map(q).join(','); }));
   var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([lines.join(NL)],{type:'text/csv'})); a.download='hd-laser-customers.csv'; a.click(); };
 $('#square').onclick=function(){ var b=$('#square'); b.disabled=true; b.textContent='Importing…'; api('/api/customers/square-import',{}).then(function(r){ b.disabled=false; b.textContent='Import from Square';
-  $('#msg').textContent=r.ok?('Square: '+r.found+' customers found, '+r.added+' new added.'+(r.more?' There are more; click again.':'')):(r.error||'Import failed'); $('#msg').className='msg '+(r.ok?'ok':'bad'); if(r.ok) load(); }); };
+  var say=function(){ $('#msg').textContent=r.ok?('Square: '+r.found+' customers found, '+r.added+' new added to the list.'+(r.more?' There are more; click Import again.':'')):(r.error||'Import failed'); $('#msg').className='msg '+(r.ok?'ok':'bad'); };
+  if(r.ok) load(say); else say(); }).catch(function(e){ b.disabled=false; b.textContent='Import from Square'; $('#msg').textContent='Could not reach Square: '+e.message; $('#msg').className='msg bad'; }); };
 $('#q').addEventListener('input',function(){ if(D) render(); });
 var F=$('#form');
 function fill(c){ F.id.value=c?c.id:''; F.name.value=c?c.name:''; F.business.value=c?c.business:''; F.email.value=c?c.email:''; F.phone.value=c?c.phone:''; F.note.value=c?c.note:''; $('#save').textContent=c?'Save changes':'Add customer'; $('#del').hidden=!c; $('#fmsg').textContent=''; }
