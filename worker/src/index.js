@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v47"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v48"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -3224,21 +3224,33 @@ async function unsubToken(env, email) {
   return [...new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(email)))].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// The designed version of a customer email (Hugh, Oct 7): logo band, the message, the gift photo grid, a big button to the
-// first link in the message, and the address and unsubscribe link. Images are hosted on hdlaser.net so every inbox can load them.
-function campaignHtml(body, unsubLink) {
+// The designed version of a customer email (Hugh, Oct 7): logo band with the shop's email, phone and address, a gold
+// "order by" strip, the subject as a big headline, the gift photo grid, the message, a big button to the first link in the
+// message with call or text under it, three small promises, and the address and unsubscribe link. Images are hosted on
+// hdlaser.net so every inbox can load them. The strip, grid, button label and promises are holiday-specific.
+function campaignHtml(body, unsubLink, subject) {
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const firstUrl = (body.match(/https?:\/\/[^\s<>"]+/) || [])[0] || "https://hdlaser.net/?src=email";
-  const linkify = (t) => esc(t).replace(/https?:\/\/[^\s<>"]+/g, (u) => `<a href="${u}" style="color:#A32C21;font-weight:700">${u.replace(/^https?:\/\//, "").replace(/\?.*$/, "")}</a>`);
-  const paras = body.split(/\n\s*\n/).map((p) => `<p style="margin:0 0 16px;font-size:17px;line-height:1.55;color:#15191E">${linkify(p.trim()).replace(/\n/g, "<br>")}</p>`).join("");
-  return `<!doctype html><html><body style="margin:0;padding:0;background:#F6F4EF">
+  const linkify = (t) => esc(t).replace(/https?:\/\/[^\s<>"]+/g, (u) => `<a href="${u}" style="color:#A32C21;font-weight:700">${u.replace(/^https?:\/\//, "").replace(/\?.*$/, "")}</a>`)
+    .replace(/\((\d{3})\) (\d{3})-(\d{4})/g, (m, a, b, c) => `<a href="tel:+1${a}${b}${c}" style="color:#A32C21;font-weight:700;text-decoration:none;white-space:nowrap">${m}</a>`);
+  const paras = body.split(/\n\s*\n/).map((p) => `<p style="margin:0 0 16px;font-size:17px;line-height:1.6;color:#15191E">${linkify(p.trim()).replace(/\n/g, "<br>")}</p>`).join("");
+  // The line inboxes show next to the subject: the first real sentence, not "Hi there!" or the contact line.
+  const pre = esc((body.split(/\n\s*\n/).map((p) => p.replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim()).find((p) => p.length > 30) || "").slice(0, 140));
+  const head = subject ? `<tr><td align="center" style="padding:30px 28px 18px"><div style="font-family:'Trebuchet MS',Helvetica,Arial,sans-serif;font-size:30px;line-height:1.15;font-weight:800;color:#15191E">${esc(subject)}</div></td></tr>` : "";
+  const promise = (icon, title, line) => `<td width="33%" valign="top" align="center" style="padding:14px 6px;background:#FBF3E1;border-radius:12px"><div style="font-size:26px;line-height:1">${icon}</div><div style="font-size:14px;font-weight:800;color:#15191E;padding-top:8px">${title}</div><div style="font-size:13px;line-height:1.4;color:#545B63;padding-top:2px">${line}</div></td>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;padding:0;background:#F6F4EF">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#F6F4EF;opacity:0">${pre}${"&#847; &zwnj; ".repeat(60)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F6F4EF"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#FFFFFF;border-radius:16px;overflow:hidden;font-family:Helvetica,Arial,sans-serif">
 <tr><td style="background:#15191E;padding:18px 24px"><a href="https://hdlaser.net/?src=email" style="text-decoration:none"><img src="https://hdlaser.net/assets/icon-512.png" width="48" height="48" alt="HD" style="vertical-align:middle;border:0;border-radius:10px"><span style="color:#FFFFFF;font-weight:800;font-size:18px;letter-spacing:2px;vertical-align:middle;padding-left:12px">LASER STUDIO</span></a>
 <div style="padding-top:12px;font-size:14px;line-height:1.7;color:#D9D4CA"><a href="mailto:contact@hdlaser.net" style="color:#FFFFFF;text-decoration:none">contact@hdlaser.net</a> &middot; <a href="tel:+18583739866" style="color:#FFFFFF;text-decoration:none">(858) 373-9866</a><br><a href="https://maps.google.com/?q=759+Turquoise+St,+San+Diego,+CA+92109" style="color:#D9D4CA;text-decoration:none">759 Turquoise St, Pacific Beach, San Diego</a></div></td></tr>
-<tr><td style="padding:28px 28px 8px">${paras}</td></tr>
-<tr><td style="padding:0 28px"><a href="${firstUrl}"><img src="https://hdlaser.net/assets/email-holiday-gifts.jpg" width="544" alt="Logo tumblers, engraved cups, water bottles and cutting boards made at HD Laser Studio" style="width:100%;max-width:544px;height:auto;border:0;border-radius:12px;display:block"></a></td></tr>
-<tr><td align="center" style="padding:24px 28px 30px"><a href="${firstUrl}" style="display:inline-block;background:#C8372A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:18px;padding:16px 30px;border-radius:999px">See the holiday gifts</a></td></tr>
+<tr><td align="center" style="background:#F2B63D;padding:10px 12px;font-size:12px;font-weight:800;letter-spacing:1px;color:#15191E">&#10052; HOLIDAY GIFTS &middot; ORDER BY DEC 1 &#10052;</td></tr>
+${head}
+<tr><td style="padding:${subject ? "0" : "28px"} 28px 0"><a href="${firstUrl}"><img src="https://hdlaser.net/assets/email-holiday-gifts.jpg" width="544" alt="Logo tumblers, engraved wine glasses, a flask and a heart box made at HD Laser Studio" style="width:100%;max-width:544px;height:auto;border:0;border-radius:12px;display:block"></a></td></tr>
+<tr><td style="padding:26px 28px 4px">${paras}</td></tr>
+<tr><td align="center" style="padding:6px 28px 8px"><a href="${firstUrl}" style="display:inline-block;background:#C8372A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:18px;padding:16px 32px;border-radius:999px">See holiday gift ideas</a></td></tr>
+<tr><td align="center" style="padding:6px 28px 26px;font-size:15px;color:#545B63">or call or text <a href="tel:+18583739866" style="color:#A32C21;font-weight:700;text-decoration:none">(858) 373-9866</a></td></tr>
+<tr><td style="padding:0 22px 28px"><table role="presentation" width="100%" cellpadding="0" cellspacing="6"><tr>${promise("&#127873;", "Any gift", "ours or yours")}${promise("&#9989;", "Free proof", "see it first")}${promise("&#128205;", "Made here", "Pacific Beach")}</tr></table></td></tr>
 <tr><td style="background:#F6F4EF;padding:18px 28px;font-size:13px;line-height:1.5;color:#545B63;text-align:center">HD Laser Studio &middot; 759 Turquoise St, Pacific Beach, San Diego, CA 92109 &middot; (858) 373-9866<br><a href="https://hdlaser.net/?src=email" style="color:#545B63">hdlaser.net</a> &middot; <a href="${unsubLink}" style="color:#545B63">Unsubscribe</a></td></tr>
 </table></td></tr></table></body></html>`;
 }
@@ -3255,12 +3267,12 @@ async function sendCampaign(env, b, origin) {
     const msg = body.replace(/\{first_name\}/g, first);
     const e = { from, to: [email], reply_to: replyTo, subject: subject.replace(/\{first_name\}/g, first), headers: { "List-Unsubscribe": `<${link}>` },
       text: `${msg}\n\n--\nHD Laser Studio · 759 Turquoise St, Pacific Beach, San Diego, CA 92109 · (858) 373-9866 · hdlaser.net\nDon't want these emails? Unsubscribe: ${link}` };
-    if (b.design !== "plain") e.html = campaignHtml(msg, link);
+    if (b.design !== "plain") e.html = campaignHtml(msg, link, e.subject);
     return e;
   };
   const post = async (batch) => { const res = await fetch("https://api.resend.com/emails/batch", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify(batch) }); const d = await res.json().catch(() => ({})); return res.ok ? { ok: true } : { ok: false, error: (d && d.message) || "Resend " + res.status }; };
   if (!b.preview && !env.RESEND_API_KEY) return { ok: false, error: "Sending email isn't set up yet (RESEND_API_KEY). Use Copy all emails and send from your email app." };
-  if (b.preview) return { ok: true, html: b.design === "plain" ? null : campaignHtml(body.replace(/\{first_name\}/g, "there"), "#"), text: body };
+  if (b.preview) return { ok: true, html: b.design === "plain" ? null : campaignHtml(body.replace(/\{first_name\}/g, "there"), "#", subject.replace(/\{first_name\}/g, "there")), text: body };
   if (b.test) { const r = await post([await build(replyTo, "Hugh")]); return r.ok ? { ok: true, test: true, to: replyTo } : r; }
   let id = +b.campaign_id || 0;
   if (!id) { const r = await env.DB.prepare(`INSERT INTO campaigns (created_at, subject, body) VALUES (?,?,?)`).bind(new Date().toISOString(), subject, body).run(); id = r.meta && r.meta.last_row_id; }
