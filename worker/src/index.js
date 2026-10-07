@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v48"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-07 v49"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -3227,7 +3227,8 @@ async function unsubToken(env, email) {
 // The designed version of a customer email (Hugh, Oct 7): logo band with the shop's email, phone and address, a gold
 // "order by" strip, the subject as a big headline, the gift photo grid, the message, a big button to the first link in the
 // message with call or text under it, three small promises, and the address and unsubscribe link. Images are hosted on
-// hdlaser.net so every inbox can load them. The strip, grid, button label and promises are holiday-specific.
+// hdlaser.net so every inbox can load them. The strip, grid, button label and promises are holiday-specific. The headline is
+// in a script font (Dancing Script where the inbox loads web fonts, like Apple Mail; Gmail falls back to the device's script font).
 function campaignHtml(body, unsubLink, subject) {
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const firstUrl = (body.match(/https?:\/\/[^\s<>"]+/) || [])[0] || "https://hdlaser.net/?src=email";
@@ -3236,9 +3237,9 @@ function campaignHtml(body, unsubLink, subject) {
   const paras = body.split(/\n\s*\n/).map((p) => `<p style="margin:0 0 16px;font-size:17px;line-height:1.6;color:#15191E">${linkify(p.trim()).replace(/\n/g, "<br>")}</p>`).join("");
   // The line inboxes show next to the subject: the first real sentence, not "Hi there!" or the contact line.
   const pre = esc((body.split(/\n\s*\n/).map((p) => p.replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim()).find((p) => p.length > 30) || "").slice(0, 140));
-  const head = subject ? `<tr><td align="center" style="padding:30px 28px 18px"><div style="font-family:'Trebuchet MS',Helvetica,Arial,sans-serif;font-size:30px;line-height:1.15;font-weight:800;color:#15191E">${esc(subject)}</div></td></tr>` : "";
+  const head = subject ? `<tr><td align="center" style="padding:30px 28px 18px"><div style="font-family:'Dancing Script','Brush Script MT','Snell Roundhand',cursive;font-size:42px;line-height:1.1;font-weight:700;color:#A32C21">${esc(subject).replace(/ (\S+)$/, "&nbsp;$1")}</div></td></tr>` : "";
   const promise = (icon, title, line) => `<td width="33%" valign="top" align="center" style="padding:14px 6px;background:#FBF3E1;border-radius:12px"><div style="font-size:26px;line-height:1">${icon}</div><div style="font-size:14px;font-weight:800;color:#15191E;padding-top:8px">${title}</div><div style="font-size:13px;line-height:1.4;color:#545B63;padding-top:2px">${line}</div></td>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;padding:0;background:#F6F4EF">
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&display=swap" rel="stylesheet"></head><body style="margin:0;padding:0;background:#F6F4EF">
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#F6F4EF;opacity:0">${pre}${"&#847; &zwnj; ".repeat(60)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F6F4EF"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#FFFFFF;border-radius:16px;overflow:hidden;font-family:Helvetica,Arial,sans-serif">
