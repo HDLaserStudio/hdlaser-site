@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-07 v50"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-09 v51"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2454,9 +2454,9 @@ const DEFAULT_BOOK = {
     { key: "wood", name: "Wood", factor: 1, services: ["engrave", "uv", "cut"] },
     { key: "metal", name: "Metal", factor: 1, services: ["engrave", "uv"] },
     { key: "glass", name: "Glass", factor: 1, services: ["engrave", "uv"] },
-    { key: "leather", name: "Leather", factor: 1, services: ["engrave", "cut"] },
+    { key: "leather", name: "Leather", factor: 1, services: ["engrave", "uv", "cut"] }, // UV on leather: Hugh, Oct 9 2026
     { key: "acrylic", name: "Acrylic or plastic", factor: 1, services: ["engrave", "uv", "cut"] },
-    { key: "stone", name: "Stone or slate", factor: 1, services: ["engrave"] },
+    { key: "stone", name: "Stone or slate", factor: 1, services: ["engrave", "uv"] }, // UV on stone and slate: Hugh, Oct 9 2026
     { key: "fabric", name: "Fabric", factor: 1, services: ["engrave", "dtf", "cut"] },
   ],
   // blank_cents is what the customer pays for the item when we supply it; cost_cents is what it costs us (never shown).
@@ -2472,7 +2472,7 @@ const DEFAULT_BOOK = {
     // Hugh, Oct 2 2026: wood plaque with a 7 x 9 metal plate, logo and text engraved on the plate, $125. The plate is the artwork area (9 in longest side).
     { key: "plaqueplate", name: "Wood plaque with 7 \u00d7 9 metal plate", material: "metal", blank_cents: 5300, cost_cents: 2200, max_inches: 9, w_in: 9, h_in: 11, shape: "plaque", photo: null, services: ["engrave"] },
     { key: "tag", name: "Metal tag or plate", material: "metal", blank_cents: 600, cost_cents: 150, max_inches: 2.5, w_in: 3, h_in: 2, shape: "tag", photo: "/assets/engrave-anodized-tags.jpg" },
-    { key: "patch", name: "Leather patch or wallet", material: "leather", blank_cents: 1400, cost_cents: 500, max_inches: 2.5, w_in: 3.5, h_in: 2.5, shape: "patch", photo: "/assets/uv-mandala-wallet.jpg", services: ["engrave"] },
+    { key: "patch", name: "Leather patch or wallet", material: "leather", blank_cents: 1400, cost_cents: 500, max_inches: 2.5, w_in: 3.5, h_in: 2.5, shape: "patch", photo: "/assets/uv-mandala-wallet.jpg", services: ["engrave", "uv"] },
     // sheet stock we cut shapes from; the size slider is the longest side of the finished piece
     { key: "woodblank", name: "Cut from our wood", material: "wood", blank_cents: 600, cost_cents: 200, max_inches: 28, w_in: 28, h_in: 15, shape: "board", photo: null, services: ["cut"] },
     { key: "acrylicblank", name: "Cut from our acrylic", material: "acrylic", blank_cents: 900, cost_cents: 350, max_inches: 28, w_in: 28, h_in: 15, shape: "board", photo: null, services: ["cut"] },
@@ -2504,7 +2504,8 @@ async function priceBook(env) {
   // anything the code has added since the book was saved (a new service, material, item or size) joins the saved book; saved prices win
   for (const k of ["services", "materials", "products"]) { const have = new Set((book[k] || []).map((x) => x.key)); for (const d of DEFAULT_BOOK[k]) if (!have.has(d.key)) book[k].push(JSON.parse(JSON.stringify(d))); }
   for (const d of DEFAULT_BOOK.materials) { const m = book.materials.find((x) => x.key === d.key); if (m) for (const svc of d.services) if (!m.services.includes(svc)) m.services.push(svc); }
-  for (const d of DEFAULT_BOOK.products) { const p = book.products.find((x) => x.key === d.key); if (p && d.services && !p.services) p.services = [...d.services]; if (p && ["own", "woodblank", "acrylicblank"].includes(d.key) && (p.max_inches || 0) < d.max_inches) { p.max_inches = d.max_inches; p.w_in = d.w_in; p.h_in = d.h_in; } }
+  // an item's finishes come from the code (the prices page has no control for them), so a finish added in the code reaches the saved book too
+  for (const d of DEFAULT_BOOK.products) { const p = book.products.find((x) => x.key === d.key); if (p && d.services) { if (!p.services) p.services = [...d.services]; else for (const svc of d.services) if (!p.services.includes(svc)) p.services.push(svc); } if (p && ["own", "woodblank", "acrylicblank"].includes(d.key) && (p.max_inches || 0) < d.max_inches) { p.max_inches = d.max_inches; p.w_in = d.w_in; p.h_in = d.h_in; } }
   for (const d of DEFAULT_BOOK.services) { const v = book.services.find((x) => x.key === d.key); if (v && v.max_inches == null) v.max_inches = d.max_inches; }
   if (!book.cut_detail) book.cut_detail = JSON.parse(JSON.stringify(DEFAULT_BOOK.cut_detail));
   book.ladders = { ...DEFAULT_BOOK.ladders, ...(s.ladders || {}) }; book.max_inches = Math.max(book.max_inches || 0, DEFAULT_BOOK.max_inches); if (book.text_only_own_cents == null) book.text_only_own_cents = DEFAULT_BOOK.text_only_own_cents; if (book.text_only_own_min_qty == null) book.text_only_own_min_qty = DEFAULT_BOOK.text_only_own_min_qty; if (book.text_only_own_max_inches == null) book.text_only_own_max_inches = DEFAULT_BOOK.text_only_own_max_inches;
