@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-09 v51"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-09 v52"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -3277,6 +3277,9 @@ async function sendCampaign(env, b, origin) {
   if (b.preview) return { ok: true, html: b.design === "plain" ? null : campaignHtml(body.replace(/\{first_name\}/g, "there"), "#", subject.replace(/\{first_name\}/g, "there")), text: body };
   if (b.test) { const r = await post([await build(replyTo, "Hugh")]); return r.ok ? { ok: true, test: true, to: replyTo } : r; }
   let id = +b.campaign_id || 0;
+  // The same subject within 30 days is the same mailing, so Send after a reload or the next day picks up where the daily
+  // limit stopped it and nobody gets it twice (Hugh, Oct 9: 300 of 481 went out, then Resend's daily limit).
+  if (!id) { const prev = await env.DB.prepare(`SELECT id FROM campaigns WHERE lower(trim(subject)) = lower(?) AND created_at > ? ORDER BY id DESC LIMIT 1`).bind(subject, new Date(Date.now() - 30 * 864e5).toISOString()).first(); if (prev) id = prev.id; }
   if (!id) { const r = await env.DB.prepare(`INSERT INTO campaigns (created_at, subject, body) VALUES (?,?,?)`).bind(new Date().toISOString(), subject, body).run(); id = r.meta && r.meta.last_row_id; }
   const people = (await env.DB.prepare(`SELECT email, name FROM customers WHERE email IS NOT NULL AND email != '' AND unsubscribed_at IS NULL AND deleted_at IS NULL AND email NOT IN (SELECT email FROM campaign_sends WHERE campaign_id = ?) ORDER BY id`).bind(id).all()).results;
   let sent = 0, error = null;
@@ -3377,7 +3380,8 @@ $('#del').onclick=function(){ if(!F.id.value||!confirm('Delete this customer fro
 document.addEventListener('click',function(e){ var b=e.target.closest('[data-edit]'); if(b){ fill(D.customers.filter(function(c){return String(c.id)===b.dataset.edit;})[0]); F.scrollIntoView({behavior:'smooth'}); return; }
   var u=e.target.closest('[data-unsub]'); if(u){ api('/api/customers',{id:u.dataset.unsub,unsubscribed:u.dataset.v==='1'}).then(load); } });
 function send(test){ var s=$('#subject').value.trim(), m=$('#body').value.trim(); if(s.length<2||m.length<5){ $('#smsg').textContent='Write a subject and a message first.'; $('#smsg').className='msg bad'; return; }
-  if(!test){ var n=D.customers.filter(function(c){return c.email&&!c.unsubscribed;}).length; if(!confirm('Send this email to '+n+' customers now?')) return; }
+  if(!test){ var n=D.customers.filter(function(c){return c.email&&!c.unsubscribed;}).length, prev=D.campaigns.filter(function(c){return c.subject.trim().toLowerCase()===s.toLowerCase()&&c.sent>0;})[0];
+    if(!confirm(prev?'This email already went to '+prev.sent+' people. Send it to the rest now? Nobody gets it twice.':'Send this email to '+n+' customers now?')) return; }
   $('#smsg').textContent='Sending…'; $('#smsg').className='msg';
   api('/api/customers/send',{subject:s,body:m,test:!!test,design:$('#design').checked?'photos':'plain',campaign_id:test?undefined:(CAMPAIGN||undefined)}).then(function(r){
     if(r.test){ $('#smsg').textContent='Test sent to '+r.to+'. Check your inbox.'; $('#smsg').className='msg ok'; return; }
