@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Order online: engraving, UV or DTF printing | HD Laser Studio</title>
-<meta name="description" content="Pick the item, then laser engraving, UV printing or a DTF transfer on your own garment. Set size and quantity, see the price and a preview of your logo, then pay.">
+<meta name="description" content="Pick the item, then laser engraving, UV printing or a DTF transfer on your own garment. Set size and quantity and see a preview of your logo on it.">
 <link rel="canonical" href="https://hdlaser.net/order/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HD Laser Studio">
 <meta property="og:title" content="Order online: engraving, UV or DTF printing | HD Laser Studio">
-<meta property="og:description" content="Pick the item, then laser engraving, UV printing or a DTF transfer on your own garment. Set size and quantity, see the price and a preview of your logo, then pay.">
+<meta property="og:description" content="Pick the item, then laser engraving, UV printing or a DTF transfer on your own garment. Set size and quantity and see a preview of your logo on it.">
 <meta property="og:url" content="https://hdlaser.net/order/">
 <meta property="og:image" content="https://hdlaser.net/assets/og-image.jpg">
 <meta name="twitter:card" content="summary_large_image">
@@ -125,6 +125,9 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
 .bar{position:fixed;left:0;right:0;bottom:0;background:var(--ink);color:#fff;padding:12px 18px;display:none;justify-content:space-between;align-items:center;gap:12px;z-index:9;box-shadow:0 -8px 24px rgba(0,0,0,.25)}
 .bar b{font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:24px;color:var(--gold)}
 .bar a{background:var(--red);color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:999px}
+/* Quote mode (Hugh, Oct 19: customers see no prices; the price list's show_prices switch, never on the shop iPad) */
+.noprices #ppu,.noprices #qcalc,.noprices #nudge,.noprices #qnudge,.noprices .tile small,.noprices .attest{display:none !important}
+.noprices .summary dd{white-space:normal;text-align:right}
 .note{font-size:14px;color:var(--muted);margin:0}
 @media (max-width:960px){main{grid-template-columns:1fr}.side{position:static}.preview svg{max-height:260px}.bar{display:flex}}
 @media (max-width:560px){main{padding:20px 16px 120px}.step{padding:18px 16px}h1{font-size:34px}.grid,.two{grid-template-columns:1fr}.tiles{grid-template-columns:repeat(2,1fr)}.readout{font-size:32px}}
@@ -308,7 +311,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   if (HUB) { $('#counter').hidden = false; servedBy(); $('#pay').textContent = 'Pay by card online instead'; $('#pay').className = 'btn'; $('#hubbar').hidden = false; $('#ovwrap').hidden = false; ['email','phone'].forEach(function(id){ var l = document.querySelector('label[for="'+id+'"]'); if (l) l.innerHTML += ' <small>(optional at the counter)</small>'; $('#'+id).required = false; }); $('#hubwho').textContent = 'Counter order' + (BY ? ' · taken by ' + BY : '') + '. Walk the customer through it; they sign step 8 themselves.'; }
 
   var SAMPLE = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="220 115 1930 640"><path fill="#C8372A" d="M510 125 L730 125 L636 371 L963 371 L1072 125 L2000 125 C2100 125 2160 210 2130 300 L2010 610 C1970 700 1880 742 1790 742 L1115 742 L1283 341 L1525 341 L1425 595 L1800 595 L1938 272 L1222 272 L1030 742 L808 742 L907 523 L572 523 L483 742 L232 742 Z"/></svg>');
-  var BOOK = null, TAX = 0.0775, TAX_OWN = false;
+  var BOOK = null, TAX = 0.0775, TAX_OWN = false, QUOTE = false; // QUOTE: customers see no prices and send a quote request
   // counter: whoever served the customer picks their name and types their own PIN, whoever is signed in to the hub
   function SERVER(){ return ($('#servedby') && $('#servedby').value) || BY; }
   function servedBy(){
@@ -417,7 +420,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     if (!p) { box.querySelector('svg').outerHTML = shapeSvg(BOOK.products[0], SAMPLE, 2, 'engrave'); $('#cap').innerHTML = 'Pick an item to see the preview.'; return; }
     var pd = (p.key==='own' && S.inches > p.w_in - 1) ? Object.assign({}, p, { w_in: S.inches + 1, h_in: S.inches + 1 }) : p;
     box.querySelector('svg').outerHTML = shapeSvg(pd, S.logo || SAMPLE, S.inches, S.service==='engrave' || S.service==='cut' || !S.service ? 'engrave' : 'uv');
-    $('#cap').innerHTML = (S.logo ? '<b>Your logo</b>' : '<b>Our logo as a stand-in.</b> Yours goes here') + ' at <b>'+S.inches+' in</b>' + (p.key==='garment' ? ' on the <b>'+(S.sides==='both'?'front and back':S.sides)+'</b>' : '') + ' on '+(p.key==='garment' ? 'your garment (shirt shown; same price on hoodies, hats and totes)' : 'the '+esc(p.name.toLowerCase()))+(S.service ? ', '+(S.service==='engrave'?'engraved':'full color') : '')+'. Drawn to scale.';
+    $('#cap').innerHTML = (S.logo ? '<b>Your logo</b>' : '<b>Our logo as a stand-in.</b> Yours goes here') + ' at <b>'+S.inches+' in</b>' + (p.key==='garment' ? ' on the <b>'+(S.sides==='both'?'front and back':S.sides)+'</b>' : '') + ' on '+(p.key==='garment' ? (QUOTE ? 'your garment (shirt shown; hoodies, hats and totes work too)' : 'your garment (shirt shown; same price on hoodies, hats and totes)') : 'the '+esc(p.name.toLowerCase()))+(S.service ? ', '+(S.service==='engrave'?'engraved':'full color') : '')+'. Drawn to scale.';
   }
   // ---- counter: a manager or owner sets the price (per spot x spots on each piece). The worker prices it as a custom job and checks the PIN.
   function override(){
@@ -455,7 +458,35 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     if (o.bad) return Object.assign({}, q, { ovBad: true });
     var sub = o.unit*q.qty; return Object.assign({}, q, { ov: o, subtotal: sub, tax: q.taxable ? Math.round(sub*TAX) : 0, over: 0 });
   }
+  // ---- quote mode: the same steps with no prices; the last button sends the request to Hugh, who replies with the price
+  function quoteMode(){
+    document.documentElement.classList.add('noprices');
+    $('.lead').innerHTML = 'A few quick choices and you\u2019ll see a preview of your logo on the item. Send it to us and we\u2019ll email you a price and a free digital proof, usually within 1\u20132 business days. Nothing is made or charged until you say yes. <a href="tel:+18583739866">Rather talk it through? Call or text (858) 373-9866.</a>';
+    $('#s-logo .sub').textContent = 'Upload your logo, type your text, or tell us which logo we already have. We prepare the artwork before your proof.';
+    var art = { logo:'Upload it now or email it after.', text:'Names, dates, a line of text.', file:'We\u2019ve made this for you before.' };
+    document.querySelectorAll('[data-art]').forEach(function(b){ var sp = b.querySelector('span'); if (sp && art[b.dataset.art]) sp.textContent = art[b.dataset.art]; });
+    var rs = $('#rush').parentNode.querySelector('small'); if (rs) rs.textContent = 'Under 3 business days.';
+    $('#s-confirm h2').innerHTML = '<span class="n">8</span>Send your request';
+    $('#pay').textContent = 'Send my request'; var pn = $('#pay').nextElementSibling; if (pn) pn.textContent = 'No payment now. We\u2019ll email you a price and a free proof.';
+    $('.summary h2').textContent = 'Your request'; $('#sumnote').textContent = 'We price every job by hand and email it to you with a free digital proof.';
+    var bw = $('#bar').firstElementChild, bl = bw && bw.firstElementChild; if (bl) bl.textContent = 'Free quote'; $('#bartot').textContent = 'No payment now'; $('#bartot').style.fontSize = '18px';
+    var own = { '0':'Tumblers, cups, bottles, cutting boards and more.', '1':'Bring it in and we engrave or print it.' };
+    document.querySelectorAll('[data-own]').forEach(function(b){ var sp = b.querySelector('span'); if (sp && own[b.dataset.own]) sp.textContent = own[b.dataset.own]; });
+    var ba = $('#bar').querySelector('a'); if (ba) ba.textContent = 'Review & send';
+  }
+  function renderRequest(){
+    var p = BOOK.products.filter(function(x){return x.key===S.product;})[0], m = BOOK.materials.filter(function(x){return x.key===(p ? (p.material||S.material) : S.material);})[0], sv = BOOK.services.filter(function(x){return x.key===S.service;})[0];
+    var rows = [];
+    if (p) rows.push(['Item', p.key==='own' ? 'Your own '+(m ? lcName(m.name) : '')+' item' : p.key==='garment' ? 'Your own garment' : esc(p.name)]);
+    if (sv) rows.push(['Finish', esc(sv.name)+(S.service==='cut' ? ', '+esc(S.detail) : '')+(p && p.key==='garment' ? ', '+(S.sides==='both' ? 'front and back' : S.sides) : '')]);
+    if (p && sv) { rows.push(['Size', S.inches+' in']); rows.push(['Quantity', String(S.qty)]); }
+    rows.push(['Artwork', S.art==='text' ? 'Text only' : S.art==='file' ? 'A logo you already have' : (S.logo ? 'Your logo: '+esc(S.logoName) : 'A new logo or design')]);
+    if ($('#needed').value) rows.push(['Needed by', esc($('#needed').value)]);
+    if (S.rush) rows.push(['Rush', 'Yes']);
+    $('#lines').innerHTML = (p ? '' : '<div><dt>Pick the item, the finish and the size.</dt><dd></dd></div>') + rows.map(function(r){ return '<div><dt>'+r[0]+'</dt><dd>'+r[1]+'</dd></div>'; }).join('');
+  }
   function renderSummary(){
+    if (QUOTE) { renderRequest(); return; }
     var q = priced(); var dl = $('#lines');
     if (q && q.ovBad) { dl.innerHTML = '<div><dt>'+(q.walkin ? 'Say what we\u2019re making and the amount.' : 'Type the price per spot and the number of spots.')+'</dt><dd></dd></div>'; $('#bartot').textContent = '$0'; $('#ovnote').textContent = ''; return; }
     if (q && q.ov) {
@@ -526,6 +557,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   $('#qty').addEventListener('input', function(){ var n = parseInt(this.value,10); if (n>=1 && n<=500) { S.qty = n; renderAll(); } });
   $('#qty').addEventListener('blur', function(){ this.value = S.qty; });
   $('#rush').addEventListener('change', function(){ S.rush = this.checked; renderAll(); });
+  $('#needed').addEventListener('change', function(){ if (QUOTE) renderSummary(); });
   $('#ovon').addEventListener('change', function(){ $('#ovbox').hidden = !this.checked; if (this.checked) $('#ovprice').focus(); renderAll(); });
   $('#ovprice').addEventListener('input', function(){ renderQtyMath(); renderSummary(); renderWords(); });
   $('#ovspots').addEventListener('input', function(){ renderQtyMath(); renderSummary(); renderWords(); });
@@ -547,12 +579,12 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
 
   // ---- checkout
   var ref = 'HD-' + Date.now().toString(36).toUpperCase();
-  function fail(msg){ var e = $('#err'); e.textContent = msg; e.hidden = false; e.scrollIntoView({behavior:'smooth', block:'center'}); $('#pay').disabled = false; renderSummary(); }
+  function fail(msg){ var e = $('#err'); e.textContent = msg; e.hidden = false; e.scrollIntoView({behavior:'smooth', block:'center'}); $('#pay').disabled = false; renderSummary(); if (QUOTE) $('#pay').textContent = 'Send my request'; }
   function checkForm(){
     $('#err').hidden = true; var q = priced();
     if (q && q.ovBad) return fail(q.walkin ? 'Say what we\u2019re making and type the amount (at the top).' : 'Type the price per spot and the number of spots, or untick Set the price myself.');
     if (!q) return fail('Finish steps 1 to 4 first: the item, the finish and the size.');
-    if (q.over) return fail('For more than '+q.over+' of these we price it by hand. Ask for a quote and we\u2019ll come back with a number.');
+    if (q.over && !QUOTE) return fail('For more than '+q.over+' of these we price it by hand. Ask for a quote and we\u2019ll come back with a number.');
     var name = $('#name').value.trim(), email = $('#email').value.trim(), phone = $('#phone').value.trim();
     if (name.length < 2) return fail('Tell us your name (step 7).');
     // at the counter the customer may give just a name; anything they do give still has to look right
@@ -560,7 +592,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     if ((phone || !HUB) && phone.replace(/\D/g,'').length < 10) return fail('We need a phone number for pickup texts (step 7).');
     if (HUB && $('#sms').checked && !phone) return fail('Add a phone number for the text updates, or untick that box (step 7).');
     if (!$('#agree').checked) return fail('Please agree to the Terms of Sale (step 7).');
-    if (!renderInitials()) return fail('Type your initials in step 8. That is your sign-off on the size, the artwork and the quantity.');
+    if (!QUOTE && !renderInitials()) return fail('Type your initials in step 8. That is your sign-off on the size, the artwork and the quantity.');
     return { q:q, name:name, email:email, phone:phone };
   }
   function orderBody(v){
@@ -571,16 +603,18 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
       heard: $('#heard').value || null, src: HUB ? null : (window.hdSource ? hdSource() : null), from: (qs.get('from') || '').slice(0,40) || null,
       logo: S.logo ? { name: S.logoName, data: S.logo } : null };
     if (HUB && $('#staffpin').value) body.staff = { name: SERVER(), pin: $('#staffpin').value };
+    if (QUOTE) { body.quote = true; delete body.attest; }
     if (v.q.ov) { body.spec = { custom: { description: ovDescription(v.q), unit_cents: v.q.ov.unit, we_supply_item: v.q.taxable }, qty: v.q.qty }; body.notes = [body.notes, v.q.walkin ? 'Walk-in job, amount set at the counter: '+money(v.q.ov.unit)+'.' : 'Price set at the counter: '+money(v.q.ov.price)+' x '+v.q.ov.spots+' spot'+(v.q.ov.spots>1?'s':'')+' = '+money(v.q.ov.unit)+' each. Choices: '+(S.inches+' in, ')+(S.art==='text'?'text only':S.art==='file'?'logo on file':'new logo')+'.'].filter(Boolean).join('\n'); if (v.q.walkin) { body.spec.custom.no_logo = true; body.from = 'walkin'; if (v.q.lines) { body.spec.custom.lines = v.q.lines.map(function(l){ return { name: l.name, qty: l.qty, unit_cents: l.unit }; }); body.spec.custom.setup = !!v.q.setupW; } } }
     return body;
   }
   $('#pay').onclick = function(){
     var v = checkForm(); if (!v) return;
-    var btn = $('#pay'); btn.disabled = true; btn.textContent = 'Opening secure payment…';
+    var btn = $('#pay'); btn.disabled = true; btn.textContent = QUOTE ? 'Sending\u2026' : 'Opening secure payment…';
     var body = orderBody(v);
     fetch(BASE + '/order/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
       .then(function(r){ return r.json().then(function(d){ d._status = r.status; return d; }); })
       .then(function(d){
+        if (d && d.quote) { if (window.hdTrack) hdTrack('quote_request', d.ref || ref); location.href = '/thanks/?kind=quote&ref=' + encodeURIComponent(d.ref || ref) + (S.logo ? '&logo=1' : ''); return; }
         if (d && d.url) { if (window.hdTrack) hdTrack('payment_started', d.ref || ref); location.href = d.url; return; }
         if (d && d.ok) { location.href = '/thanks/?kind=custom&pay=later&ref=' + encodeURIComponent(d.ref || ref) + (S.logo ? '&logo=1' : ''); return; }
         fail((d && d.error) || 'Something went wrong. Call us at (858) 373-9866 and we’ll finish it by hand.');
@@ -628,6 +662,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   if (window.matchMedia('(max-width:960px)').matches) { var pv = $('#preview'); $('#s-product').insertAdjacentElement('afterend', pv); pv.style.marginBottom = '16px'; }
   // ---- boot
   function boot(b){ BOOK = b.book; TAX = b.tax_rate || 0; TAX_OWN = !!b.tax_own_items; $('#rushpct').textContent = BOOK.rush_pct;
+    QUOTE = !HUB && BOOK.show_prices === false; if (QUOTE) quoteMode();
     var pre = qs.get('product'); if (pre && BOOK.products.some(function(p){return p.key===pre;})) { S.product = pre; var pp = BOOK.products.filter(function(p){return p.key===pre;})[0]; S.material = pp.material; S.own = pre==='own' || pre==='garment'; var pm = qs.get('material'); if (pre==='own' && pm && BOOK.materials.some(function(m){return m.key===pm;})) S.material = pm; }
     var svc = qs.get('service'); if (BOOK.services.some(function(x){return x.key===svc;})) S.service = svc;
     var pin = parseFloat(qs.get('inches')); if (pin >= 0.5 && pin <= BOOK.max_inches) S.inches = Math.round(pin*2)/2;

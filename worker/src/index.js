@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-09 v52"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-19 v53"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -734,7 +734,8 @@ async function kpis(env, from, to) {
   const lastSync = await q(`SELECT v FROM meta WHERE k = 'last_sync'`).first();
   const inqCount = await q(`SELECT COUNT(*) n FROM inquiries WHERE kind = 'quote' AND created_at >= ? AND created_at < ?`, fromIso, toIso).first();
   const inquiries = (await q(`SELECT id, created_at, kind, ref, name, business, email, phone, fields, emailed FROM inquiries ORDER BY created_at DESC LIMIT 50`).all()).results.map((r) => { let f = {}; try { f = JSON.parse(r.fields || "{}"); } catch {} return { ...r, fields: f }; });
-  funnel.quote_request = Math.max(funnel.quote_request, inqCount.n);
+  const quoteOrders = await q(`SELECT COUNT(*) n FROM orders WHERE status = 'quote' AND created_at >= ? AND created_at < ?`, fromIso, toIso).first();
+  funnel.quote_request = Math.max(funnel.quote_request, inqCount.n + quoteOrders.n);
   const lifetime = await q(`SELECT COUNT(*) orders, COALESCE(SUM(paid_cents - refunded_cents - COALESCE(tip_cents,0)),0) revenue, COALESCE(SUM(cups),0) cups FROM orders WHERE status IN ('paid','refunded')`).first();
 
   // where customers come from: new visitors (first arrival), orders placed, paid, revenue and quote requests per channel
@@ -743,6 +744,7 @@ async function kpis(env, from, to) {
   const byChannel = {}, byHeard = {}, byPage = {};
   for (const r of (await q(`SELECT detail FROM events WHERE name = 'arrival' AND ts >= ? AND ts < ?`, fromIso, toIso).all()).results) { let d = null; try { d = JSON.parse(r.detail || "null"); } catch {} tally(byChannel, channelOf(cleanSrc(d)), "visitors"); }
   for (const r of (await q(`SELECT channel, heard, src, status, paid_cents, refunded_cents, tip_cents FROM orders WHERE created_at >= ? AND created_at < ? AND status != 'cancelled'`, fromIso, toIso).all()).results) {
+    if (r.status === "quote") { tally(byChannel, r.channel || "Not recorded", "quotes"); tally(byHeard, r.heard || "Didn't say", "quotes"); continue; }
     const paid = r.status === "paid" || r.status === "refunded", rev = paid ? (r.paid_cents || 0) - (r.refunded_cents || 0) - (r.tip_cents || 0) : 0;
     let via = null; try { via = (JSON.parse(r.src || "null") || {}).via || null; } catch {}
     for (const [m, k] of [[byChannel, r.channel || "Not recorded"], [byHeard, r.heard || "Didn't say"], ...(via ? [[byPage, via]] : [])]) { tally(m, k, "orders"); if (paid) { tally(m, k, "paid"); tally(m, k, "revenue_cents", rev); } }
@@ -841,7 +843,7 @@ h1{font-size:20px;margin:0}h2{font-size:17px;margin:22px 0 10px}main{max-width:1
 .tile .n{font-size:26px;font-weight:700;margin-top:4px}.tile .d{font-size:12px;color:var(--muted);margin-top:2px}.up{color:var(--green)}.down{color:var(--red)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;overflow:auto}
 table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #EDE8DF;vertical-align:top}th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}td.num,th.num{text-align:right;white-space:nowrap}
-.pill{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:#EDE8DF}.pill.paid{background:#E7F2EC;color:var(--green)}.pill.refunded,.pill.pay_later{background:#FBE9E6;color:var(--red)}.pill.checkout_started{background:#FBF3D6}
+.pill{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:#EDE8DF}.pill.paid{background:#E7F2EC;color:var(--green)}.pill.refunded,.pill.pay_later{background:#FBE9E6;color:var(--red)}.pill.checkout_started{background:#FBF3D6}.pill.quote{background:#E8EEF8;color:#2F4F7F}
 .small{font-size:12px;color:var(--muted)}.btn{font:inherit;font-size:12px;padding:4px 9px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;margin:2px 2px 2px 0}.btn.done{background:#E7F2EC;border-color:#BFDCCB;color:var(--green)}
 .empty{color:var(--muted);font-style:italic}#err{background:#FBE9E6;color:var(--red);padding:10px 14px;border-radius:10px;margin:12px 0;display:none}
 </style></head><body>
@@ -2482,6 +2484,10 @@ const DEFAULT_BOOK = {
   ],
   qty_breaks: [{ min: 1, off_pct: 0 }, { min: 6, off_pct: 5 }, { min: 12, off_pct: 10 }, { min: 25, off_pct: 15 }, { min: 50, off_pct: 20 }, { min: 100, off_pct: 25 }],
   rush_pct: 50,                       // added to the work portion when they need it in under 3 business days
+  // Hugh, Oct 19 2026: customers on the website see no prices. The order page collects every detail and sends a quote request;
+  // the price list still prices it, for Hugh's email only. The shop iPad (counter mode) always shows prices. Tick
+  // "Show prices to customers on the website" on /admin/prices to bring them back exactly as they were.
+  show_prices: false,
   own_item_handling_cents: 0,       // per piece on customer-supplied items: inspection, test fit, no replacement stock
   min_order_cents: 2500,
   text_only_own_cents: 2500,          // flat per piece: text only (no artwork to digitize) on the customer's own item, any size, engraving or UV. No setup, no handling.
@@ -2521,7 +2527,7 @@ function r25(c) { return Math.max(0, Math.round(c / 25) * 25); }
 
 // Price one spec against the book. Returns { error } or the full breakdown in cents.
 const OWN_ITEM_KEYS = ["own", "garment"]; // products the customer supplies. Flip TAX_OWN_ITEMS=1 in Cloudflare to tax them anyway.
-function quoteSpec(book, spec) {
+function quoteSpec(book, spec, opts) {
   const product = book.products.find((p) => p.key === String(spec.product || ""));
   if (!product) return { error: "Pick what we're putting it on" };
   const matKey = product.material || String(spec.material || "");
@@ -2535,7 +2541,7 @@ function quoteSpec(book, spec) {
   if (!(inches >= 0.5 && inches <= maxIn)) return { error: `Size must be between 0.5 and ${maxIn} inches` };
   const qty = parseInt(spec.qty, 10);
   if (!(qty >= 1 && qty <= 500)) return { error: "Quantity must be 1 to 500" };
-  if (product.max_qty && qty > product.max_qty) return { error: `For more than ${product.max_qty} of these we price it by hand. Ask for a quote at hdlaser.net/quote` };
+  if (product.max_qty && qty > product.max_qty && !(opts && opts.noMax)) return { error: `For more than ${product.max_qty} of these we price it by hand. Ask for a quote at hdlaser.net/quote` };
   const rush = !!spec.rush;
   const sides = product.key === "garment" ? (["front", "back", "both"].includes(String(spec.sides)) ? String(spec.sides) : "front") : null;
   const prints = sides === "both" ? 2 : 1; // front and back are two prints, each priced by size
@@ -2687,7 +2693,9 @@ async function orderCheckout(request, env, cors) {
   const ip = request.headers.get("CF-Connecting-IP") || "";
   if (rateLimited("order:" + ip, 10, 600000)) return json({ error: "Too many attempts. Please wait a few minutes." }, 429, cors);
   const book = await priceBook(env);
-  const q = b.spec && b.spec.custom ? customQuote(book, b.spec) : quoteSpec(book, b.spec || {});
+  // a quote request from the website (prices hidden): saved with every detail and the logo, priced for Hugh only, never sent to Square
+  const quoteReq = !!b.quote && !(b.staff && b.staff.pin) && !(b.spec && b.spec.custom);
+  const q = b.spec && b.spec.custom ? customQuote(book, b.spec) : quoteSpec(book, b.spec || {}, { noMax: quoteReq });
   if (q.error) return json({ error: q.error }, 400, cors);
   const c = b.customer || {};
   const email = String(c.email || "").trim().toLowerCase();
@@ -2700,8 +2708,8 @@ async function orderCheckout(request, env, cors) {
   const a = b.attest || {};
   const initials = String(a.initials || "").trim().toUpperCase().replace(/[^A-Z]/g, "");
   const expect = initialsFor(name);
-  if (initials.length < 2 || initials.length > 4) return json({ error: "Type your initials to confirm the order" }, 400, cors);
-  if (!initials.startsWith(expect)) return json({ error: `Your initials should start with ${expect.split("").join(".")}. so they match the name on the order` }, 400, cors);
+  if (!quoteReq && (initials.length < 2 || initials.length > 4)) return json({ error: "Type your initials to confirm the order" }, 400, cors);
+  if (!quoteReq && !initials.startsWith(expect)) return json({ error: `Your initials should start with ${expect.split("").join(".")}. so they match the name on the order` }, 400, cors);
   const text = attestText(q, name);
   const ref = /^HD-[A-Z0-9]{4,12}$/.test(String(b.ref || "")) ? b.ref : "HD-" + Date.now().toString(36).toUpperCase();
   const now = new Date().toISOString();
@@ -2742,7 +2750,7 @@ async function orderCheckout(request, env, cors) {
   const order = { location_id: env.SQUARE_LOCATION_ID, reference_id: ref, line_items: lineItems };
   if (tax) order.taxes = [{ uid: "ca-sales-tax", name: "CA sales tax", percentage: String(+(taxRate * 100).toFixed(3)), scope: "ORDER" }];
   let linkOk = false, data = {}, terminal = null, tipsOffReason = null;
-  if (payHow === "terminal" && env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
+  if (!quoteReq && payHow === "terminal" && env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
     // the Square Terminal on the counter shows the amount; the customer taps there. Completion arrives by webhook or the page's status poll.
     let sqOrderId = null;
     const or = await squareFetch(env, "/v2/orders", { method: "POST", body: JSON.stringify({ idempotency_key: `${ref}-o-${Date.now()}`, order }) });
@@ -2762,7 +2770,7 @@ async function orderCheckout(request, env, cors) {
     }
     if (res.ok && data.checkout) terminal = { id: data.checkout.id, status: data.checkout.status, order_id: sqOrderId };
     else { console.error("Terminal error", res.status, JSON.stringify(data).slice(0, 600)); return json({ error: "The Terminal didn't answer: " + (squareErr(data) || res.status) + ". Is it on and online?" }, 502, cors); }
-  } else if (env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
+  } else if (!quoteReq && env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
     const payload = { idempotency_key: `${ref}-${Date.now()}`, order,
       checkout_options: { redirect_url: `${env.SITE_URL}/thanks/?paid=1&kind=custom&ref=${encodeURIComponent(ref)}${logo ? "&logo=1" : ""}`, ask_for_shipping_address: false, merchant_support_email: env.SUPPORT_EMAIL, allow_tipping: false },
       pre_populated_data: { buyer_email: email || undefined, buyer_phone_number: e164(c.phone) },
@@ -2778,19 +2786,59 @@ async function orderCheckout(request, env, cors) {
     if (logo) { const ins = await env.DB.prepare(`INSERT INTO order_assets (ref, created_at, name, type, bytes, data) VALUES (?,?,?,?,?,?)`).bind(ref, now, logo.name, logo.type, Math.round(logo.data.length * 0.75), logo.data).run(); assetId = ins.meta && ins.meta.last_row_id; }
     await env.DB.batch([
       env.DB.prepare(`INSERT OR REPLACE INTO orders (ref, created_at, status, business, name, email, phone, notes, text_consent, cups, base_price_cents, cups_subtotal_cents, setup_fee_cents, total_cents, deposit_percent, square_order_id, kind, spec, needed_by, rush, taken_by, tax_cents, tax_invoiced_at, attest_initials, attest_text, attest_at, attest_ip, attest_ua, attest_hash, logo_asset_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, linkOk || terminal ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email || null, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, quoteReq ? "quote" : linkOk || terminal ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email || null, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
         null, q.work_unit_cents, q.subtotal_cents - q.setup_cents, q.setup_cents, total, 100, terminal ? terminal.order_id : linkOk ? (data.payment_link.order_id || null) : null, "custom", JSON.stringify(spec), neededBy, q.rush ? 1 : 0, takenBy, tax, tax ? now : null, initials, text, now, ip, ua, hash, assetId),
       env.DB.prepare(`UPDATE orders SET taken_by_id = ?, terminal_checkout_id = ? WHERE ref = ?`).bind(takenById, terminal ? terminal.id : null, ref),
       env.DB.prepare(`UPDATE orders SET channel = ?, heard = ?, src = ? WHERE ref = ?`).bind(takenBy ? "At the counter" : channelOf(src), cleanHeard(b.heard), src ? JSON.stringify(src) : null, ref),
       env.DB.prepare(`DELETE FROM order_items WHERE ref = ?`).bind(ref),
       env.DB.prepare(`INSERT INTO order_items (ref, product, material, service, inches, qty, work_unit_cents, blank_unit_cents, discount_pct, line_cents) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(ref, q.product.key, q.material.key, q.service.key, q.inches, q.qty, q.work_unit_after_cents, q.blank_unit_cents, q.discount_pct, q.work_cents + q.blank_cents + q.handling_cents),
-      env.DB.prepare(`INSERT INTO events (ts, name, session, ref, path, detail) VALUES (?,?,?,?,?,?)`).bind(now, "order_checkout", null, ref, "/order/", JSON.stringify({ product: q.product.key, service: q.service.key, inches: q.inches, qty: q.qty })),
+      env.DB.prepare(`INSERT INTO events (ts, name, session, ref, path, detail) VALUES (?,?,?,?,?,?)`).bind(now, quoteReq ? "quote_request" : "order_checkout", null, ref, "/order/", JSON.stringify({ product: q.product.key, service: q.service.key, inches: q.inches, qty: q.qty })),
     ]);
   }
   // tell the shop and the customer straight away; payment confirmation follows from the Square webhook
   const $ = (n) => "$" + (n / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const who = c.business ? `${c.business} (${name})` : name;
   const breakdown = [q.custom && q.lines ? q.lines.map((l) => `${l.qty} × ${l.name} @ ${$(l.unit_cents)}`).join("\n") + ` (prices set by ${takenBy})` : q.custom ? `${q.qty} × ${q.product.name} @ ${$(q.work_unit_cents)} (custom price set by ${takenBy})` : `${q.qty * q.prints} × ${lcName(q.service.name)} ${q.inches} in${q.sides ? " (" + (q.sides === "both" ? "front and back" : q.sides) + ")" : ""} @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : q.discount_off_cents ? ` (${$(q.discount_off_cents)} off each for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", q.setup_cents ? `Setup ${$(q.setup_cents)}` : `Setup: none (${q.art === "text" ? "text only" : "logo on file"})`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
+  if (quoteReq) {
+    // the customer saw no price: Hugh gets every detail plus what the price list would charge, and replies with his price
+    const artLine = q.art === "text" ? `Text only: "${q.text || ""}"` : q.art === "file" ? `A logo we have on file: ${q.art_ref || "(they didn't say which)"}` : "A new logo or design";
+    if (env.RESEND_API_KEY) {
+      await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `Quote request ${ref}: ${who}, list price ${$(total)}`, text:
+`Quote request ${ref} from hdlaser.net. The customer did not see a price.
+
+Customer: ${[name, c.business, email, c.phone].filter(Boolean).join(" · ")}
+${q.summary}
+Artwork: ${artLine}
+Logo file: ${logo ? "attached to the request in the dashboard (" + logo.name + ")" : "not uploaded yet"}
+${neededBy ? "Needed by: " + neededBy + "\n" : ""}${q.rush ? "Rush: yes\n" : ""}${notes ? "Notes: " + notes + "\n" : ""}
+What your price list would charge (only you see this):
+${breakdown}
+
+Reply to this email with your price; the reply goes straight to the customer.
+When they say yes: charge it on the Terminal when they come in (hub, New order or Log a walk-in), or send them a Square invoice.
+Dashboard: ${env.WORKER_URL || ""}/admin` });
+      const first = name.split(" ")[0] || "there";
+      await sendEmail(env, { to: email, subject: `We've got your quote request ${ref}`, text:
+`Hi ${first},
+
+Thanks for asking HD Laser Studio for a quote. Here's what you sent us (reference ${ref}):
+
+${q.summary}
+${artLine}
+${logo ? "Your logo file came through." : q.art === "logo" ? "No logo file yet. Reply to this email with it attached (vector AI/EPS/SVG/PDF is best; a clean PNG works)." : ""}
+${neededBy ? "Needed by " + neededBy + "." : ""}
+
+We'll email you a price and a free digital proof within 1-2 business days. Nothing is made or charged until you say yes.
+
+Questions or changes? Reply to this email, or call or text (858) 373-9866.
+
+HD Laser Studio
+759 Turquoise St, Pacific Beach
+(858) 373-9866 · hdlaser.net` });
+    }
+    await sendAlert(env, `Quote request ${ref}: ${who}, ${q.summary}. Price list says ${$(total)}; they did not see it.`);
+    return json({ ok: true, ref, quote: true }, 200, cors);
+  }
   if (env.RESEND_API_KEY) {
     await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
 `New order ${ref} from hdlaser.net${takenBy ? " (taken at the counter by " + takenBy + ")" : ""}
@@ -3013,6 +3061,7 @@ async function saveWholeBook(env, body) {
   if (keep.length) { if (!keep.some((p) => p.key === "own")) { const own = next.products.find((p) => p.key === "own"); if (own) keep.push(own); } next.products = keep; }
   // quantity breaks, rush, handling, minimum
   if (Array.isArray(b.qty_breaks)) { const qb = b.qty_breaks.map((x) => ({ min: int(x.min, 1, 100000), off_pct: int(x.off_pct, 0, 90) })).filter((x) => x.min != null && x.off_pct != null).sort((x, y) => x.min - y.min); if (!qb.length || qb[0].min !== 1) qb.unshift({ min: 1, off_pct: 0 }); next.qty_breaks = qb.filter((x, i, a) => i === 0 || x.min !== a[i - 1].min); }
+  if (b.show_prices != null) next.show_prices = !!b.show_prices;
   if (b.rush_pct != null) next.rush_pct = int(b.rush_pct, 0, 300) ?? next.rush_pct;
   if (b.own_item_handling_cents != null) next.own_item_handling_cents = int(b.own_item_handling_cents, 0, 100000) ?? next.own_item_handling_cents;
   if (b.min_order_cents != null) next.min_order_cents = int(b.min_order_cents, 0, 1000000) ?? next.min_order_cents;
@@ -3051,6 +3100,7 @@ input.n{text-align:right}input:focus{outline:3px solid #F2B63D;outline-offset:1p
 <main>
 <p class="sub" style="font-size:16px">Everything the order page charges, on one screen. Change any number, then press <b>Save all prices</b> at the bottom. Changed cells turn yellow until saved. Nothing goes live until you save.</p>
 <div id="err" class="sub" style="color:var(--red);font-weight:700"></div>
+<label class="sub" style="display:flex;gap:10px;align-items:flex-start;font-size:16px;margin:4px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fff"><input type="checkbox" id="showprices" style="width:20px;height:20px;flex:none;margin-top:2px"><span><b>Show prices to customers on the website</b><br>Off: customers see no prices, they send a quote request with every detail, and you reply with your price. The shop iPad always shows prices. Press Save all prices after changing this.</span></label>
 
 <h2>Per piece, by artwork size</h2>
 <p class="sub">The work only, on wood (other materials multiply it, see below). Type into any cell, or fill a whole column from three numbers.</p>
@@ -3082,7 +3132,7 @@ function render(){
   $('#f-svc').innerHTML=B.services.map(s=>'<option value="'+s.key+'">'+esc(s.name)+'</option>').join('');
   $('#sizes').innerHTML='<tr><th>Artwork, longest side</th>'+B.services.map(s=>'<th>'+esc(s.name)+' ($)</th>').join('')+'</tr>'+B.sizes.map(z=>'<tr><td><b>'+z.inches+' in</b></td>'+B.services.map(s=>'<td><input class="n" type="number" step="0.25" min="0" data-size="'+z.inches+'" data-svc="'+s.key+'" value="'+d2(z[s.key+'_cents'])+'"></td>').join('')+'</tr>').join('');
   $('#services').innerHTML='<tr><th>Finish</th><th>Setup, once per order, new logo only ($)</th><th>Minutes per piece</th><th>Extra minutes per inch</th><th>Consumables per piece ($)</th></tr>'+B.services.map(s=>'<tr><td><b>'+esc(s.name)+'</b></td><td><input class="n" type="number" step="1" min="0" data-svc="'+s.key+'" data-f="setup_cents" value="'+d2(s.setup_cents)+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="min_per_piece" value="'+s.min_per_piece+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="per_inch" value="'+s.per_inch+'"></td><td><input class="n" type="number" step="0.05" min="0" data-svc="'+s.key+'" data-f="consumable_cents" value="'+d2(s.consumable_cents)+'"></td></tr>').join('');
-  $('#rush').value=B.rush_pct; $('#min').value=d2(B.min_order_cents); $('#textown').value=d2(B.text_only_own_cents||0);
+  $('#showprices').checked=B.show_prices!==false; $('#rush').value=B.rush_pct; $('#min').value=d2(B.min_order_cents); $('#textown').value=d2(B.text_only_own_cents||0);
   $('#cutdetail').innerHTML='<tr>'+(B.cut_detail||[]).map(d=>'<th>'+esc(d.name)+' cut, \u00d7</th>').join('')+'</tr><tr>'+(B.cut_detail||[]).map(d=>'<td><input class="n" type="number" step="0.1" min="0.25" data-cd="'+d.key+'" value="'+d.factor+'"></td>').join('')+'</tr>';
   $('#materials').innerHTML='<tr><th>Material</th><th>Factor</th><th>Offered</th></tr>'+B.materials.map(m=>'<tr><td><b>'+esc(m.name)+'</b></td><td><input class="n" type="number" step="0.05" min="0.1" data-mat="'+m.key+'" data-f="factor" value="'+m.factor+'"></td><td>'+B.services.map(s=>'<label class="chk"><input type="checkbox" data-mat="'+m.key+'" data-svc="'+s.key+'" '+(m.services.includes(s.key)?'checked':'')+'>'+esc(s.name)+'</label>').join('')+'</td></tr>').join('');
   $('#products').innerHTML='<tr><th>Item</th><th>Material</th><th>Customer pays ($)</th><th>Costs us ($)</th><th>Largest artwork (in)</th><th></th></tr>'+B.products.filter(p=>p.key!=='own').map(p=>prow(p)).join('')
@@ -3103,7 +3153,7 @@ function collect(){ const book={services:[],sizes:[],materials:[],products:[],qt
   document.querySelectorAll('#products tr[data-p]').forEach(tr=>{ const g=f=>tr.querySelector('[data-pf="'+f+'"]').value; book.products.push({key:tr.dataset.p,name:g('name'),material:g('material'),blank_cents:Math.round(+g('blank_cents')*100),cost_cents:Math.round(+g('cost_cents')*100),max_inches:+g('max_inches'),removed:!!tr.dataset.removed}); });
   book.products.push({key:'own'});
   document.querySelectorAll('#qty tr[data-q]').forEach(tr=>{ const mn=+tr.querySelector('[data-qf="min"]').value, off=+tr.querySelector('[data-qf="off_pct"]').value; if(mn>=1) book.qty_breaks.push({min:mn,off_pct:off}); });
-  book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); book.text_only_own_cents=Math.round(+$('#textown').value*100); book.cut_detail=[...document.querySelectorAll('input[data-cd]')].map(i=>({key:i.dataset.cd,factor:+i.value})); return book; }
+  book.show_prices=$('#showprices').checked; book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); book.text_only_own_cents=Math.round(+$('#textown').value*100); book.cut_detail=[...document.querySelectorAll('input[data-cd]')].map(i=>({key:i.dataset.cd,factor:+i.value})); return book; }
 $('#save').onclick=async()=>{ const b=$('#save'); b.disabled=true; $('#msg').textContent='Saving\\u2026'; $('#msg').className='msg';
   try{ const r=await fetch('/api/pricing/book/all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({book:collect(),note:'edited on the prices page'})}); const j=await r.json(); if(!j.ok) throw new Error(j.error||'Save failed'); B=j.book; render(); $('#msg').textContent='Saved. '+j.changed+' price'+(j.changed===1?'':'s')+' changed. The order page uses these now.'; $('#msg').className='msg ok'; }
   catch(e){ $('#msg').textContent=e.message; $('#msg').className='msg bad'; } b.disabled=false; };
