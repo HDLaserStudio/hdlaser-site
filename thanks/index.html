@@ -75,6 +75,11 @@ button[type=submit]:hover{background:var(--redd)}
 .btn{display:inline-block;background:var(--red);color:#fff;text-decoration:none;font-weight:700;padding:14px 24px;border-radius:999px;border:0;font:inherit;font-size:16px;cursor:pointer}
 .btn.ghost{background:transparent;border:2px solid var(--ink);color:var(--ink)}
 .btns{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px}
+.hubbar{background:var(--ink);color:#F3F4F6;font-size:15px;padding:10px 24px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.hubbar a{color:#F4B740;font-weight:700;text-decoration:none}
+.hubbar[hidden]{display:none}
+.hubback{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:16px 0 4px}
+.hubback .btn{font-size:18px;padding:16px 28px}
 .steps{list-style:none;padding:0;margin:0;display:grid;gap:10px}
 .steps li{display:flex;gap:12px;line-height:1.5}
 .steps li::before{content:"";flex:none;width:14px;height:14px;margin-top:6px;border-radius:7px;background:#F2B63D}
@@ -83,6 +88,7 @@ button[type=submit]:hover{background:var(--redd)}
 </style>
 </head>
 <body>
+<div class="hubbar" id="hubbar" hidden><span>Shop iPad</span><a href="/hub/">&#8592; Back to the hub</a></div>
 <header>
   <a class="brand" href="/" aria-label="HD Laser Studio home"><svg width="78" height="26" viewBox="220 115 1930 640" aria-hidden="true"><path fill="#C8372A" d="M510 125 L730 125 L636 371 L963 371 L1072 125 L2000 125 C2100 125 2160 210 2130 300 L2010 610 C1970 700 1880 742 1790 742 L1115 742 L1283 341 L1525 341 L1425 595 L1800 595 L1938 272 L1222 272 L1030 742 L808 742 L907 523 L572 523 L483 742 L232 742 Z"></path></svg><span>LASER STUDIO</span></a>
   <a class="call" href="tel:+18583739866">(858) 373-9866</a>
@@ -149,7 +155,7 @@ button[type=submit]:hover{background:var(--redd)}
     lead.textContent = qs.get('counter') === '1' ? 'Paid at the counter. Your proof is next; your receipt is on its way from Square.' : custom ? 'Payment received. Your proof is next, and your receipt from Square is on its way to your inbox.' : 'Payment received. Two quick things below and we’ll get your proof started. Your receipt from Square is on its way to your inbox.';
     document.getElementById('paid').hidden = false;
     if (qs.get('counter') === '1' && (window.HD_CONFIG || {}).WORKER_BASE) {
-      var pb = document.createElement('button'); pb.type = 'button'; pb.textContent = 'Print receipt on the Terminal'; pb.style.cssText = 'font:inherit;font-weight:700;padding:12px 22px;border-radius:999px;border:2px solid #15191E;background:#fff;cursor:pointer;margin:12px 0 0';
+      var pb = document.createElement('button'); pb.id = 'printrc'; pb.type = 'button'; pb.textContent = 'Print receipt on the Terminal'; pb.style.cssText = 'font:inherit;font-weight:700;padding:12px 22px;border-radius:999px;border:2px solid #15191E;background:#fff;cursor:pointer;margin:12px 0 0';
       pb.onclick = function(){ pb.disabled = true; pb.textContent = 'Printing\u2026'; fetch(HD_CONFIG.WORKER_BASE + '/order/terminal/receipt', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ref: ref }) }).then(function(r){ return r.json(); }).then(function(d){ pb.textContent = d && d.ok ? 'Sent to the Terminal' : ((d && d.error) || 'Could not print'); if (!(d && d.ok)) pb.disabled = false; }).catch(function(){ pb.textContent = 'Could not reach the shop server'; pb.disabled = false; }); };
       lead.insertAdjacentElement('afterend', pb);
     }
@@ -162,6 +168,19 @@ button[type=submit]:hover{background:var(--redd)}
     h1.textContent = 'Thanks. Order ' + ref + ' is in.';
     lead.textContent = 'We’ll confirm your order and email a digital proof within 1–2 business days. Send your logo whenever you’re ready.';
     document.getElementById('paid').hidden = false;
+  }
+  // the shop iPad: a counter sale lands here, so the staff get a way back to the hub, and after a Terminal sale it goes back by itself
+  var shop = qs.get('counter') === '1'; try { shop = shop || !!localStorage.getItem('hd_staff_token'); } catch (e) {}
+  if (shop) {
+    document.getElementById('hubbar').hidden = false;
+    var hb = document.createElement('div'); hb.className = 'hubback';
+    hb.innerHTML = '<a class="btn" href="/hub/">Back to the hub</a>' + (qs.get('counter') === '1' ? '<span id="hubcount" style="color:var(--muted)">Going back by itself in <b id="hubsec">30</b> s. <a href="#" id="hubstay">Stay here</a></span>' : '');
+    (document.getElementById('printrc') || lead).insertAdjacentElement('afterend', hb);
+    if (qs.get('counter') === '1') {
+      var left = 30, hubTimer = setInterval(function(){ left--; if (left <= 0) { clearInterval(hubTimer); location.href = '/hub/'; return; } document.getElementById('hubsec').textContent = left; }, 1000);
+      document.getElementById('hubstay').onclick = function(e){ e.preventDefault(); clearInterval(hubTimer); document.getElementById('hubcount').hidden = true; };
+      var pr = document.getElementById('printrc'); if (pr) pr.addEventListener('click', function(){ left = Math.max(left, 20); }); // give the receipt time to print
+    }
   }
   if (ref) {
     var subj = encodeURIComponent('Logo for order ' + ref), body = encodeURIComponent('Hi HD Laser, my logo for order ' + ref + ' is attached.\n\nBusiness name:\nPreferred placement or notes:\n');
