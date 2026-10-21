@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Order online: engraving, UV or DTF printing | HD Laser Studio</title>
+<title>Free quote: engraving, UV or DTF printing | HD Laser Studio</title>
 <meta name="description" content="Pick the item, then laser engraving, UV printing or a DTF transfer on your own garment. Set size and quantity and see a preview of your logo on it.">
 <link rel="canonical" href="https://hdlaser.net/order/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HD Laser Studio">
-<meta property="og:title" content="Order online: engraving, UV or DTF printing | HD Laser Studio">
+<meta property="og:title" content="Free quote: engraving, UV or DTF printing | HD Laser Studio">
 <meta property="og:description" content="Pick the item, then laser engraving, UV printing or a DTF transfer on your own garment. Set size and quantity and see a preview of your logo on it.">
 <meta property="og:url" content="https://hdlaser.net/order/">
 <meta property="og:image" content="https://hdlaser.net/assets/og-image.jpg">
@@ -141,7 +141,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
 </header>
 <main>
 <div>
-  <h1>Build your order.</h1>
+  <h1>Get your free quote.</h1>
   <p class="lead">Four quick choices and you&#8217;ll see your price and a preview of your logo on the item. Nothing is made until you approve a digital proof. <a href="/quote/">Rather talk it through? Ask for a quote.</a></p>
   <p class="err" id="loaderr" hidden></p>
 
@@ -664,7 +664,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   if (window.matchMedia('(max-width:960px)').matches) { var pv = $('#preview'); $('#s-product').insertAdjacentElement('afterend', pv); pv.style.marginBottom = '16px'; }
   // ---- boot
   function boot(b){ BOOK = b.book; TAX = b.tax_rate || 0; TAX_OWN = !!b.tax_own_items; $('#rushpct').textContent = BOOK.rush_pct;
-    QUOTE = !HUB && BOOK.show_prices === false; if (QUOTE) quoteMode();
+    QUOTE = !HUB && BOOK.show_prices === false; if (QUOTE) quoteMode(); else $('h1').textContent = 'Build your order.'; // the shop iPad, or prices switched back on
     var pre = qs.get('product'); if (pre && BOOK.products.some(function(p){return p.key===pre;})) { S.product = pre; var pp = BOOK.products.filter(function(p){return p.key===pre;})[0]; S.material = pp.material; S.own = pre==='own' || pre==='garment'; var pm = qs.get('material'); if (pre==='own' && pm && BOOK.materials.some(function(m){return m.key===pm;})) S.material = pm; }
     var svc = qs.get('service'); if (BOOK.services.some(function(x){return x.key===svc;})) S.service = svc;
     var pin = parseFloat(qs.get('inches')); if (pin >= 0.5 && pin <= BOOK.max_inches) S.inches = Math.round(pin*2)/2;
