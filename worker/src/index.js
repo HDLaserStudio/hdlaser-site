@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-21 v55"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-21 v56"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -1201,10 +1201,11 @@ async function staffRoutes(request, env, cors, path, url) {
     const pid = String(b.payment_id || "");
     const p = await env.DB.prepare(`SELECT payment_id FROM payments WHERE payment_id = ? AND status = 'COMPLETED'`).bind(pid).first();
     if (!p) return json({ error: "Unknown payment" }, 404, cors);
-    const body = { idempotency_key: `rcpt-${pid}-${Date.now()}`, action: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), type: "RECEIPT", receipt_options: { payment_id: pid, print_only: true } } };
+    // choose: the Terminal shows Square's receipt screen (print, email or text) and Square sends it; otherwise it just prints
+    const body = { idempotency_key: `rcpt-${pid}-${Date.now()}`, action: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), type: "RECEIPT", receipt_options: { payment_id: pid, print_only: !b.choose } } };
     const r = await squareFetch(env, "/v2/terminals/actions", { method: "POST", body: JSON.stringify(body) }); const d = await r.json().catch(() => ({}));
-    if (!r.ok) return json({ error: squareErr(d) || "The Terminal did not take the print job. Is it on?" }, 502, cors);
-    await staffLog(env, me.id, "receipt_printed", pid);
+    if (!r.ok) return json({ error: squareErr(d) || "The Terminal did not take the receipt. Is it on?" }, 502, cors);
+    await staffLog(env, me.id, b.choose ? "receipt_offered" : "receipt_printed", pid);
     return json({ ok: true, status: d.action && d.action.status }, 200, cors);
   }
 
@@ -2675,16 +2676,17 @@ async function terminalStatus(env, ref, id, cors) {
   const after = await env.DB.prepare(`SELECT status FROM orders WHERE ref = ?`).bind(ref).first();
   return json({ ok: true, status: d.checkout.status, cancel_reason: d.checkout.cancel_reason || null, order: after.status }, 200, { ...cors, "Cache-Control": "no-store" });
 }
-// Print the receipt for a paid counter order on the Terminal's own printer (a Terminal "RECEIPT" action).
+// Print the receipt for a paid counter order on the Terminal's own printer (a Terminal "RECEIPT" action). With choose, the
+// Terminal shows Square's receipt screen instead, so the customer can have it emailed or texted; Square sends it.
 async function terminalReceipt(request, env, cors) {
   let b; try { b = await request.json(); } catch { return json({ error: "Bad JSON" }, 400, cors); }
   if (!env.DB || !env.SQUARE_TERMINAL_DEVICE_ID) return json({ error: "Terminal not set up" }, 503, cors);
   const o = await env.DB.prepare(`SELECT ref, square_payment_id, paid_at FROM orders WHERE ref = ? AND terminal_checkout_id IS NOT NULL AND status = 'paid'`).bind(String(b.ref || "")).first();
   if (!o || !o.square_payment_id) return json({ error: "No paid counter order with that number" }, 404, cors);
   if (Date.now() - Date.parse(o.paid_at || 0) > 24 * 3600000) return json({ error: "Receipts print from the Terminal for 24 hours after payment; after that use Square's dashboard" }, 400, cors);
-  const body = { idempotency_key: `${o.ref}-r-${Date.now()}`, action: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), type: "RECEIPT", receipt_options: { payment_id: o.square_payment_id, print_only: true } } };
+  const body = { idempotency_key: `${o.ref}-r-${Date.now()}`, action: { device_id: String(env.SQUARE_TERMINAL_DEVICE_ID).replace(/^device:/, ""), type: "RECEIPT", receipt_options: { payment_id: o.square_payment_id, print_only: !b.choose } } };
   const r = await squareFetch(env, "/v2/terminals/actions", { method: "POST", body: JSON.stringify(body) }); const d = await r.json().catch(() => ({}));
-  if (!r.ok) return json({ error: squareErr(d) || "The Terminal did not take the print job" }, 502, cors);
+  if (!r.ok) return json({ error: squareErr(d) || "The Terminal did not take the receipt" }, 502, cors);
   return json({ ok: true, status: d.action && d.action.status }, 200, cors);
 }
 async function terminalCancel(request, env, cors) {

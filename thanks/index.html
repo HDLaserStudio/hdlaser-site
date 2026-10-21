@@ -158,6 +158,10 @@ button[type=submit]:hover{background:var(--redd)}
       var pb = document.createElement('button'); pb.id = 'printrc'; pb.type = 'button'; pb.textContent = 'Print receipt on the Terminal'; pb.style.cssText = 'font:inherit;font-weight:700;padding:12px 22px;border-radius:999px;border:2px solid #15191E;background:#fff;cursor:pointer;margin:12px 0 0';
       pb.onclick = function(){ pb.disabled = true; pb.textContent = 'Printing\u2026'; fetch(HD_CONFIG.WORKER_BASE + '/order/terminal/receipt', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ref: ref }) }).then(function(r){ return r.json(); }).then(function(d){ pb.textContent = d && d.ok ? 'Sent to the Terminal' : ((d && d.error) || 'Could not print'); if (!(d && d.ok)) pb.disabled = false; }).catch(function(){ pb.textContent = 'Could not reach the shop server'; pb.disabled = false; }); };
       lead.insertAdjacentElement('afterend', pb);
+      // email or text: the Terminal shows Square's receipt screen again; the customer types an email or a phone number and Square sends it
+      var eb = document.createElement('button'); eb.id = 'mailrc'; eb.type = 'button'; eb.textContent = 'Email or text receipt'; eb.style.cssText = pb.style.cssText + ';margin-left:10px';
+      eb.onclick = function(){ eb.disabled = true; eb.textContent = 'Sending\u2026'; fetch(HD_CONFIG.WORKER_BASE + '/order/terminal/receipt', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ref: ref, choose: true }) }).then(function(r){ return r.json(); }).then(function(d){ eb.textContent = d && d.ok ? 'On the Terminal: the customer picks email or text' : ((d && d.error) || 'Could not reach the Terminal'); if (!(d && d.ok)) eb.disabled = false; }).catch(function(){ eb.textContent = 'Could not reach the shop server'; eb.disabled = false; }); };
+      pb.insertAdjacentElement('afterend', eb);
     }
     if (window.hdTrack) hdTrack('paid_return', ref);
   } else if (qs.get('pay') === 'later') {
@@ -175,11 +179,11 @@ button[type=submit]:hover{background:var(--redd)}
     document.getElementById('hubbar').hidden = false;
     var hb = document.createElement('div'); hb.className = 'hubback';
     hb.innerHTML = '<a class="btn" href="/hub/">Back to the hub</a>' + (qs.get('counter') === '1' ? '<span id="hubcount" style="color:var(--muted)">Going back by itself in <b id="hubsec">30</b> s. <a href="#" id="hubstay">Stay here</a></span>' : '');
-    (document.getElementById('printrc') || lead).insertAdjacentElement('afterend', hb);
+    (document.getElementById('mailrc') || document.getElementById('printrc') || lead).insertAdjacentElement('afterend', hb);
     if (qs.get('counter') === '1') {
       var left = 30, hubTimer = setInterval(function(){ left--; if (left <= 0) { clearInterval(hubTimer); location.href = '/hub/'; return; } document.getElementById('hubsec').textContent = left; }, 1000);
       document.getElementById('hubstay').onclick = function(e){ e.preventDefault(); clearInterval(hubTimer); document.getElementById('hubcount').hidden = true; };
-      var pr = document.getElementById('printrc'); if (pr) pr.addEventListener('click', function(){ left = Math.max(left, 20); }); // give the receipt time to print
+      ['printrc', 'mailrc'].forEach(function(id){ var el = document.getElementById(id); if (el) el.addEventListener('click', function(){ left = Math.max(left, 20); }); }); // give the receipt time
     }
   }
   if (ref) {
