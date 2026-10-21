@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-19 v53"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-21 v54"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2803,21 +2803,26 @@ async function orderCheckout(request, env, cors) {
     // the customer saw no price: Hugh gets every detail plus what the price list would charge, and replies with his price
     const artLine = q.art === "text" ? `Text only: "${q.text || ""}"` : q.art === "file" ? `A logo we have on file: ${q.art_ref || "(they didn't say which)"}` : "A new logo or design";
     if (env.RESEND_API_KEY) {
-      await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `Quote request ${ref}: ${who}, list price ${$(total)}`, text:
-`Quote request ${ref} from hdlaser.net. The customer did not see a price.
+      const first = name.split(" ")[0] || "there";
+      // Two emails, because a reply carries the subject and usually the whole message underneath it: the private one has the
+      // price list and replies come back to the shop; the one Hugh answers goes to the customer and has no money in it at all.
+      await sendEmail(env, { to: env.SUPPORT_EMAIL, subject: `Price list for ${ref}, only for you: ${$(total)}`, text:
+`Only for you. Don't reply to this one or forward it to the customer.
+To answer ${name}, reply to the other email, "Quote request ${ref}". It has no prices in it.
+
+What your price list would charge for ${ref}:
+${breakdown}
+${logo ? "\nTheir logo (" + logo.name + ") is on the request in the dashboard.\n" : ""}
+When they say yes: charge it on the Terminal when they come in (hub, New order or Log a walk-in), or send them a Square invoice.
+Dashboard: ${env.WORKER_URL || ""}/admin` });
+      await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `Quote request ${ref}: ${who}`, text:
+`Quote request ${ref} from hdlaser.net. Reply with your price; your reply goes to ${first} (${email}).
 
 Customer: ${[name, c.business, email, c.phone].filter(Boolean).join(" · ")}
 ${q.summary}
 Artwork: ${artLine}
-Logo file: ${logo ? "attached to the request in the dashboard (" + logo.name + ")" : "not uploaded yet"}
-${neededBy ? "Needed by: " + neededBy + "\n" : ""}${q.rush ? "Rush: yes\n" : ""}${notes ? "Notes: " + notes + "\n" : ""}
-What your price list would charge (only you see this):
-${breakdown}
-
-Reply to this email with your price; the reply goes straight to the customer.
-When they say yes: charge it on the Terminal when they come in (hub, New order or Log a walk-in), or send them a Square invoice.
-Dashboard: ${env.WORKER_URL || ""}/admin` });
-      const first = name.split(" ")[0] || "there";
+Logo file: ${logo ? "came through with the request (" + logo.name + ")" : "not uploaded yet"}
+${neededBy ? "Needed by: " + neededBy + "\n" : ""}${q.rush ? "Rush: yes\n" : ""}${notes ? "Notes: " + notes + "\n" : ""}` });
       await sendEmail(env, { to: email, subject: `We've got your quote request ${ref}`, text:
 `Hi ${first},
 
