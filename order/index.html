@@ -334,20 +334,21 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     var flatText = S.art==='text' && (product.key==='own'||product.key==='garment') && service.key!=='dtf' && (BOOK.text_only_own_cents||0)>0 && qty>=(BOOK.text_only_own_min_qty||1) && S.inches<=(BOOK.text_only_own_max_inches||99);
     var det = service.key==='cut' ? ((BOOK.cut_detail||[]).filter(function(d){return d.key===S.detail;})[0] || (BOOK.cut_detail||[])[0] || {key:'simple',name:'Simple outline',factor:1}) : null;
     var flatWork = product.flat_work && product.flat_work[service.key]!=null ? product.flat_work[service.key] : null;
-    var workUnit = flatText ? BOOK.text_only_own_cents : flatWork!=null ? flatWork : r25(size[service.key+'_cents']*material.factor*(det?det.factor:1));
-    var brk = product.qty_off ? {off_pct:0} : (BOOK.qty_breaks.slice().sort(function(a,b){return b.min-a.min;}).filter(function(b){return qty>=b.min;})[0] || {off_pct:0});
+    var flatSame = !flatText && product.key==='own' && service.key==='engrave' && (BOOK.same_own_cents||0)>0 && qty>=(BOOK.same_own_min_qty||2) && S.inches<=(BOOK.same_own_max_inches||0); // same engraving on 2+ of their own items
+    var workUnit = flatText ? BOOK.text_only_own_cents : flatSame ? BOOK.same_own_cents : flatWork!=null ? flatWork : r25(size[service.key+'_cents']*material.factor*(det?det.factor:1));
+    var brk = product.qty_off || flatSame ? {off_pct:0} : (BOOK.qty_breaks.slice().sort(function(a,b){return b.min-a.min;}).filter(function(b){return qty>=b.min;})[0] || {off_pct:0});
     var flatOff = product.qty_off && qty>=product.qty_off.min ? Math.min(product.qty_off.cents, workUnit) : 0;
     var workAfter = flatOff ? workUnit-flatOff : r25(workUnit*(1-brk.off_pct/100));
-    var handling = product.key==='own' && !flatText ? BOOK.own_item_handling_cents : 0;
+    var handling = product.key==='own' && !flatText && !flatSame ? BOOK.own_item_handling_cents : 0;
     var prints = product.key==='garment' && S.sides==='both' ? 2 : 1;
     var work = workAfter*qty*prints, blank = (product.blank_cents||0)*qty, hand = handling*qty;
     var rush = S.rush ? r25(work*BOOK.rush_pct/100) : 0;
     var setup = S.art==='logo' ? service.setup_cents : 0;
     var subtotal = work+blank+hand+rush+setup; var top = Math.max(0, BOOK.min_order_cents-subtotal); subtotal += top;
-    var next = product.qty_off ? (qty<product.qty_off.min ? {min:product.qty_off.min, off_cents:product.qty_off.cents} : null) : (BOOK.qty_breaks.slice().sort(function(a,b){return a.min-b.min;}).filter(function(b){return b.min>qty;})[0] || null);
+    var next = flatSame ? null : product.qty_off ? (qty<product.qty_off.min ? {min:product.qty_off.min, off_cents:product.qty_off.cents} : null) : (BOOK.qty_breaks.slice().sort(function(a,b){return a.min-b.min;}).filter(function(b){return b.min>qty;})[0] || null);
     var over = product.max_qty && qty>product.max_qty ? product.max_qty : 0;
     var taxable = TAX_OWN || (product.key!=='own' && product.key!=='garment');
-    return { product:product, material:material, service:service, qty:qty, prints:prints, sides:product.key==='garment'?S.sides:null, workUnit:workUnit, workAfter:workAfter, off:brk.off_pct, flatOff:flatOff, over:over, work:work, blank:blank, blankUnit:product.blank_cents||0, hand:hand, handUnit:handling, rush:rush, setup:setup, art:S.art, flatText:flatText, detail:det, top:top, subtotal:subtotal, taxable:taxable, tax:taxable?Math.round(subtotal*TAX):0, next:next };
+    return { product:product, material:material, service:service, qty:qty, prints:prints, sides:product.key==='garment'?S.sides:null, workUnit:workUnit, workAfter:workAfter, off:brk.off_pct, flatOff:flatOff, over:over, work:work, blank:blank, blankUnit:product.blank_cents||0, hand:hand, handUnit:handling, rush:rush, setup:setup, art:S.art, flatText:flatText, flatSame:flatSame, detail:det, top:top, subtotal:subtotal, taxable:taxable, tax:taxable?Math.round(subtotal*TAX):0, next:next };
   }
   function unitFor(productKey, matKey, svcKey, inches){ var p=BOOK.products.filter(function(x){return x.key===productKey;})[0], m=BOOK.materials.filter(function(x){return x.key===(p.material||matKey);})[0], s=BOOK.sizes.filter(function(x){return x.inches===inches;})[0]; if(!p||!m||!s) return null; return r25(s[svcKey+'_cents']*m.factor); }
 
@@ -403,7 +404,8 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     var r = $('#size'); r.max = max; if (S.inches>max) S.inches = max; r.value = S.inches; $('#inches').textContent = S.inches;
     var q = quote(); var m = p ? BOOK.materials.filter(function(x){return x.key===(p.material||S.material);})[0] : null;
     if (q && q.flatText) { var tmx = BOOK.text_only_own_max_inches||99; $('#ppu').textContent = money(q.workUnit)+' per piece'; $('#nudge').innerHTML = 'Text only up to '+tmx+' in on '+(BOOK.text_only_own_min_qty||1)+' or more of your own items is one flat price. Bigger than '+tmx+' in, each piece is priced by size.'; }
-    else if (q) { $('#ppu').textContent = money(q.workUnit)+' per piece for the work'; var tq = BOOK.text_only_own_min_qty||1; var textTip = S.art==='text' && (S.product==='own'||S.product==='garment') && S.service!=='dtf' && S.qty<tq && S.inches<=(BOOK.text_only_own_max_inches||99) && (BOOK.text_only_own_cents||0)>0 ? ' Bringing '+tq+' or more items with text only? It\u2019s '+money(BOOK.text_only_own_cents)+' each up to '+(BOOK.text_only_own_max_inches||99)+' in.' : ''; var up = S.inches+0.5<=max ? unitFor(S.product, S.material, S.service, S.inches+0.5) : null; $('#nudge').innerHTML = (up!=null ? 'Half an inch bigger is <b>'+money(up-q.workUnit)+' more</b> per piece. Bigger reads better from across the room.' : 'That is as big as this item takes. Need larger? <a href="/quote/">Ask for a quote.</a>') + textTip; }
+    else if (q && q.flatSame) { var smx = BOOK.same_own_max_inches||0; $('#ppu').textContent = money(q.workUnit)+' per piece'; $('#nudge').innerHTML = 'The same engraving up to '+smx+' in on '+(BOOK.same_own_min_qty||2)+' or more of your own items is one flat price. Bigger than '+smx+' in, each piece is priced by size.'; }
+    else if (q) { $('#ppu').textContent = money(q.workUnit)+' per piece for the work'; var tq = BOOK.text_only_own_min_qty||1; var textTip = S.art==='text' && (S.product==='own'||S.product==='garment') && S.service!=='dtf' && S.qty<tq && S.inches<=(BOOK.text_only_own_max_inches||99) && (BOOK.text_only_own_cents||0)>0 ? ' Bringing '+tq+' or more items with text only? It\u2019s '+money(BOOK.text_only_own_cents)+' each up to '+(BOOK.text_only_own_max_inches||99)+' in.' : ''; var sq = BOOK.same_own_min_qty||2; if (!textTip && S.product==='own' && S.service==='engrave' && S.qty<sq && S.inches<=(BOOK.same_own_max_inches||0) && (BOOK.same_own_cents||0)>0) textTip = ' Bringing '+sq+' or more with the same engraving? It\u2019s '+money(BOOK.same_own_cents)+' each up to '+BOOK.same_own_max_inches+' in.'; var up = S.inches+0.5<=max ? unitFor(S.product, S.material, S.service, S.inches+0.5) : null; $('#nudge').innerHTML = (up!=null ? 'Half an inch bigger is <b>'+money(up-q.workUnit)+' more</b> per piece. Bigger reads better from across the room.' : 'That is as big as this item takes. Need larger? <a href="/quote/">Ask for a quote.</a>') + textTip; }
     else { $('#ppu').textContent = ''; $('#nudge').textContent = p && m && !S.service ? 'Pick engraving or printing to see the price.' : ''; }
   }
   function renderQtyMath(){ // step 4: price per piece times how many, so the quantity's effect is plain
@@ -498,7 +500,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     }
     $('#ovnote').textContent = '';
     if (!q) { dl.innerHTML = '<div><dt>Pick the item, the finish and the size.</dt><dd></dd></div>'; $('#bartot').textContent = '$0'; $('#pay').textContent = 'Pay securely'; return; }
-    var rows = [['<b>'+(q.qty*q.prints)+' × '+esc(lcName(q.service.name))+'</b>, '+(q.flatText ? 'text only, flat price' : S.inches+' in')+(q.detail ? ', '+esc(q.detail.name.toLowerCase()) : '')+(q.sides ? ', '+(q.sides==='both'?'front and back':q.sides) : '')+(q.off?' <small>('+q.off+'% off)</small>':q.flatOff?' <small>('+money(q.flatOff)+' off each)</small>':''), money(q.work)]];
+    var rows = [['<b>'+(q.qty*q.prints)+' × '+esc(lcName(q.service.name))+'</b>, '+(q.flatText ? 'text only, flat price' : q.flatSame ? S.inches+' in, same engraving, flat price' : S.inches+' in')+(q.detail ? ', '+esc(q.detail.name.toLowerCase()) : '')+(q.sides ? ', '+(q.sides==='both'?'front and back':q.sides) : '')+(q.off?' <small>('+q.off+'% off)</small>':q.flatOff?' <small>('+money(q.flatOff)+' off each)</small>':''), money(q.work)]];
     if (q.blankUnit) rows.push([q.qty+' × '+esc(q.product.name), money(q.blank)]);
     if (q.handUnit) rows.push([q.qty+' × handling your own item', money(q.hand)]);
     if (q.art==='logo') { if (q.setup) rows.push(['Logo digitizing and setup <small>(one time)</small>', money(q.setup)]); } else rows.push(['Setup', 'none <small>('+(q.art==='text'?'text only':'logo on file')+')</small>']);

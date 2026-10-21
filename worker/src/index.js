@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-21 v54"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-21 v55"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2497,6 +2497,13 @@ const DEFAULT_BOOK = {
   // Hugh, Oct 3 2026: one big item was $199 but two dropped to $50 total. The $25 is for small text only; above this size
   // every item is priced by size, so a second item never costs less than the first.
   text_only_own_max_inches: 2,
+  // Hugh, Oct 21 2026: "when they bring multiple items with same engraving this is the price": $25 each, plus the one-time
+  // logo digitizing and setup for a new logo (his quote: 13 of a customer's Yetis, $25 x 13 + $50 = $375). Laser engraving on
+  // the customer's own items, any artwork, no handling and no quantity break on top. Up to this size; bigger engravings stay on
+  // the size list (12 in is $199 in his saved book). Text only up to text_only_own_max_inches keeps its own rule above.
+  same_own_cents: 2500,
+  same_own_min_qty: 2,
+  same_own_max_inches: 3,
 };
 function ladderPrices(l, steps) { const out = []; let p = l.start_cents, climbs = 0; const flat = Math.round((l.flat_to_inches || 0) * 2); for (let i = 0; i < steps; i++) { out.push(Math.round(p / 25) * 25); if (i + 1 >= flat) { p += l.first_gap_cents + climbs * l.gap_growth_cents; climbs++; } } return out; }
 function buildSizes(book) { const n = Math.round(book.max_inches / 0.5); const cols = Object.fromEntries(Object.entries(book.ladders).map(([k, l]) => [k, ladderPrices(l, n)])); return Array.from({ length: n }, (_, i) => { const row = { inches: (i + 1) / 2 }; for (const k of Object.keys(cols)) row[k + "_cents"] = cols[k][i]; return row; }); }
@@ -2555,20 +2562,21 @@ function quoteSpec(book, spec, opts) {
   const flatText = art === "text" && OWN_ITEM_KEYS.includes(product.key) && service.key !== "dtf" && book.text_only_own_cents > 0 && qty >= (book.text_only_own_min_qty || 1) && inches <= (book.text_only_own_max_inches || 99); // plain small text on 2+ of their own items: one flat price; any size
   const detail = service.key === "cut" ? ((book.cut_detail || []).find((d) => d.key === String(spec.detail)) || (book.cut_detail || [])[0] || { key: "simple", name: "Simple outline", factor: 1 }) : null;
   const flatWork = product.flat_work && product.flat_work[service.key] != null ? product.flat_work[service.key] : null; // items with one work price whatever the artwork size
-  const workUnit = flatText ? book.text_only_own_cents : flatWork != null ? flatWork : r25(size[service.key + "_cents"] * material.factor * (detail ? detail.factor : 1));
-  const brk = product.qty_off ? { off_pct: 0 } : ([...book.qty_breaks].sort((a, b) => b.min - a.min).find((b) => qty >= b.min) || { off_pct: 0 });
+  const flatSame = !flatText && product.key === "own" && service.key === "engrave" && book.same_own_cents > 0 && qty >= (book.same_own_min_qty || 2) && inches <= (book.same_own_max_inches || 0); // the same engraving on 2+ of their own items: one flat price each
+  const workUnit = flatText ? book.text_only_own_cents : flatSame ? book.same_own_cents : flatWork != null ? flatWork : r25(size[service.key + "_cents"] * material.factor * (detail ? detail.factor : 1));
+  const brk = product.qty_off || flatSame ? { off_pct: 0 } : ([...book.qty_breaks].sort((a, b) => b.min - a.min).find((b) => qty >= b.min) || { off_pct: 0 });
   const flatOff = product.qty_off && qty >= product.qty_off.min ? Math.min(product.qty_off.cents, workUnit) : 0; // a fixed amount off each piece instead of a percentage
   const workUnitAfter = flatOff ? workUnit - flatOff : r25(workUnit * (1 - brk.off_pct / 100));
-  const handlingUnit = product.key === "own" && !flatText ? book.own_item_handling_cents : 0;
+  const handlingUnit = product.key === "own" && !flatText && !flatSame ? book.own_item_handling_cents : 0;
   const blankUnit = product.blank_cents || 0;
   const work = workUnitAfter * qty * prints, blank = blankUnit * qty, handling = handlingUnit * qty;
   const rushCents = rush ? r25(work * book.rush_pct / 100) : 0;
   const setup = art === "logo" ? service.setup_cents : 0;
   let subtotal = work + blank + handling + rushCents + setup;
   const minimumTopUp = Math.max(0, book.min_order_cents - subtotal); subtotal += minimumTopUp;
-  const nextBreak = product.qty_off ? (qty < product.qty_off.min ? { min: product.qty_off.min, off_cents: product.qty_off.cents } : null) : [...book.qty_breaks].sort((a, b) => a.min - b.min).find((b) => b.min > qty);
+  const nextBreak = flatSame ? null : product.qty_off ? (qty < product.qty_off.min ? { min: product.qty_off.min, off_cents: product.qty_off.cents } : null) : [...book.qty_breaks].sort((a, b) => a.min - b.min).find((b) => b.min > qty);
   const taxable = !OWN_ITEM_KEYS.includes(product.key); // no sales tax when the customer brings the item; we only sell the work
-  return { product, material, service, inches, qty, rush, sides, prints, taxable, art, text, art_ref: artRef, flat_text: flatText, detail: detail ? detail.key : null, detail_name: detail ? detail.name : null, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_off_cents: flatOff, discount_cents: (workUnit - workUnitAfter) * qty,
+  return { product, material, service, inches, qty, rush, sides, prints, taxable, art, text, art_ref: artRef, flat_text: flatText, flat_same: flatSame, detail: detail ? detail.key : null, detail_name: detail ? detail.name : null, work_unit_cents: workUnit, work_unit_after_cents: workUnitAfter, discount_pct: brk.off_pct, discount_off_cents: flatOff, discount_cents: (workUnit - workUnitAfter) * qty,
     blank_unit_cents: blankUnit, handling_unit_cents: handlingUnit, work_cents: work, blank_cents: blank, handling_cents: handling, rush_cents: rushCents, setup_cents: setup, minimum_top_up_cents: minimumTopUp, subtotal_cents: subtotal,
     next_break: nextBreak ? { min: nextBreak.min, off_pct: nextBreak.off_pct, off_cents: nextBreak.off_cents } : null,
     summary: `${qty} × ${lcName(service.name)}, ${inches} in on ${product.key === "own" ? "customer's own " + material.name.toLowerCase() + " item" : product.key === "garment" ? "customer's own garment" : product.name.toLowerCase()}${sides ? ", " + (sides === "both" ? "front and back" : sides) : ""}${detail ? ", " + detail.name.toLowerCase() : ""}${rush ? ", rush" : ""}${art === "text" ? ", text: \u201c" + text + "\u201d" : art === "file" ? ", logo on file (" + artRef + ")" : ""}` };
@@ -3071,6 +3079,8 @@ async function saveWholeBook(env, body) {
   if (b.own_item_handling_cents != null) next.own_item_handling_cents = int(b.own_item_handling_cents, 0, 100000) ?? next.own_item_handling_cents;
   if (b.min_order_cents != null) next.min_order_cents = int(b.min_order_cents, 0, 1000000) ?? next.min_order_cents;
   if (b.text_only_own_cents != null) next.text_only_own_cents = int(b.text_only_own_cents, 0, 1000000) ?? next.text_only_own_cents;
+  if (b.same_own_cents != null) next.same_own_cents = int(b.same_own_cents, 0, 1000000) ?? next.same_own_cents;
+  if (b.same_own_max_inches != null) { const mi = Number(b.same_own_max_inches); if (Number.isFinite(mi) && mi >= 0 && mi <= 28) next.same_own_max_inches = Math.round(mi * 2) / 2; else errors.push("Same engraving: up to (in)"); }
   for (const d of next.cut_detail || []) { const src = (b.cut_detail || []).find((x) => x.key === d.key); if (!src) continue; const f = Number(src.factor); if (Number.isFinite(f) && f >= 0.25 && f <= 10) d.factor = f; else errors.push(`${d.name}: factor`); }
   if (errors.length) return { ok: false, error: "Check these: " + errors.join(", ") };
   // history: one row per changed price
@@ -3114,7 +3124,7 @@ input.n{text-align:right}input:focus{outline:3px solid #F2B63D;outline-offset:1p
 
 <h2>Setup, rush, minimum</h2>
 <div class="card"><table id="services"></table><p class="small" style="margin:8px 0 0">Minutes and consumables are what a piece costs us; they feed the margin check, not the customer price.</p>
-<table style="margin-top:10px"><tr><th>Rush, % added to the work</th><th>Shop minimum per order ($)</th><th>Text only on their own item, flat per piece ($)</th></tr><tr><td><input class="n" type="number" id="rush" step="5" min="0"></td><td><input class="n" type="number" id="min" step="1" min="0"></td><td><input class="n" type="number" id="textown" step="1" min="0"></td></tr></table><table style="margin-top:10px" id="cutdetail"></table><p class="small">Laser cutting: the size column is the price of a simple outline cut by the longest side of the piece (the bed is 15 \u00d7 28 in). Detailed and intricate cuts multiply it by these factors.</p><p class="small">Text only on a customer's own item (engraving or UV, any size) is this one price per piece: no setup, no handling. Set it to 0 to price text by size like everything else.</p></div>
+<table style="margin-top:10px"><tr><th>Rush, % added to the work</th><th>Shop minimum per order ($)</th><th>Text only on their own item, flat per piece ($)</th></tr><tr><td><input class="n" type="number" id="rush" step="5" min="0"></td><td><input class="n" type="number" id="min" step="1" min="0"></td><td><input class="n" type="number" id="textown" step="1" min="0"></td></tr></table><table style="margin-top:10px"><tr><th>Same engraving on 2 or more of their own items, flat per piece ($)</th><th>Up to this size (in)</th></tr><tr><td><input class="n" type="number" id="sameown" step="1" min="0"></td><td><input class="n" type="number" id="samemax" step="0.5" min="0" max="28"></td></tr></table><table style="margin-top:10px" id="cutdetail"></table><p class="small">Laser cutting: the size column is the price of a simple outline cut by the longest side of the piece (the bed is 15 \u00d7 28 in). Detailed and intricate cuts multiply it by these factors.</p><p class="small">Text only on a customer's own item (engraving or UV, any size) is this one price per piece: no setup, no handling. Set it to 0 to price text by size like everything else.</p><p class="small">The same engraving (a logo or text) on 2 or more of the customer's own items, up to the size you set, is the flat price per piece: no handling, no quantity discount on top. A new logo still adds its one-time setup. Bigger engravings are priced by size. Set it to 0 to turn it off.</p></div>
 
 <h2>Materials</h2>
 <p class="sub">The work price is multiplied by the factor. Tick which finishes we offer on each.</p>
@@ -3137,7 +3147,7 @@ function render(){
   $('#f-svc').innerHTML=B.services.map(s=>'<option value="'+s.key+'">'+esc(s.name)+'</option>').join('');
   $('#sizes').innerHTML='<tr><th>Artwork, longest side</th>'+B.services.map(s=>'<th>'+esc(s.name)+' ($)</th>').join('')+'</tr>'+B.sizes.map(z=>'<tr><td><b>'+z.inches+' in</b></td>'+B.services.map(s=>'<td><input class="n" type="number" step="0.25" min="0" data-size="'+z.inches+'" data-svc="'+s.key+'" value="'+d2(z[s.key+'_cents'])+'"></td>').join('')+'</tr>').join('');
   $('#services').innerHTML='<tr><th>Finish</th><th>Setup, once per order, new logo only ($)</th><th>Minutes per piece</th><th>Extra minutes per inch</th><th>Consumables per piece ($)</th></tr>'+B.services.map(s=>'<tr><td><b>'+esc(s.name)+'</b></td><td><input class="n" type="number" step="1" min="0" data-svc="'+s.key+'" data-f="setup_cents" value="'+d2(s.setup_cents)+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="min_per_piece" value="'+s.min_per_piece+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="per_inch" value="'+s.per_inch+'"></td><td><input class="n" type="number" step="0.05" min="0" data-svc="'+s.key+'" data-f="consumable_cents" value="'+d2(s.consumable_cents)+'"></td></tr>').join('');
-  $('#showprices').checked=B.show_prices!==false; $('#rush').value=B.rush_pct; $('#min').value=d2(B.min_order_cents); $('#textown').value=d2(B.text_only_own_cents||0);
+  $('#showprices').checked=B.show_prices!==false; $('#rush').value=B.rush_pct; $('#min').value=d2(B.min_order_cents); $('#textown').value=d2(B.text_only_own_cents||0); $('#sameown').value=d2(B.same_own_cents||0); $('#samemax').value=B.same_own_max_inches||0;
   $('#cutdetail').innerHTML='<tr>'+(B.cut_detail||[]).map(d=>'<th>'+esc(d.name)+' cut, \u00d7</th>').join('')+'</tr><tr>'+(B.cut_detail||[]).map(d=>'<td><input class="n" type="number" step="0.1" min="0.25" data-cd="'+d.key+'" value="'+d.factor+'"></td>').join('')+'</tr>';
   $('#materials').innerHTML='<tr><th>Material</th><th>Factor</th><th>Offered</th></tr>'+B.materials.map(m=>'<tr><td><b>'+esc(m.name)+'</b></td><td><input class="n" type="number" step="0.05" min="0.1" data-mat="'+m.key+'" data-f="factor" value="'+m.factor+'"></td><td>'+B.services.map(s=>'<label class="chk"><input type="checkbox" data-mat="'+m.key+'" data-svc="'+s.key+'" '+(m.services.includes(s.key)?'checked':'')+'>'+esc(s.name)+'</label>').join('')+'</td></tr>').join('');
   $('#products').innerHTML='<tr><th>Item</th><th>Material</th><th>Customer pays ($)</th><th>Costs us ($)</th><th>Largest artwork (in)</th><th></th></tr>'+B.products.filter(p=>p.key!=='own').map(p=>prow(p)).join('')
@@ -3158,7 +3168,7 @@ function collect(){ const book={services:[],sizes:[],materials:[],products:[],qt
   document.querySelectorAll('#products tr[data-p]').forEach(tr=>{ const g=f=>tr.querySelector('[data-pf="'+f+'"]').value; book.products.push({key:tr.dataset.p,name:g('name'),material:g('material'),blank_cents:Math.round(+g('blank_cents')*100),cost_cents:Math.round(+g('cost_cents')*100),max_inches:+g('max_inches'),removed:!!tr.dataset.removed}); });
   book.products.push({key:'own'});
   document.querySelectorAll('#qty tr[data-q]').forEach(tr=>{ const mn=+tr.querySelector('[data-qf="min"]').value, off=+tr.querySelector('[data-qf="off_pct"]').value; if(mn>=1) book.qty_breaks.push({min:mn,off_pct:off}); });
-  book.show_prices=$('#showprices').checked; book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); book.text_only_own_cents=Math.round(+$('#textown').value*100); book.cut_detail=[...document.querySelectorAll('input[data-cd]')].map(i=>({key:i.dataset.cd,factor:+i.value})); return book; }
+  book.show_prices=$('#showprices').checked; book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); book.text_only_own_cents=Math.round(+$('#textown').value*100); book.same_own_cents=Math.round(+$('#sameown').value*100); book.same_own_max_inches=+$('#samemax').value; book.cut_detail=[...document.querySelectorAll('input[data-cd]')].map(i=>({key:i.dataset.cd,factor:+i.value})); return book; }
 $('#save').onclick=async()=>{ const b=$('#save'); b.disabled=true; $('#msg').textContent='Saving\\u2026'; $('#msg').className='msg';
   try{ const r=await fetch('/api/pricing/book/all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({book:collect(),note:'edited on the prices page'})}); const j=await r.json(); if(!j.ok) throw new Error(j.error||'Save failed'); B=j.book; render(); $('#msg').textContent='Saved. '+j.changed+' price'+(j.changed===1?'':'s')+' changed. The order page uses these now.'; $('#msg').className='msg ok'; }
   catch(e){ $('#msg').textContent=e.message; $('#msg').className='msg bad'; } b.disabled=false; };
