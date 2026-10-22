@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-21 v56"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-22 v57"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -355,7 +355,8 @@ function channelOf(src) {
   return "Other site: " + ref;
 }
 const HEARD = ["Google search", "Google Maps", "Apple Maps", "Instagram", "Facebook", "Yelp", "A friend or family", "Walked or drove by", "I've ordered before", "Saw your work somewhere", "Flyer or card", "Email or text from you", "Other"];
-function cleanHeard(v) { const h = String(v || "").trim(); return HEARD.includes(h) ? h : null; }
+// "Other" can carry what they typed (Hugh, Oct 22: people say ChatGPT, Reddit…), saved as "Other: ChatGPT"
+function cleanHeard(v) { const h = String(v || "").trim(); if (HEARD.includes(h)) return h; const m = /^Other:\s*([\s\S]*)$/i.exec(h); if (!m) return null; const t = m[1].replace(/[\u0000-\u001f<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60); return t ? "Other: " + t : "Other"; }
 
 // ---------------------------------------------------------------- events + resale
 async function recordEvent(request, env, cors) {

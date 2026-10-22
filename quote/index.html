@@ -159,7 +159,7 @@ button[type=submit]:hover{background:var(--redd)}
         <div class="f"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div>
         <div class="f"><label for="phone">Phone</label><input id="phone" name="Phone" type="tel" autocomplete="tel" required></div>
       </div>
-      <div class="f" style="margin-top:14px;max-width:360px"><label for="heard">How did you find us? <small>(optional)</small></label><select id="heard" name="How did you find us"><option value="">Pick one</option><option>Google search</option><option>Google Maps</option><option>Apple Maps</option><option>Instagram</option><option>Facebook</option><option>Yelp</option><option>A friend or family</option><option>Walked or drove by</option><option>I've ordered before</option><option>Saw your work somewhere</option><option>Flyer or card</option><option>Email or text from you</option><option>Other</option></select></div>
+      <div class="f" style="margin-top:14px;max-width:360px"><label for="heard">How did you find us? <small>(optional)</small></label><select id="heard" name="How did you find us"><option value="">Pick one</option><option>Google search</option><option>Google Maps</option><option>Apple Maps</option><option>Instagram</option><option>Facebook</option><option>Yelp</option><option>A friend or family</option><option>Walked or drove by</option><option>I've ordered before</option><option>Saw your work somewhere</option><option>Flyer or card</option><option>Email or text from you</option><option>Other</option></select><input type="text" id="heardother" name="Where they found us" maxlength="60" autocomplete="off" placeholder="Where? For example ChatGPT, Reddit, a podcast" aria-label="Where did you find us?" style="display:none;margin-top:8px"></div>
     </fieldset>
 
     <fieldset>
@@ -245,10 +245,13 @@ button[type=submit]:hover{background:var(--redd)}
       if (d && d.url) { if (window.hdTrack) hdTrack('payment_started', ref); location.href = d.url; } else { location.href = '/thanks/?ref=' + ref + '&pay=later&err=' + encodeURIComponent((d && d._status) + ' ' + ((d && d.error) || 'no url')); }
     }).catch(function (e) { location.href = '/thanks/?ref=' + ref + '&pay=later&err=' + encodeURIComponent('network ' + (e && e.message || '')); });
   }
+  var hsel = document.getElementById('heard'), hother = document.getElementById('heardother'); // Other: type where (ChatGPT, Reddit…)
+  if (hsel && hother) hsel.addEventListener('change', function () { var o = hsel.value === 'Other'; hother.style.display = o ? 'block' : 'none'; if (o) hother.focus(); });
   form.addEventListener('submit', function (e) {
     if (form.dataset.native) return;            // second pass: plain submit as a fallback
     e.preventDefault(); errBox.hidden = true; btn.disabled = true; btn.textContent = 'Sending…';
     var fd = new FormData(form), obj = {}; fd.forEach(function (v, k) { obj[k] = v; }); if (window.hdSource) obj._src = hdSource();
+    var wh = String(obj['Where they found us'] || '').trim(); delete obj['Where they found us']; if (obj['How did you find us'] === 'Other' && wh) obj['How did you find us'] = 'Other: ' + wh.slice(0, 60); // Other: what they typed
     var viaWorker = CFG.SUBMIT_ENDPOINT ? fetch(CFG.SUBMIT_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) })
       .then(function (r) { if (r.status >= 500) throw new Error('fallback'); return r.json().then(function (d) { if (!r.ok || !d.ok) throw Object.assign(new Error(d.error || 'submit'), { shown: !!d.error }); return d; }); })
       : Promise.reject(new Error('fallback'));
