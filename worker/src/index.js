@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-26 v58"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-26 v59"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS plaid_items (item_id TEXT PRIMARY KEY, access_token T
 CREATE TABLE IF NOT EXISTS coffee_orders (ref TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, name TEXT, phone TEXT, email TEXT, items TEXT, summary TEXT, total_cents INTEGER, pickup TEXT, note TEXT, text_consent INTEGER DEFAULT 0, square_order_id TEXT, square_payment_id TEXT, paid_at TEXT, paid_cents INTEGER DEFAULT 0, tip_cents INTEGER DEFAULT 0, notified_at TEXT, ready_at TEXT, picked_up_at TEXT);
 CREATE INDEX IF NOT EXISTS coffee_created ON coffee_orders(created_at);`;
 // Columns added after the first release. Each ALTER is tried once and ignored if the column already exists.
-const ALTERS = ["ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT", "ALTER TABLE jobs ADD COLUMN email TEXT"];
+const ALTERS = ["ALTER TABLE orders ADD COLUMN done_on_pay INTEGER", "ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT", "ALTER TABLE jobs ADD COLUMN email TEXT"];
 
 let migrated = false;
 async function ensureSchema(env) {
@@ -613,8 +613,19 @@ async function upsertPayment(env, p) {
   if (ref && p.status === "COMPLETED") {
     await env.DB.prepare(`UPDATE orders SET status = CASE WHEN ? >= total_cents AND ? > 0 THEN 'refunded' ELSE 'paid' END, square_payment_id = ?, paid_at = COALESCE(paid_at, ?), paid_cents = ?, fee_cents = ?, refunded_cents = ?, tip_cents = ? WHERE ref = ?`)
       .bind(refunded, refunded, p.id, p.created_at || new Date().toISOString(), amount, fee, refunded, money(p.tip_money), ref).run();
-    await notifyPaid(env, ref);
+    await doneOnPayment(env, ref); await notifyPaid(env, ref);
   }
+}
+
+// Hugh, Oct 26: "when i get the payment from the customer that means work is done". A sale paid on the Terminal comes off the
+// work queue as done and goes into the work log, credited to whoever took it, just like a tap on Done. The counter page has
+// "The work is done" ticked; it is unticked for a customer who pays now and picks up later, and that sale stays in the queue.
+async function doneOnPayment(env, ref) {
+  const o = await env.DB.prepare(`SELECT ref, taken_by_id FROM orders WHERE ref = ? AND status = 'paid' AND done_on_pay = 1 AND completed_at IS NULL`).bind(ref).first().catch(() => null);
+  if (!o) return;
+  await env.DB.prepare(`UPDATE orders SET completed_at = ? WHERE ref = ? AND completed_at IS NULL`).bind(new Date().toISOString(), ref).run();
+  const owner = o.taken_by_id ? null : await env.DB.prepare(`SELECT id FROM staff WHERE role = 'owner' AND active = 1 ORDER BY id LIMIT 1`).first();
+  await orderJob(env, ref, o.taken_by_id || (owner && owner.id) || null);
 }
 
 async function notifyPaid(env, ref) {
@@ -655,6 +666,24 @@ async function notifyPaidCustom(env, o) {
   let spec = {}; try { spec = JSON.parse(o.spec || "{}"); } catch {}
   const total = "$" + (o.paid_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 });
   const first = (o.name || "").split(" ")[0] || "there";
+  if (o.completed_at) { // paid at pickup: the work is done, so no proof or "what happens next"
+    await sendEmail(env, { to: o.email, subject: `Thank you! Order ${o.ref} is paid`, text:
+`Hi ${first},
+
+Payment received, ${total}. Thank you for coming in.
+
+Your order (${o.ref}): ${spec.summary || ""}
+
+We hope you love it. If anything isn't right, reply to this email or call or text (858) 373-9866.
+
+HD Laser Studio
+759 Turquoise St, Pacific Beach
+(858) 373-9866 · hdlaser.net` });
+    await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o.email || undefined, subject: `PAID ${total}: ${o.business || o.name} (${o.ref})`, text: `Order ${o.ref} is paid and marked done (paid at pickup, so it came off the work queue).\n\nCustomer: ${[o.name, o.business, o.email, o.phone].filter(Boolean).join(" · ")}\n${spec.summary || ""}\n\nDashboard: ${env.WORKER_URL || ""}/admin` });
+    await sendAlert(env, `PAID ${total} by ${o.business || o.name} (${o.ref}): ${spec.summary || "custom order"}. Done, off the queue.`);
+    await env.DB.prepare(`UPDATE orders SET notified_paid_at = ? WHERE ref = ?`).bind(new Date().toISOString(), o.ref).run();
+    return;
+  }
   await sendEmail(env, { to: o.email, subject: `Paid. Order ${o.ref} is confirmed`, text:
 `Hi ${first},
 
@@ -2680,7 +2709,7 @@ async function terminalUpdate(env, ck) {
       if (r.ok && d.payment) { if (d.payment.order_id && !(await env.DB.prepare(`SELECT 1 FROM orders WHERE square_order_id = ?`).bind(d.payment.order_id).first())) await env.DB.prepare(`UPDATE orders SET square_order_id = ? WHERE ref = ?`).bind(d.payment.order_id, o.ref).run(); await upsertPayment(env, d.payment); }
     }
     const after = await env.DB.prepare(`SELECT status FROM orders WHERE ref = ?`).bind(o.ref).first();
-    if (after && after.status !== "paid" && after.status !== "refunded") { await env.DB.prepare(`UPDATE orders SET status = 'paid', paid_at = COALESCE(paid_at, ?), paid_cents = COALESCE(paid_cents, total_cents) WHERE ref = ?`).bind(new Date().toISOString(), o.ref).run(); await notifyPaid(env, o.ref); }
+    if (after && after.status !== "paid" && after.status !== "refunded") { await env.DB.prepare(`UPDATE orders SET status = 'paid', paid_at = COALESCE(paid_at, ?), paid_cents = COALESCE(paid_cents, total_cents) WHERE ref = ?`).bind(new Date().toISOString(), o.ref).run(); await doneOnPayment(env, o.ref); await notifyPaid(env, o.ref); }
   } else if (ck.status === "CANCELED" && o.status === "checkout_started") {
     await env.DB.prepare(`UPDATE orders SET status = 'pay_later' WHERE ref = ?`).bind(o.ref).run();
   }
@@ -2818,7 +2847,7 @@ async function orderCheckout(request, env, cors) {
       env.DB.prepare(`INSERT OR REPLACE INTO orders (ref, created_at, status, business, name, email, phone, notes, text_consent, cups, base_price_cents, cups_subtotal_cents, setup_fee_cents, total_cents, deposit_percent, square_order_id, kind, spec, needed_by, rush, taken_by, tax_cents, tax_invoiced_at, attest_initials, attest_text, attest_at, attest_ip, attest_ua, attest_hash, logo_asset_id)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, quoteReq ? "quote" : linkOk || terminal ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email || null, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
         null, q.work_unit_cents, q.subtotal_cents - q.setup_cents, q.setup_cents, total, 100, terminal ? terminal.order_id : linkOk ? (data.payment_link.order_id || null) : null, "custom", JSON.stringify(spec), neededBy, q.rush ? 1 : 0, takenBy, tax, tax ? now : null, initials, text, now, ip, ua, hash, assetId),
-      env.DB.prepare(`UPDATE orders SET taken_by_id = ?, terminal_checkout_id = ? WHERE ref = ?`).bind(takenById, terminal ? terminal.id : null, ref),
+      env.DB.prepare(`UPDATE orders SET taken_by_id = ?, terminal_checkout_id = ?, done_on_pay = ? WHERE ref = ?`).bind(takenById, terminal ? terminal.id : null, terminal && b.done_on_pay !== false ? 1 : 0, ref),
       env.DB.prepare(`UPDATE orders SET channel = ?, heard = ?, src = ? WHERE ref = ?`).bind(takenBy ? "At the counter" : channelOf(src), cleanHeard(b.heard), src ? JSON.stringify(src) : null, ref),
       env.DB.prepare(`DELETE FROM order_items WHERE ref = ?`).bind(ref),
       env.DB.prepare(`INSERT INTO order_items (ref, product, material, service, inches, qty, work_unit_cents, blank_unit_cents, discount_pct, line_cents) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(ref, q.product.key, q.material.key, q.service.key, q.inches, q.qty, q.work_unit_after_cents, q.blank_unit_cents, q.discount_pct, q.work_cents + q.blank_cents + q.handling_cents),
@@ -2875,7 +2904,7 @@ HD Laser Studio
     return json({ ok: true, ref, quote: true }, 200, cors);
   }
   if (env.RESEND_API_KEY) {
-    await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
+    await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : terminal ? "Counter sale" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
 `New order ${ref} from hdlaser.net${takenBy ? " (taken at the counter by " + takenBy + ")" : ""}
 
 Customer: ${[name, c.business, email, c.phone].filter(Boolean).join(" · ")}
@@ -2890,7 +2919,8 @@ Sizing confirmation: initialed "${initials}" at ${now} from ${ip || "unknown IP"
 ${terminal ? "Paying on the Terminal at the counter." : linkOk ? "They were sent to Square to pay." : "Square did not return a payment link. Send them a Square invoice for " + $(total) + "."}
 Dashboard: ${env.WORKER_URL || ""}/admin` });
     const first = name.split(" ")[0] || "there";
-    await sendEmail(env, { to: email, subject: `We've got your order ${ref}`, text:
+    // paid at pickup with the work done: no "we've got your order, proof next"; the thank-you comes once they've paid
+    await sendEmail(env, { to: terminal && b.done_on_pay !== false ? null : email, subject: `We've got your order ${ref}`, text:
 `Hi ${first},
 
 Thanks for your order. Here's what we have on file:

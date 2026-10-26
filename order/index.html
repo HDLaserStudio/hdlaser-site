@@ -275,6 +275,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
         <div class="f" style="max-width:260px"><label for="servedby">Served by</label><select id="servedby"></select></div>
         <div class="f" style="max-width:260px"><label for="staffpin">Their PIN</label><input id="staffpin" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></div>
       </div>
+      <label class="check" style="margin-top:12px"><input type="checkbox" id="workdone" checked><span><b>The work is done.</b> Once they pay, it comes off the work queue as done. Untick it if they're paying now and picking up later.</span></label>
       <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
         <button type="button" class="btn red" id="payterm">Charge on the Terminal</button>
         <span class="note">The customer taps their card on the Square Terminal. Cash or a card by phone? Use the online button below.</span>
@@ -634,11 +635,17 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   // ---- counter: charge the Square Terminal and wait for the tap
   var TERM = null, termTimer = null;
   function termFail(msg){ clearInterval(termTimer); termTimer = null; $('#termwait').hidden = true; $('#payterm').disabled = false; $('#payterm').textContent = 'Charge on the Terminal'; fail(msg); }
+  // "The work is done" (Hugh, Oct 26: payment means the work is done): ticked, unless the needed-by date is after today, which
+  // means they pay now and pick up later. Once someone taps the box, it stays as they set it.
+  var doneTouched = false, DONEPAY = false;
+  function syncWorkDone(){ if (doneTouched) return; var n = $('#needed').value, d = new Date(), today = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); $('#workdone').checked = !(n && n > today); }
+  $('#workdone').addEventListener('change', function(){ doneTouched = true; });
+  $('#needed').addEventListener('change', syncWorkDone);
   $('#payterm').onclick = function(){
     var v = checkForm(); if (!v) return;
     if (!/^\d{4,8}$/.test($('#staffpin').value)) return fail('Enter your employee PIN first.');
     var btn = $('#payterm'); btn.disabled = true; btn.textContent = 'Sending to the Terminal…';
-    var body = orderBody(v); body.pay = 'terminal'; body.staff = { name: SERVER(), pin: $('#staffpin').value };
+    var body = orderBody(v); body.pay = 'terminal'; body.staff = { name: SERVER(), pin: $('#staffpin').value }; DONEPAY = $('#workdone').checked; body.done_on_pay = DONEPAY;
     fetch(BASE + '/order/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
       .then(function(r){ return r.json(); })
       .then(function(d){
@@ -652,7 +659,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
             .then(function(r){ return r.json(); })
             .then(function(st){
               if (!st) return;
-              if (st.status === 'COMPLETED' || st.order === 'paid') { clearInterval(termTimer); location.href = '/thanks/?paid=1&kind=custom&counter=1&ref=' + encodeURIComponent(TERM.ref) + (S.logo ? '&logo=1' : ''); return; }
+              if (st.status === 'COMPLETED' || st.order === 'paid') { clearInterval(termTimer); location.href = '/thanks/?paid=1&kind=custom&counter=1&ref=' + encodeURIComponent(TERM.ref) + (S.logo ? '&logo=1' : '') + (DONEPAY ? '&done=1' : ''); return; }
               if (st.status === 'CANCELED' || st.status === 'CANCEL_REQUESTED') termFail('Canceled on the Terminal' + (st.cancel_reason ? ' (' + st.cancel_reason.toLowerCase().replace(/_/g,' ') + ')' : '') + '. Nothing was charged. Try again or use the online button.');
               else if (st.status === 'IN_PROGRESS') $('#termmsg').textContent = 'Card presented. Finishing on the Terminal…';
             }).catch(function(){});
@@ -686,7 +693,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
         $('#wsingle').hidden = true; $('#wamountf').hidden = true; $('#wlist').hidden = false;
         $('#wlist').innerHTML = '<table style="width:100%;border-collapse:collapse">' + WLINES.map(function(l){ return '<tr><td style="padding:6px 0">'+l.qty+' \u00d7 '+esc(l.name)+'</td><td style="text-align:right">'+money(l.unit)+' each</td><td style="text-align:right;font-weight:700">'+money(l.qty*l.unit)+'</td></tr>'; }).join('') + (WSETUP ? '<tr><td style="padding:6px 0">Logo digitizing and setup</td><td></td><td style="text-align:right;font-weight:700">'+money(WSETUP)+'</td></tr>' : '') + '<tr><td style="padding:8px 0;border-top:1px solid var(--line)"><b>Total before tax</b></td><td style="border-top:1px solid var(--line)"></td><td style="text-align:right;border-top:1px solid var(--line);font-size:20px"><b>'+money(WLINES.reduce(function(a,l){ return a+l.qty*l.unit; },0)+WSETUP)+'</b></td></tr></table>'; }
       if (qs.get('name')) $('#name').value = qs.get('name').slice(0,80); if (qs.get('email')) $('#email').value = qs.get('email').slice(0,120); if (qs.get('phone')) $('#phone').value = qs.get('phone').slice(0,40);
-      if (qs.get('notes')) $('#notes').value = qs.get('notes').slice(0,2000); if (/^\d{4}-\d{2}-\d{2}$/.test(qs.get('needed') || '')) $('#needed').value = qs.get('needed');
+      if (qs.get('notes')) $('#notes').value = qs.get('notes').slice(0,2000); if (/^\d{4}-\d{2}-\d{2}$/.test(qs.get('needed') || '')) $('#needed').value = qs.get('needed'); syncWorkDone();
       ['wdesc','wamount','wtax'].forEach(function(id){ $('#'+id).addEventListener('input', function(){ renderSummary(); renderWords(); }); $('#'+id).addEventListener('change', function(){ renderSummary(); renderWords(); }); });
       $('#hubwho').textContent = 'Walk-in job' + (BY ? ' · logged by ' + BY : '') + '. The customer fills in steps 7 and 8.';
     }
