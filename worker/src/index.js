@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-22 v57"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-26 v58"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -1183,6 +1183,25 @@ async function staffRoutes(request, env, cors, path, url) {
   if (path === "/staff/me") return json(await staffHome(env, me), 200, { ...cors, "Cache-Control": "no-store" });
   // names only, for the order page's "Served by" picker on the shop iPad; whoever is picked still proves it with their own PIN
   if (path === "/staff/names") return json({ names: (await env.DB.prepare(`SELECT name FROM staff WHERE active = 1 ORDER BY name`).all()).results.map((r) => r.name) }, 200, { ...cors, "Cache-Control": "no-store" });
+
+  // Returning customers (Hugh, Oct 26): the iPad finds people by phone, name or email, fills in their details and shows what they
+  // ordered before. The list is the customer database (/admin/customers), brought up to date at most every 5 minutes.
+  if (path === "/staff/customers/find") {
+    const q = String(url.searchParams.get("q") || "").trim().toLowerCase().slice(0, 60), d = q.replace(/\D/g, "");
+    if (q.length < 2) return json({ customers: [] }, 200, { ...cors, "Cache-Control": "no-store" });
+    await ensureCustomers(env);
+    const last = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'customers_synced_at'`).first().catch(() => null);
+    if (!last || !(Date.now() - Date.parse(last.v) < 5 * 60000)) { await syncCustomers(env); await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('customers_synced_at', ?)`).bind(now).run(); }
+    const like = "%" + q.replace(/[%_\\]/g, "") + "%", dl = d.length >= 3 ? "%" + d + "%" : "";
+    const rows = (await env.DB.prepare(`SELECT id, name, business, email, phone, orders, spent_cents, last_seen FROM customers WHERE deleted_at IS NULL AND (lower(COALESCE(name, '')) LIKE ? OR lower(COALESCE(business, '')) LIKE ? OR COALESCE(email, '') LIKE ? OR (? <> '' AND COALESCE(phone, '') LIKE ?)) ORDER BY COALESCE(last_seen, first_seen) DESC LIMIT 8`).bind(like, like, like, dl, dl).all()).results;
+    return json({ customers: rows.map((r) => ({ id: r.id, name: r.name || "", business: r.business || "", email: r.email || "", phone: fmtPhone(r.phone), orders: r.orders || 0, spent_cents: r.spent_cents || 0, last_seen: r.last_seen })) }, 200, { ...cors, "Cache-Control": "no-store" });
+  }
+  if (path === "/staff/customers/history") {
+    await ensureCustomers(env);
+    const c = await env.DB.prepare(`SELECT * FROM customers WHERE id = ? AND deleted_at IS NULL`).bind(+url.searchParams.get("id") || 0).first();
+    if (!c) return json({ error: "That customer isn't on the list" }, 404, cors);
+    return json({ customer: { id: c.id, name: c.name || "", business: c.business || "", email: c.email || "", phone: fmtPhone(c.phone), orders: c.orders || 0, spent_cents: c.spent_cents || 0, note: c.note || "" }, history: await customerHistory(env, c) }, 200, { ...cors, "Cache-Control": "no-store" });
+  }
 
   // Receipts: every Square payment we know of (web, counter and register), newest first, printable on the Terminal.
   if (path === "/staff/receipts") {
@@ -3263,6 +3282,32 @@ async function importSquareCustomers(env) {
   } while (cursor && pages < 20);
   const r = await mergeCustomers(env, recs, false);
   return { ok: true, found: recs.length, ...r, more: !!cursor };
+}
+
+// Everything one customer has done with us, newest first: web and counter orders, quote requests, walk-ins logged without a
+// charge (a walk-in charged on the Terminal is already an order, and a job made from an order carries its ref, so neither counts twice).
+async function customerHistory(env, c) {
+  const em = c.email || "", ph = c.phone || "";
+  const mine = (e, p) => !!((em && normEmail(e) === em) || (ph && normPhone(p) === ph));
+  const q = async (sql) => { try { return (await env.DB.prepare(sql).all()).results; } catch { return []; } };
+  const names = Object.fromEntries(products(env).map((x) => [x.key, x.name])), out = [];
+  for (const o of await q(`SELECT ref, created_at, status, email, phone, spec, cups, notes, total_cents, paid_cents, refunded_cents, tip_cents, taken_by, logo_asset_id, completed_at FROM orders WHERE status != 'cancelled' ORDER BY created_at DESC LIMIT 3000`)) {
+    if (!mine(o.email, o.phone)) continue;
+    let sp = {}; try { sp = JSON.parse(o.spec || "{}"); } catch {}
+    const paid = o.status === "paid" || o.status === "refunded";
+    out.push({ at: o.created_at, ref: o.ref, kind: o.status === "quote" ? "Quote request" : o.taken_by ? "At the counter" : "Online", what: sp.summary || (o.cups ? o.cups + " logo cups" : ""), notes: String(o.notes || "").slice(0, 120), art: sp.art || null, logo: !!o.logo_asset_id, total_cents: paid ? Math.max(0, (o.paid_cents || 0) - (o.refunded_cents || 0) - (o.tip_cents || 0)) : o.status === "quote" ? 0 : (o.total_cents || 0), status: o.completed_at ? "done" : o.status }); // a quote's price-list amount stays off the iPad screen
+  }
+  for (const j of await q(`SELECT created_at, phone, email, product, qty, amount_cents, note, status FROM jobs WHERE status != 'cancelled' AND (ref IS NULL OR ref = '') ORDER BY created_at DESC LIMIT 3000`)) {
+    if (!mine(j.email, j.phone)) continue;
+    out.push({ at: j.created_at, ref: null, kind: "Walk-in", what: ((j.qty || 1) > 1 ? j.qty + " × " : "") + (names[j.product] || j.product || "Job"), notes: String(j.note || "").slice(0, 120), total_cents: j.amount_cents || 0, status: j.status === "done" ? "done" : "queued" });
+  }
+  for (const i of await q(`SELECT created_at, ref, email, phone, fields FROM inquiries ORDER BY created_at DESC LIMIT 3000`)) {
+    if (!mine(i.email, i.phone)) continue;
+    let f = {}; try { f = JSON.parse(i.fields || "{}"); } catch {}
+    out.push({ at: i.created_at, ref: i.ref || null, kind: "Quote form", what: [f.Service, f.Material, f.Quantity ? f.Quantity + " pieces" : ""].filter(Boolean).join(", "), notes: String(f.Notes || "").slice(0, 120), total_cents: 0, status: "quote" });
+  }
+  out.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+  return out.slice(0, 25);
 }
 
 async function customerList(env) {

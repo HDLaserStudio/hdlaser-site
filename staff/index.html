@@ -151,6 +151,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
 </main>
 
 <script src="/assets/site-config.js?v=7"></script>
+<script src="/assets/customer-find.js?v=1"></script>
 <script>
 (function(){
   var BASE=(window.HD_CONFIG&&HD_CONFIG.WORKER_BASE)||'';
@@ -171,7 +172,13 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
     api('/staff/login',{name:f.name.value,pin:f.pin.value,smsConsent:!!(f.smsConsent&&f.smsConsent.checked)}).then(function(j){ token=j.token; try{localStorage.setItem('hd_staff_token',token);}catch(e){} f.reset(); load(); }).catch(function(err){ $('#loginerr').textContent=err.message; $('#loginerr').hidden=false; }); });
   $('#logout').onclick=function(){ api('/staff/logout',{}).catch(function(){}).then(signOut); };
 
-  function load(){ if(!token){ signOut(); return; }
+  // returning customers on Log a walk-in: search, tap, and the customer, phone and email fill in (made once, after sign-in)
+  var cfMade=false;
+  function customerFind(){ if(cfMade||!window.hdCustomerFind) return; var f=$('#jobform'); var m=document.createElement('div'); f.insertBefore(m,f.firstChild);
+    cfMade=!!hdCustomerFind({ mount:m, filledText:'Their name, phone and email are filled in below.', logoText:'Leave Logo digitizing and setup unticked.',
+      onPick:function(c){ f.customer.value=c.name||c.business||''; if(c.phone) f.phone.value=c.phone; if(c.email) f.email.value=c.email; },
+      onClear:function(){ f.customer.value=''; f.phone.value=''; f.email.value=''; } }); if(!cfMade) m.remove(); }
+  function load(){ if(!token){ signOut(); return; } customerFind();
     api('/staff/me').then(function(s){ state=s; render(); }).catch(function(err){ if(token){ alert(err.message); } }); }
 
   function render(){ var s=state; $('#login').hidden=true; $('#app').hidden=false;
