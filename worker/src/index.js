@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-26 v59"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-27 v60"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS plaid_items (item_id TEXT PRIMARY KEY, access_token T
 CREATE TABLE IF NOT EXISTS coffee_orders (ref TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, name TEXT, phone TEXT, email TEXT, items TEXT, summary TEXT, total_cents INTEGER, pickup TEXT, note TEXT, text_consent INTEGER DEFAULT 0, square_order_id TEXT, square_payment_id TEXT, paid_at TEXT, paid_cents INTEGER DEFAULT 0, tip_cents INTEGER DEFAULT 0, notified_at TEXT, ready_at TEXT, picked_up_at TEXT);
 CREATE INDEX IF NOT EXISTS coffee_created ON coffee_orders(created_at);`;
 // Columns added after the first release. Each ALTER is tried once and ignored if the column already exists.
-const ALTERS = ["ALTER TABLE orders ADD COLUMN done_on_pay INTEGER", "ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT", "ALTER TABLE jobs ADD COLUMN email TEXT"];
+const ALTERS = ["ALTER TABLE orders ADD COLUMN ship_to TEXT", "ALTER TABLE orders ADD COLUMN done_on_pay INTEGER", "ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT", "ALTER TABLE jobs ADD COLUMN email TEXT"];
 
 let migrated = false;
 async function ensureSchema(env) {
@@ -113,6 +113,7 @@ export default {
       if (path === "/resale" && request.method === "POST") return requireOrigin(cors) || recordResale(request, env, cors);
       if (path === "/pricing") return json({ book: publicBook(await priceBook(env)), tax_rate: parseFloat(env.TAX_RATE || "0.0775") || 0, tax_own_items: env.TAX_OWN_ITEMS === "1", attest_version: ATTEST_VERSION }, 200, { ...cors, "Cache-Control": "no-store" });
       if (path === "/order/checkout" && request.method === "POST") return requireOrigin(cors) || orderCheckout(request, env, cors);
+      if (path === "/cups/checkout" && request.method === "POST") return requireOrigin(cors) || cupsCheckout(request, env, cors);
       if (path === "/order/terminal/status") return requireOrigin(cors) || terminalStatus(env, url.searchParams.get("ref"), url.searchParams.get("id"), cors);
       if (path === "/order/terminal/cancel" && request.method === "POST") return requireOrigin(cors) || terminalCancel(request, env, cors);
       if (path === "/order/terminal/receipt" && request.method === "POST") return requireOrigin(cors) || terminalReceipt(request, env, cors);
@@ -146,6 +147,17 @@ export default {
         if (denied) return denied;
         if (path === "/admin") return new Response(dashboardHtml(env), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
         if (path === "/admin/customers") return new Response(CUSTOMERS_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+        if (path === "/admin/social") return new Response(SOCIAL_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+        if (path === "/api/social") return json(await socialState(env), 200, { "Cache-Control": "no-store" });
+        if (path.startsWith("/api/social/") && request.method === "POST") {
+          const b = await request.json().catch(() => ({})), what = path.slice(12);
+          if (what === "settings") { const r = await saveSocialSettings(env, b); if (r.ok && b.enabled === true) await env.DB.prepare(`DELETE FROM meta WHERE k = 'social_error'`).run(); return json(r, 200); }
+          if (what === "post") return json(await socialEdit(env, b), 200);
+          if (what === "starter") return json(await socialLoadStarter(env), 200);
+          if (what === "write") return json(await socialWrite(env, 14), 200);
+          if (what === "run") return json(await socialTick(env, true), 200);
+          if (what === "test") return json(await socialTest(env, b), 200);
+        }
         if (path === "/api/customers" && request.method === "GET") return json(await customerList(env), 200, { "Cache-Control": "no-store" });
         if (path === "/api/customers" && request.method === "POST") return json(await saveCustomer(env, await request.json().catch(() => ({}))), 200);
         if (path === "/api/customers/square-import" && request.method === "POST") return json(await importSquareCustomers(env), 200);
@@ -229,6 +241,7 @@ export default {
       await noShowCheck(env);                                              // staffing watchdog: every tick during open hours
       if (d.getUTCMinutes() >= 10) return;                                 // the :15 crons exist only for the 10:15 check
       await googleReviews(env, false).catch((e) => console.error("reviews", e)); // refreshes itself at most once a day
+      await socialTick(env, false).catch((e) => console.error("social", e));       // the AI host's two videos a day (off until switched on)
       await syncSquare(env, 3);
       if (env.PLAID_CLIENT_ID) await plaidSync(env, null, 12);
       if (d.getUTCDay() === 1 && d.getUTCHours() === 15) { await analyzePricing(env).catch((e) => console.error("pricing review", e)); await sendDigest(env); }
@@ -332,7 +345,7 @@ function price(lines) {
 // ---------------------------------------------------------------- where customers come from
 // The site remembers how a visitor first arrived (assets/site-config.js): a tag from a link we hand out (?src=google-profile,
 // ?src=flyer-cafe) or the site that sent them. This turns that into one plain channel name for the dashboard.
-const SOURCE_TAGS = { "google-profile": "Google Business Profile", gbp: "Google Business Profile", "google-ads": "Google ads", "apple-maps": "Apple Maps", apple: "Apple Maps", instagram: "Instagram", ig: "Instagram", facebook: "Facebook", fb: "Facebook", yelp: "Yelp", nextdoor: "Nextdoor", email: "Email from us", text: "Text from us", sms: "Text from us", flyer: "Flyer", card: "Business card", qr: "QR code", sign: "Shop sign" };
+const SOURCE_TAGS = { ai: "AI influencer", "google-profile": "Google Business Profile", gbp: "Google Business Profile", "google-ads": "Google ads", "apple-maps": "Apple Maps", apple: "Apple Maps", instagram: "Instagram", ig: "Instagram", facebook: "Facebook", fb: "Facebook", yelp: "Yelp", nextdoor: "Nextdoor", email: "Email from us", text: "Text from us", sms: "Text from us", flyer: "Flyer", card: "Business card", qr: "QR code", sign: "Shop sign" };
 function cleanSrc(v) {
   if (!v || typeof v !== "object") return null;
   const c = (x, n = 60) => String(x || "").toLowerCase().replace(/[^a-z0-9_./-]/g, "").slice(0, n);
@@ -666,6 +679,29 @@ async function notifyPaidCustom(env, o) {
   let spec = {}; try { spec = JSON.parse(o.spec || "{}"); } catch {}
   const total = "$" + (o.paid_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 });
   const first = (o.name || "").split(" ")[0] || "there";
+  if (spec.product === "namecup") { // name cups bought online: no proof, we engrave and ship
+    const lines = (spec.lines || []).map((l) => `${l.qty} × ${l.size} oz cup, ${(CUP_COLORS.find((x) => x[0] === l.color) || [, l.color])[1]}, engraved \u201c${l.text}\u201d (${CUP_FONTS[l.font] || l.font})`).join("\n");
+    await sendEmail(env, { to: o.email, subject: `Paid! Your cups are next (order ${o.ref})`, text:
+`Hi ${first},
+
+Payment received, ${total}. Thank you!
+
+Your order (${o.ref}):
+${lines}
+
+We engrave exactly the names you typed and ship within 3-5 business days to:
+${o.ship_to || ""}
+
+We'll email you the tracking number when they're on the way. Spot a typo? Reply right away, before we engrave.
+
+HD Laser Studio
+759 Turquoise St, Pacific Beach
+(858) 373-9866 · hdlaser.net` });
+    await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o.email || undefined, subject: `PAID ${total}: cups to ship, ${o.name} (${o.ref})`, text: `Order ${o.ref} is paid. Engrave and ship within 3-5 business days.\n\n${lines}\n\nShip to: ${o.ship_to || "(no address)"}\nCustomer: ${[o.name, o.email, o.phone].filter(Boolean).join(" · ")}\n\nDashboard: ${env.WORKER_URL || ""}/admin` });
+    await sendAlert(env, `PAID ${total} by ${o.name} (${o.ref}): ${spec.summary || "name cups"}. Ship to ${String(o.ship_to || "").split(", ").slice(-1)[0]}.`);
+    await env.DB.prepare(`UPDATE orders SET notified_paid_at = ? WHERE ref = ?`).bind(new Date().toISOString(), o.ref).run();
+    return;
+  }
   if (o.completed_at) { // paid at pickup: the work is done, so no proof or "what happens next"
     await sendEmail(env, { to: o.email, subject: `Thank you! Order ${o.ref} is paid`, text:
 `Hi ${first},
@@ -1405,18 +1441,20 @@ async function workQueue(env) {
   const items = [];
   const jobs = (await q(`SELECT j.*, p.name staff_name FROM jobs j LEFT JOIN staff p ON p.id = j.staff_id WHERE j.status IN ('queued','started') ORDER BY j.created_at`).all()).results;
   for (const j of jobs) items.push({ kind: "job", id: j.id, title: `${j.customer || "Walk-in"}: ${prodName(env, j.product)} x${j.qty}`, note: j.note, phone: j.phone, minutes: j.minutes, amount_cents: j.amount_cents, due_at: j.due_at, created_at: j.created_at, status: j.status, by: j.staff_name });
-  const orders = (await q(`SELECT o.ref, o.business, o.name, o.phone, o.cups, o.paid_at, o.paid_cents, o.logo_received_at, o.proof_approved_at, o.kind, o.spec, o.needed_by, o.rush, o.logo_asset_id, o.attest_initials,
+  const orders = (await q(`SELECT o.ref, o.business, o.name, o.phone, o.cups, o.paid_at, o.paid_cents, o.logo_received_at, o.proof_approved_at, o.kind, o.spec, o.needed_by, o.rush, o.logo_asset_id, o.attest_initials, o.ship_to,
       (SELECT SUM(CASE WHEN finish='printed' THEN qty*3+30 ELSE qty*2.5+20 END) FROM order_lines l WHERE l.ref=o.ref) minutes,
       (SELECT SUM(qty * (CASE WHEN service='uv' THEN 3 + inches*1.5 ELSE 4 + inches*2 END)) + 10 FROM order_items i WHERE i.ref=o.ref) cminutes,
       (SELECT GROUP_CONCAT(qty || ' x ' || size || 'oz ' || finish || ' ' || color || ' (' || lid || ')', '; ') FROM order_lines l WHERE l.ref = o.ref) items
       FROM orders o WHERE o.status = 'paid' AND o.completed_at IS NULL ORDER BY o.paid_at`).all()).results;
   for (const o of orders) {
     const custom = o.kind === "custom"; let spec = {}; if (custom) { try { spec = JSON.parse(o.spec || "{}"); } catch {} if ((o.logo_asset_id || spec.art === "text" || spec.art === "file") && !o.logo_received_at) o.logo_received_at = o.paid_at; o.minutes = o.cminutes; }
+    if (spec.no_proof && !o.proof_approved_at) o.proof_approved_at = o.paid_at; // name cups: they typed the name and saw the preview, so straight to making it
+    if (spec.product === "namecup") o.minutes = Math.round((o.cups || 1) * 6 + 15); // engrave, pack and label
     const stage = !o.logo_received_at ? "waiting for logo" : !o.proof_approved_at ? "send proof" : "in production";
-    const wait = custom ? (o.rush ? 3 : 7) : 21;
+    const wait = spec.product === "namecup" ? 3 : custom ? (o.rush ? 3 : 7) : 21;
     let due = o.proof_approved_at ? new Date(new Date(o.proof_approved_at).getTime() + wait * 86400000).toISOString() : (o.logo_received_at ? new Date(new Date(o.logo_received_at).getTime() + 2 * 86400000).toISOString() : null);
     if (custom && o.needed_by && (!due || o.needed_by + "T23:00:00Z" < due)) due = o.needed_by + "T23:00:00Z";
-    items.push({ kind: "order", id: o.ref, title: custom ? `${o.business || o.name}: ${spec.summary || "custom order"}` : `${o.business || o.name}: ${o.cups} logo cups`, note: custom ? `Initialed ${o.attest_initials || "?"}${o.logo_asset_id ? " · logo on file" : ""}` : o.items, phone: o.phone, minutes: stage === "in production" ? Math.round(o.minutes || 0) : stage === "send proof" ? 20 : 0, amount_cents: o.paid_cents, due_at: due, created_at: o.paid_at, status: stage, stage, logo: !!o.logo_received_at, proof: !!o.proof_approved_at });
+    items.push({ kind: "order", id: o.ref, title: custom ? `${o.business || o.name}: ${spec.summary || "custom order"}` : `${o.business || o.name}: ${o.cups} logo cups`, note: spec.product === "namecup" ? `Ship to: ${o.ship_to || "?"}` : custom ? `Initialed ${o.attest_initials || "?"}${o.logo_asset_id ? " · logo on file" : ""}` : o.items, phone: o.phone, minutes: stage === "in production" ? Math.round(o.minutes || 0) : stage === "send proof" ? 20 : 0, amount_cents: o.paid_cents, due_at: due, created_at: o.paid_at, status: stage, stage, logo: !!o.logo_received_at, proof: !!o.proof_approved_at });
   }
   const now = Date.now();
   for (const it of items) {
@@ -2554,6 +2592,10 @@ const DEFAULT_BOOK = {
   same_own_cents: 2500,
   same_own_min_qty: 2,
   same_own_max_inches: 3,
+  // Name cups shipped anywhere in the US (Hugh, Oct 27: the AI influencer sells name cups online, shipped). One flat price per
+  // order; free from ship_free_cents when that is above 0. Both are on /admin/prices.
+  ship_cents: 995,
+  ship_free_cents: 0,
 };
 function ladderPrices(l, steps) { const out = []; let p = l.start_cents, climbs = 0; const flat = Math.round((l.flat_to_inches || 0) * 2); for (let i = 0; i < steps; i++) { out.push(Math.round(p / 25) * 25); if (i + 1 >= flat) { p += l.first_gap_cents + climbs * l.gap_growth_cents; climbs++; } } return out; }
 function buildSizes(book) { const n = Math.round(book.max_inches / 0.5); const cols = Object.fromEntries(Object.entries(book.ladders).map(([k, l]) => [k, ladderPrices(l, n)])); return Array.from({ length: n }, (_, i) => { const row = { inches: (i + 1) / 2 }; for (const k of Object.keys(cols)) row[k + "_cents"] = cols[k][i]; return row; }); }
@@ -2745,6 +2787,86 @@ async function terminalCancel(request, env, cors) {
   const r = await squareFetch(env, "/v2/terminals/checkouts/" + b.id + "/cancel", { method: "POST", body: "{}" }); const d = await r.json().catch(() => ({}));
   if (d.checkout) await terminalUpdate(env, d.checkout);
   return json({ ok: r.ok, status: d.checkout ? d.checkout.status : null, error: r.ok ? undefined : squareErr(d) }, r.ok ? 200 : 502, cors);
+}
+
+// ---------------------------------------------------------------- name cups, sold online and shipped (Hugh, Oct 27)
+// /cups/ sells one simple thing at a fixed price: a 12 or 16 oz cup in any of the 12 colors, laser engraved with a name or short
+// text the customer types. Prices come from the price book (the cup plus the engraving, $5 off each from 6 cups); shipping is one
+// flat price per order; California sales tax only when it ships to California. No proof: they see the preview and confirm the spelling.
+const CUP_COLORS = [["navy", "Navy"], ["black", "Black"], ["dark-gray", "Dark gray"], ["cream", "Cream"], ["light-blue", "Light blue"], ["light-green", "Light green"], ["army-green", "Army green"], ["pink", "Pink"], ["bikini-pink", "Bikini pink"], ["purple", "Purple"], ["orange", "Orange"], ["yellow", "Yellow"]];
+const CUP_FONTS = { classic: "Classic", script: "Script", bold: "Bold" };
+const US_STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" ");
+function cupPrices(book) {
+  const p = (k) => book.products.find((x) => x.key === k) || {};
+  const unit = (x) => (x.blank_cents || 0) + ((x.flat_work && x.flat_work.engrave) || 1500);
+  const c12 = p("cup12"), c16 = p("cup16"), off = c16.qty_off || c12.qty_off || { min: 6, cents: 500 };
+  return { "12": unit(c12), "16": unit(c16), off_min: off.min, off_cents: off.cents, ship_cents: book.ship_cents ?? 995, ship_free_cents: book.ship_free_cents || 0 };
+}
+async function cupsCheckout(request, env, cors) {
+  let b; try { b = await request.json(); } catch { return json({ error: "Bad JSON" }, 400, cors); }
+  const ip = request.headers.get("CF-Connecting-IP") || "";
+  if (rateLimited("cups:" + ip, 10, 600000)) return json({ error: "Too many attempts. Please wait a few minutes." }, 429, cors);
+  const P = cupPrices(await priceBook(env)), colors = Object.fromEntries(CUP_COLORS);
+  const clean = (v, n) => String(v || "").replace(/[\u0000-\u001f<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, n);
+  const lines = (Array.isArray(b.lines) ? b.lines : []).slice(0, 20).map((l) => ({ size: String(l.size) === "12" ? "12" : "16", color: colors[l.color] ? l.color : null, text: clean(l.text, 24), font: CUP_FONTS[l.font] ? l.font : "classic", qty: Math.max(1, Math.min(50, parseInt(l.qty, 10) || 1)) }));
+  if (!lines.length) return json({ error: "Add at least one cup" }, 400, cors);
+  for (const l of lines) { if (!l.color) return json({ error: "Pick a color for each cup" }, 400, cors); if (!l.text) return json({ error: "Type the name or text for each cup" }, 400, cors); }
+  const count = lines.reduce((n, l) => n + l.qty, 0);
+  if (count > 50) return json({ error: "For more than 50 cups, ask us for a free quote" }, 400, cors);
+  const c = b.customer || {}, ship = b.ship || {};
+  const email = String(c.email || "").trim().toLowerCase(), name = clean(c.name, 80), phone = clean(c.phone, 40);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Type a valid email for your receipt and tracking" }, 400, cors);
+  if (name.length < 2) return json({ error: "Type your name" }, 400, cors);
+  const to = { name: clean(ship.name, 80) || name, line1: clean(ship.line1, 100), line2: clean(ship.line2, 100), city: clean(ship.city, 60), state: String(ship.state || "").toUpperCase(), zip: String(ship.zip || "").trim() };
+  if (!to.line1 || !to.city) return json({ error: "Type the street address and city to ship to" }, 400, cors);
+  if (!US_STATES.includes(to.state)) return json({ error: "Pick the state to ship to" }, 400, cors);
+  if (!/^\d{5}(-\d{4})?$/.test(to.zip)) return json({ error: "Type a 5-digit ZIP code" }, 400, cors);
+  if (!b.spelled) return json({ error: "Check the spelling, then tick the box. We engrave exactly what you type." }, 400, cors);
+  if (!c.agreed) return json({ error: "Terms must be accepted" }, 400, cors);
+  const off = count >= P.off_min ? P.off_cents : 0;
+  for (const l of lines) l.unit_cents = P[l.size] - off;
+  const subtotal = lines.reduce((n, l) => n + l.unit_cents * l.qty, 0);
+  const shipping = P.ship_free_cents > 0 && subtotal >= P.ship_free_cents ? 0 : P.ship_cents;
+  const taxRate = parseFloat(env.TAX_RATE || "0.0775") || 0, tax = to.state === "CA" ? Math.round(subtotal * taxRate) : 0; // the cups only, not the shipping
+  const total = subtotal + shipping + tax;
+  const ref = "HD-" + Date.now().toString(36).toUpperCase(), now = new Date().toISOString();
+  const label = (l) => `${l.size} oz cup, ${colors[l.color]}, engraved \u201c${l.text}\u201d (${CUP_FONTS[l.font]})`;
+  const summary = lines.map((l) => `${l.qty} × ${label(l)}`).join("; ");
+  const shipTo = [to.name, to.line1, to.line2, `${to.city}, ${to.state} ${to.zip}`].filter(Boolean).join(", ");
+  const src = cleanSrc(b.src);
+  let linkOk = false, data = {};
+  if (env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
+    const order = { location_id: env.SQUARE_LOCATION_ID, reference_id: ref, line_items: lines.map((l) => ({ name: label(l).slice(0, 255), quantity: String(l.qty), base_price_money: { amount: l.unit_cents, currency: "USD" }, applied_taxes: tax ? [{ tax_uid: "ca-sales-tax" }] : undefined })) };
+    if (shipping) order.line_items.push({ name: "Shipping (USPS, anywhere in the US)", quantity: "1", base_price_money: { amount: shipping, currency: "USD" } });
+    if (tax) order.taxes = [{ uid: "ca-sales-tax", name: "CA sales tax", percentage: String(+(taxRate * 100).toFixed(3)), scope: "LINE_ITEM" }];
+    const payload = { idempotency_key: `${ref}-${Date.now()}`, order,
+      checkout_options: { redirect_url: `${env.SITE_URL}/thanks/?paid=1&kind=cups&ref=${encodeURIComponent(ref)}`, ask_for_shipping_address: false, merchant_support_email: env.SUPPORT_EMAIL, allow_tipping: false },
+      pre_populated_data: { buyer_email: email, buyer_phone_number: e164(phone), buyer_address: { address_line_1: to.line1, address_line_2: to.line2 || undefined, locality: to.city, administrative_district_level_1: to.state, postal_code: to.zip, country: "US" } },
+      payment_note: `hdlaser.net cups ${ref}: ${summary}`.slice(0, 500) };
+    const res = await squareFetch(env, "/v2/online-checkout/payment-links", { method: "POST", body: JSON.stringify(payload) });
+    data = await res.json().catch(() => ({}));
+    linkOk = res.ok && !!data.payment_link;
+    if (!linkOk) console.error("Square cups error", res.status, JSON.stringify(data).slice(0, 800));
+  }
+  const spec = { product: "namecup", summary: `${count} name cup${count === 1 ? "" : "s"}: ${summary}`, art: "text", no_proof: true, lines, shipping_cents: shipping, ship: to };
+  if (env.DB) await env.DB.batch([
+    env.DB.prepare(`INSERT INTO orders (ref, created_at, status, name, email, phone, notes, cups, total_cents, tax_cents, setup_fee_cents, cups_subtotal_cents, square_order_id, kind, spec) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,'custom',?)`)
+      .bind(ref, now, linkOk ? "checkout_started" : "pay_later", name, email, phone || null, clean(b.notes, 500), count, total, tax, subtotal, linkOk ? (data.payment_link.order_id || null) : null, JSON.stringify(spec)),
+    env.DB.prepare(`UPDATE orders SET ship_to = ?, channel = ?, src = ? WHERE ref = ?`).bind(shipTo, channelOf(src), src ? JSON.stringify(src) : null, ref),
+    env.DB.prepare(`INSERT INTO events (ts, name, session, ref, path, detail) VALUES (?,?,?,?,?,?)`).bind(now, "order_checkout", null, ref, "/cups/", JSON.stringify({ product: "namecup", qty: count })),
+  ]);
+  const $ = (n) => "$" + (n / 100).toFixed(2);
+  if (env.RESEND_API_KEY) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Cup order" : "Cup order (needs payment link)"} ${ref}: ${name}, ${$(total)}`, text:
+`New name cup order ${ref} from hdlaser.net/cups${src && src.tag ? " (came from " + channelOf(src) + ")" : ""}. ${linkOk ? "They were sent to Square to pay; you'll get a PAID email when they do." : "Square did not return a payment link. Send them a Square invoice for " + $(total) + "."}
+
+${lines.map((l) => `${l.qty} × ${label(l)} @ ${$(l.unit_cents)}`).join("\n")}
+Shipping ${$(shipping)}${tax ? "\nCA sales tax " + $(tax) : ""}
+Total ${$(total)}
+
+Ship to: ${shipTo}
+Customer: ${[name, email, phone].filter(Boolean).join(" · ")}` });
+  if (!linkOk) return json({ error: "The payment page didn't open. Please try again in a minute, or call or text (858) 373-9866 and we'll send you a payment link.", ref }, 502, cors);
+  return json({ ok: true, ref, url: data.payment_link.url }, 200, cors);
 }
 
 async function orderCheckout(request, env, cors) {
@@ -3132,6 +3254,8 @@ async function saveWholeBook(env, body) {
   if (b.min_order_cents != null) next.min_order_cents = int(b.min_order_cents, 0, 1000000) ?? next.min_order_cents;
   if (b.text_only_own_cents != null) next.text_only_own_cents = int(b.text_only_own_cents, 0, 1000000) ?? next.text_only_own_cents;
   if (b.same_own_cents != null) next.same_own_cents = int(b.same_own_cents, 0, 1000000) ?? next.same_own_cents;
+  if (b.ship_cents != null) next.ship_cents = int(b.ship_cents, 0, 100000) ?? next.ship_cents;
+  if (b.ship_free_cents != null) next.ship_free_cents = int(b.ship_free_cents, 0, 10000000) ?? next.ship_free_cents;
   if (b.same_own_max_inches != null) { const mi = Number(b.same_own_max_inches); if (Number.isFinite(mi) && mi >= 0 && mi <= 28) next.same_own_max_inches = Math.round(mi * 2) / 2; else errors.push("Same engraving: up to (in)"); }
   for (const d of next.cut_detail || []) { const src = (b.cut_detail || []).find((x) => x.key === d.key); if (!src) continue; const f = Number(src.factor); if (Number.isFinite(f) && f >= 0.25 && f <= 10) d.factor = f; else errors.push(`${d.name}: factor`); }
   if (errors.length) return { ok: false, error: "Check these: " + errors.join(", ") };
@@ -3176,7 +3300,7 @@ input.n{text-align:right}input:focus{outline:3px solid #F2B63D;outline-offset:1p
 
 <h2>Setup, rush, minimum</h2>
 <div class="card"><table id="services"></table><p class="small" style="margin:8px 0 0">Minutes and consumables are what a piece costs us; they feed the margin check, not the customer price.</p>
-<table style="margin-top:10px"><tr><th>Rush, % added to the work</th><th>Shop minimum per order ($)</th><th>Text only on their own item, flat per piece ($)</th></tr><tr><td><input class="n" type="number" id="rush" step="5" min="0"></td><td><input class="n" type="number" id="min" step="1" min="0"></td><td><input class="n" type="number" id="textown" step="1" min="0"></td></tr></table><table style="margin-top:10px"><tr><th>Same engraving on 2 or more of their own items, flat per piece ($)</th><th>Up to this size (in)</th></tr><tr><td><input class="n" type="number" id="sameown" step="1" min="0"></td><td><input class="n" type="number" id="samemax" step="0.5" min="0" max="28"></td></tr></table><table style="margin-top:10px" id="cutdetail"></table><p class="small">Laser cutting: the size column is the price of a simple outline cut by the longest side of the piece (the bed is 15 \u00d7 28 in). Detailed and intricate cuts multiply it by these factors.</p><p class="small">Text only on a customer's own item (engraving or UV, any size) is this one price per piece: no setup, no handling. Set it to 0 to price text by size like everything else.</p><p class="small">The same engraving (a logo or text) on 2 or more of the customer's own items, up to the size you set, is the flat price per piece: no handling, no quantity discount on top. A new logo still adds its one-time setup. Bigger engravings are priced by size. Set it to 0 to turn it off.</p></div>
+<table style="margin-top:10px"><tr><th>Rush, % added to the work</th><th>Shop minimum per order ($)</th><th>Text only on their own item, flat per piece ($)</th></tr><tr><td><input class="n" type="number" id="rush" step="5" min="0"></td><td><input class="n" type="number" id="min" step="1" min="0"></td><td><input class="n" type="number" id="textown" step="1" min="0"></td></tr></table><table style="margin-top:10px"><tr><th>Same engraving on 2 or more of their own items, flat per piece ($)</th><th>Up to this size (in)</th></tr><tr><td><input class="n" type="number" id="sameown" step="1" min="0"></td><td><input class="n" type="number" id="samemax" step="0.5" min="0" max="28"></td></tr></table><table style="margin-top:10px"><tr><th>Name cups page: shipping per order ($)</th><th>Free shipping from ($, 0 = never)</th></tr><tr><td><input class="n" type="number" id="shipc" step="0.05" min="0"></td><td><input class="n" type="number" id="shipfree" step="1" min="0"></td></tr></table><table style="margin-top:10px" id="cutdetail"></table><p class="small">Laser cutting: the size column is the price of a simple outline cut by the longest side of the piece (the bed is 15 \u00d7 28 in). Detailed and intricate cuts multiply it by these factors.</p><p class="small">Text only on a customer's own item (engraving or UV, any size) is this one price per piece: no setup, no handling. Set it to 0 to price text by size like everything else.</p><p class="small">The same engraving (a logo or text) on 2 or more of the customer's own items, up to the size you set, is the flat price per piece: no handling, no quantity discount on top. A new logo still adds its one-time setup. Bigger engravings are priced by size. Set it to 0 to turn it off.</p></div>
 
 <h2>Materials</h2>
 <p class="sub">The work price is multiplied by the factor. Tick which finishes we offer on each.</p>
@@ -3199,7 +3323,7 @@ function render(){
   $('#f-svc').innerHTML=B.services.map(s=>'<option value="'+s.key+'">'+esc(s.name)+'</option>').join('');
   $('#sizes').innerHTML='<tr><th>Artwork, longest side</th>'+B.services.map(s=>'<th>'+esc(s.name)+' ($)</th>').join('')+'</tr>'+B.sizes.map(z=>'<tr><td><b>'+z.inches+' in</b></td>'+B.services.map(s=>'<td><input class="n" type="number" step="0.25" min="0" data-size="'+z.inches+'" data-svc="'+s.key+'" value="'+d2(z[s.key+'_cents'])+'"></td>').join('')+'</tr>').join('');
   $('#services').innerHTML='<tr><th>Finish</th><th>Setup, once per order, new logo only ($)</th><th>Minutes per piece</th><th>Extra minutes per inch</th><th>Consumables per piece ($)</th></tr>'+B.services.map(s=>'<tr><td><b>'+esc(s.name)+'</b></td><td><input class="n" type="number" step="1" min="0" data-svc="'+s.key+'" data-f="setup_cents" value="'+d2(s.setup_cents)+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="min_per_piece" value="'+s.min_per_piece+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="per_inch" value="'+s.per_inch+'"></td><td><input class="n" type="number" step="0.05" min="0" data-svc="'+s.key+'" data-f="consumable_cents" value="'+d2(s.consumable_cents)+'"></td></tr>').join('');
-  $('#showprices').checked=B.show_prices!==false; $('#rush').value=B.rush_pct; $('#min').value=d2(B.min_order_cents); $('#textown').value=d2(B.text_only_own_cents||0); $('#sameown').value=d2(B.same_own_cents||0); $('#samemax').value=B.same_own_max_inches||0;
+  $('#showprices').checked=B.show_prices!==false; $('#rush').value=B.rush_pct; $('#min').value=d2(B.min_order_cents); $('#textown').value=d2(B.text_only_own_cents||0); $('#sameown').value=d2(B.same_own_cents||0); $('#samemax').value=B.same_own_max_inches||0; $('#shipc').value=d2(B.ship_cents||0); $('#shipfree').value=d2(B.ship_free_cents||0);
   $('#cutdetail').innerHTML='<tr>'+(B.cut_detail||[]).map(d=>'<th>'+esc(d.name)+' cut, \u00d7</th>').join('')+'</tr><tr>'+(B.cut_detail||[]).map(d=>'<td><input class="n" type="number" step="0.1" min="0.25" data-cd="'+d.key+'" value="'+d.factor+'"></td>').join('')+'</tr>';
   $('#materials').innerHTML='<tr><th>Material</th><th>Factor</th><th>Offered</th></tr>'+B.materials.map(m=>'<tr><td><b>'+esc(m.name)+'</b></td><td><input class="n" type="number" step="0.05" min="0.1" data-mat="'+m.key+'" data-f="factor" value="'+m.factor+'"></td><td>'+B.services.map(s=>'<label class="chk"><input type="checkbox" data-mat="'+m.key+'" data-svc="'+s.key+'" '+(m.services.includes(s.key)?'checked':'')+'>'+esc(s.name)+'</label>').join('')+'</td></tr>').join('');
   $('#products').innerHTML='<tr><th>Item</th><th>Material</th><th>Customer pays ($)</th><th>Costs us ($)</th><th>Largest artwork (in)</th><th></th></tr>'+B.products.filter(p=>p.key!=='own').map(p=>prow(p)).join('')
@@ -3220,7 +3344,7 @@ function collect(){ const book={services:[],sizes:[],materials:[],products:[],qt
   document.querySelectorAll('#products tr[data-p]').forEach(tr=>{ const g=f=>tr.querySelector('[data-pf="'+f+'"]').value; book.products.push({key:tr.dataset.p,name:g('name'),material:g('material'),blank_cents:Math.round(+g('blank_cents')*100),cost_cents:Math.round(+g('cost_cents')*100),max_inches:+g('max_inches'),removed:!!tr.dataset.removed}); });
   book.products.push({key:'own'});
   document.querySelectorAll('#qty tr[data-q]').forEach(tr=>{ const mn=+tr.querySelector('[data-qf="min"]').value, off=+tr.querySelector('[data-qf="off_pct"]').value; if(mn>=1) book.qty_breaks.push({min:mn,off_pct:off}); });
-  book.show_prices=$('#showprices').checked; book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); book.text_only_own_cents=Math.round(+$('#textown').value*100); book.same_own_cents=Math.round(+$('#sameown').value*100); book.same_own_max_inches=+$('#samemax').value; book.cut_detail=[...document.querySelectorAll('input[data-cd]')].map(i=>({key:i.dataset.cd,factor:+i.value})); return book; }
+  book.show_prices=$('#showprices').checked; book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); book.text_only_own_cents=Math.round(+$('#textown').value*100); book.same_own_cents=Math.round(+$('#sameown').value*100); book.same_own_max_inches=+$('#samemax').value; book.ship_cents=Math.round(+$('#shipc').value*100); book.ship_free_cents=Math.round(+$('#shipfree').value*100); book.cut_detail=[...document.querySelectorAll('input[data-cd]')].map(i=>({key:i.dataset.cd,factor:+i.value})); return book; }
 $('#save').onclick=async()=>{ const b=$('#save'); b.disabled=true; $('#msg').textContent='Saving\\u2026'; $('#msg').className='msg';
   try{ const r=await fetch('/api/pricing/book/all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({book:collect(),note:'edited on the prices page'})}); const j=await r.json(); if(!j.ok) throw new Error(j.error||'Save failed'); B=j.book; render(); $('#msg').textContent='Saved. '+j.changed+' price'+(j.changed===1?'':'s')+' changed. The order page uses these now.'; $('#msg').className='msg ok'; }
   catch(e){ $('#msg').textContent=e.message; $('#msg').className='msg bad'; } b.disabled=false; };
@@ -3229,6 +3353,422 @@ window.addEventListener('beforeunload',e=>{ if(document.querySelector('input.cha
 load();
 </script></body></html>`;
 }
+
+// ---------------------------------------------------------------- AI host: two videos a day, posted by themselves (Hugh, Oct 27)
+// "A fully automated AI influencer business that sells a simple product like my coffee cups ... no filming from me, posts 2 times a
+// day automatically." Sunny, an AI host made in HeyGen, sells the name cups (/cups/) and business logo cups (free quote). Every
+// hour the worker takes the next approved post for each slot in the coming 30 hours, has HeyGen make the video (vertical, with
+// captions), and when it is ready hands it to Blotato scheduled for that slot on TikTok, Instagram, YouTube and Facebook. When
+// fewer than 8 posts are left, Claude writes 14 more (needs ANTHROPIC_API_KEY). Secrets: HEYGEN_API_KEY, BLOTATO_API_KEY.
+// Everything is on /admin/social, including a test button that shows each service's exact answer.
+const SOCIAL_SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS social_posts (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, kind TEXT, pillar TEXT, hook TEXT, script TEXT, bg TEXT, status TEXT DEFAULT 'approved', source TEXT, slot_at TEXT, video_id TEXT, video_url TEXT, results TEXT, error TEXT, posted_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS social_posts_status ON social_posts(status, id)`,
+];
+const SOCIAL_DEFAULTS = { enabled: false, host: "Sunny", times: ["09:00", "18:00"], avatar_type: "avatar", avatar_id: "", voice_id: "", talk_style: "normal", product_style: "circle", product_scale: 0.42, product_offset: { x: 0.28, y: 0.3 }, auto_approve: true,
+  platforms: { tiktok: "", instagram: "", youtube: "", facebook: "", facebook_page: "" } };
+const SOCIAL_PLATFORMS = ["tiktok", "instagram", "youtube", "facebook"];
+const SOCIAL_TAGS = { gift: "#personalizedgifts #customtumbler #giftideas #laserengraving", coffee: "#coffeelover #reusablecup #customtumbler #pacificbeach",
+  business: "#smallbusiness #brandedmerch #customlogo #coffeeshop", season: "#holidaygifts #giftideas #personalizedgifts #shopsmall", color: "#customtumbler #personalizedgifts #laserengraved #namecup",
+  craft: "#laserengraving #howitsmade #madeinsandiego #customtumbler", names: "#personalizedgifts #customtumbler #giftideas #teamgifts", logo: "#brandedmerch #customlogo #smallbusiness #coffeeshop" };
+const SOCIAL_BGS = { talk: ["social/talk-beach.jpg", "social/talk-shop.jpg"],
+  product: ["social/cup-navy.jpg", "social/cup-black.jpg", "social/cup-dark-gray.jpg", "social/cup-cream.jpg", "social/cup-light-blue.jpg", "social/cup-light-green.jpg", "social/cup-army-green.jpg", "social/cup-pink.jpg", "social/cup-bikini-pink.jpg", "social/cup-purple.jpg", "social/cup-orange.jpg", "social/cup-yellow.jpg",
+    "social/names-bottles.jpg", "social/names-tumblers.jpg", "social/names-team.jpg", "social/logo-cafe.jpg", "social/logo-print.jpg", "social/logo-crest.jpg", "social/logo-event.jpg",
+    "hero-laser-tumbler.mp4", "engrave-red-tumbler.mp4", "engrave-copper-plate.mp4", "laser-metal-plate.mp4", "engrave-white-bottle.mp4"] };
+// The first month, two a day: [kind, pillar, background, hook, script]. Talk posts are the host on a backdrop; product posts put
+// the host small in a corner over a cup, a name example, a logo job or a real laser video from the shop. No prices in any video.
+const SOC_T = "social/talk-beach.jpg", SOC_TS = "social/talk-shop.jpg";
+const SOCIAL_STARTER = [
+  ["talk", "gift", SOC_T, "The gift nobody returns", "Here's a gift nobody has ever returned: a cup with their name on it. I'm Sunny, the AI host for HD Laser Studio in Pacific Beach. You pick the color, type the name, and the team engraves it with a laser, so it never washes off. It's the one thing on their desk that's really theirs. Tap the link in our bio to make one."],
+  ["product", "color", "social/cup-navy.jpg", "Navy, 16 oz, Coach Mike", "This is navy. Sixteen ounces, with Coach Mike engraved on the side. Navy is the classic: coaches, dads, anyone who likes it simple. The laser cuts through the color, so the name shines silver and lasts for years. Pick your color and type a name with the link in our bio."],
+  ["talk", "gift", SOC_TS, "A teacher gift that gets used", "Teachers drink a lot of coffee. Like, a lot. So give them a cup with their name on it. Pick one of twelve colors, type Mrs. Lopez or Mr. Kim, and it's laser engraved in Pacific Beach and shipped to your door. Useful, personal, and it won't end up in a drawer. Link in our bio."],
+  ["product", "craft", "hero-laser-tumbler.mp4", "This is how your name gets on the cup", "This is the laser that makes your cup. It takes off the thin color layer and shows the steel underneath, so your name becomes part of the cup. It won't peel, fade or wash off. Every cup is made right here in Pacific Beach. Make yours with the link in our bio."],
+  ["talk", "coffee", SOC_T, "Your cup pays for itself", "A lot of coffee shops give you a little discount when you bring your own cup. Do that five days a week and it adds up fast. And if you're bringing your own cup anyway, it might as well have your name on it. Twelve colors, two sizes. Link in our bio."],
+  ["product", "color", "social/cup-pink.jpg", "Pink, 12 oz, Maya", "Pink, twelve ounces, with Maya in script. Soft color, and the engraved name shines silver right through it. Great for a birthday, a best friend, or just because. Type any name and pick from twelve colors with the link in our bio."],
+  ["talk", "business", SOC_TS, "Coffee shop owners, this one's for you", "Coffee shop owners: your regulars would carry your logo every single day if you gave them a reason. Branded reusable cups with your logo, engraved or in full color. Sell them at the counter or pair them with a refill discount. Free quote and a free proof, link in our bio."],
+  ["product", "names", "social/names-team.jpg", "One for every name on the team", "One cup for every name on the team. Each one gets its own name, all in one order. Order six or more and every cup costs less. Coaches, offices, wedding parties, families. Add the names with the link in our bio."],
+  ["talk", "gift", SOC_T, "The coach gift that beats a gift card", "End of the season and you need a coach gift? Skip the gift card. Put Coach and their name on a cup, from the whole team. Order six or more cups and you save on every one. Laser engraved in Pacific Beach and shipped anywhere in the US. Tap the link in our bio."],
+  ["product", "color", "social/cup-black.jpg", "Black, 16 oz, Jordan", "Black, sixteen ounces, Jordan in bold. Black with silver engraving is sharp, simple and goes with everything. It keeps coffee hot and cold drinks cold. Type a name and pick your style, classic, script or bold, with the link in our bio."],
+  ["talk", "season", SOC_TS, "Thanksgiving host gift idea", "Going to someone's house for Thanksgiving? Bring a host gift that isn't another candle. A cup with their name on it, or one word, like Thankful. It's laser engraved, so it lasts long after the leftovers are gone. Order early so it arrives in time. Link in our bio."],
+  ["product", "craft", "engrave-red-tumbler.mp4", "Watch a name appear", "Watch a name appear. The laser runs line by line, and in a couple of minutes the cup has a name it will keep for years. No stickers, no ink, nothing to peel. Just the cup, engraved. Make one for someone with the link in our bio."],
+  ["talk", "gift", SOC_T, "For the coworker who has everything", "Welcoming someone new at work? Put their name on a cup before their first day. It says we were ready for you better than any email. Pick the color, type the name, and we ship it anywhere in the US. Link in our bio."],
+  ["product", "color", "social/cup-cream.jpg", "Cream, 16 oz, Mrs. Lopez", "Cream, sixteen ounces, Mrs. Lopez. Teachers love this one: calm color, easy to spot on a busy desk, and the name is engraved so it never rubs off in the dishwasher line at school. Make one for your favorite teacher with the link in our bio."],
+  ["talk", "coffee", SOC_TS, "12 oz or 16 oz?", "Twelve ounces or sixteen? Twelve fits most cup holders and is perfect for a latte. Sixteen is for the big drip coffee people. Not sure? Go sixteen. Either way, your name is laser engraved on the side. Link in our bio."],
+  ["product", "logo", "social/logo-cafe.jpg", "Your café's own cups", "These are a café's own cups, with their logo engraved and printed. Your regulars carry them all over town, so your logo goes everywhere they do. Want cups like these for your shop? Ask for a free quote and a free proof with the link in our bio."],
+  ["talk", "gift", SOC_T, "What do you get Dad?", "Dad says he doesn't want anything. He does want a cup that says Dad, that nobody else in the house is allowed to use. Laser engraved, twelve colors, shipped anywhere in the US. Tap the link in our bio."],
+  ["product", "color", "social/cup-light-blue.jpg", "Light blue, 12 oz, Ava", "Light blue, twelve ounces, Ava in script. A happy color for a happy person. Type her name exactly how she spells it, because we engrave exactly what you type. Twelve colors to choose from with the link in our bio."],
+  ["talk", "business", SOC_TS, "Swag people actually use", "Want your team to actually use the company swag? Give them something they use every day. A cup with your logo, and each person's name if you want. Engraved or full color. Free quote and free proof, link in our bio."],
+  ["product", "craft", "engrave-copper-plate.mp4", "Not a sticker. Not ink.", "Not a sticker. Not ink. A laser. The same machine engraves metal, wood, glass and leather, and on our cups it reveals the steel under the color. That's why the name never fades. Every one is made in Pacific Beach. Link in our bio."],
+  ["talk", "gift", SOC_T, "Bridesmaid gift idea", "Asking your bridesmaids, or planning the bachelorette? Put each name on a cup in her favorite color. Add as many names as you want in one order, and from six cups you save on every one. Link in our bio."],
+  ["product", "color", "social/cup-light-green.jpg", "Light green, 16 oz, Plant Mom", "Light green, sixteen ounces, Plant Mom. It doesn't have to be a name. A nickname, an inside joke, one short line, up to twenty-four letters. We engrave exactly what you type. What would yours say? Make it with the link in our bio."],
+  ["talk", "season", SOC_TS, "Holiday shopping tip", "Holiday shopping tip: buy the personalized gifts first, because they take a few days to make and ship. Name cups ship in three to five business days, anywhere in the US. Do those now and relax later. Link in our bio."],
+  ["product", "names", "social/names-tumblers.jpg", "A name, a date, a short line", "A name, a date, or a short line. Monograms look great too. Pick a style: classic, script or bold, and see a preview of your cup before you buy. Make yours with the link in our bio."],
+  ["talk", "coffee", SOC_T, "Hot an hour later", "Hot coffee, still hot an hour later. That's the job of a good insulated cup. Ours come in twelve and sixteen ounces, twelve colors, and your name laser engraved on the side. Link in our bio."],
+  ["product", "color", "social/cup-army-green.jpg", "Army green, 16 oz, Sgt. Reyes", "Army green, sixteen ounces, Sgt. Reyes. Made for the people who serve, and the people who love them. Rank, name, unit, a short line. We engrave exactly what you type. Link in our bio."],
+  ["talk", "gift", SOC_TS, "Grandma's coffee cup", "Grandma's coffee deserves a cup that says Grandma. Or Nana. Or Abuela. Type it exactly the way she likes it, and we laser engrave it so it lasts for years. We'll ship it right to her door. Link in our bio."],
+  ["product", "logo", "social/logo-print.jpg", "Full color, any logo", "Full color, any logo. If your logo has lots of colors, we print it right on the cup instead of engraving it. Not sure which looks better? We'll send you a free proof of both. Free quote with the link in our bio."],
+  ["talk", "business", SOC_T, "Event cups people keep", "Running an event? Cups with your event logo become the souvenir people actually keep. Engraved or full color, from a handful to a few hundred. Ask for a free quote with the link in our bio."],
+  ["product", "craft", "laser-metal-plate.mp4", "Why engraving lasts", "Why engraving lasts: printing sits on top of a surface. Engraving goes into it. That's why a laser engraved name still looks sharp years later. Every cup we make is engraved right here in Pacific Beach. Link in our bio."],
+  ["talk", "gift", SOC_TS, "Nurses, this one's for you", "Nurses, does your cup go missing every shift? Put your name on it. Big, engraved, impossible to mix up. Pick a color you can spot across the break room. Link in our bio."],
+  ["product", "color", "social/cup-bikini-pink.jpg", "Bikini pink, 12 oz, Bride Squad", "Bikini pink, twelve ounces, Bride Squad. Order one for every bridesmaid, each with her own name if you want. Add the names in one order, and from six cups you save on every one. Link in our bio."],
+  ["talk", "coffee", SOC_T, "Pacific Beach runs on coffee", "If you've walked Garnet Avenue with a coffee in hand, you know Pacific Beach runs on coffee. Our shop is right here on Turquoise Street, and every cup is engraved in the shop. Get one with your name and we'll ship it wherever you are. Link in our bio."],
+  ["product", "names", "social/names-bottles.jpg", "Names that last", "Names that last. These were engraved for a couple, his and hers, in two colors. A matching set makes a great wedding or housewarming gift. Pick two colors and type two names with the link in our bio."],
+  ["talk", "gift", SOC_TS, "Your cup, your words", "It doesn't have to be a name. Coffee first. Plant mom. Boss lady. You get up to twenty-four letters, and we engrave exactly what you type. What would yours say? Tell me in the comments. The link to make one is in our bio."],
+  ["product", "color", "social/cup-purple.jpg", "Purple, 12 oz, Grandma", "Purple, twelve ounces, Grandma. A cup she'll reach for every morning, and think of you every time. Type the name the way she likes it, and we ship it right to her door. Link in our bio."],
+  ["talk", "business", SOC_T, "Client gifts that stay on the desk", "Gym, salon, real estate office: a client gift that sits on their desk for years beats a card that goes in the trash. Your logo, and their name if you want. Ask for a free quote with the link in our bio."],
+  ["product", "craft", "engrave-white-bottle.mp4", "Made in Pacific Beach", "Every cup is engraved and checked here in our Pacific Beach shop before it ships. Real people, a real laser, and your name spelled exactly the way you typed it. Make yours with the link in our bio."],
+  ["talk", "season", SOC_TS, "Office holiday gifts, sorted", "Getting holiday gifts for the whole office? Put everyone's name on a cup. Add every name in one order, and from six cups you save on every one. Done in one go. Link in our bio."],
+  ["product", "color", "social/cup-orange.jpg", "Orange, 16 oz, Coffee First", "Orange, sixteen ounces, Coffee First. Bright, fun, and honest. Your cup can say anything you want, up to twenty-four letters. What's your morning motto? Make it with the link in our bio."],
+  ["talk", "coffee", SOC_T, "Night-before coffee tip", "Morning routine tip: put your cup next to the coffee maker the night before. Future you will thank you. Even better if it has your name on it, so nobody else grabs it. Link in our bio."],
+  ["product", "logo", "social/logo-event.jpg", "Cups for your event", "Cups for your event. Festivals, reunions, races, fundraisers. Your logo on every cup, engraved or printed, and people use them long after the day is over. Free quote with the link in our bio."],
+  ["talk", "gift", SOC_TS, "Gifts for a couple", "Two cups, two names, one kitchen. A matching set makes a great wedding or housewarming gift. Pick two colors, type two names, and we ship them together. Link in our bio."],
+  ["product", "color", "social/cup-yellow.jpg", "Yellow, 12 oz, Sunshine", "Yellow, twelve ounces, Sunshine. For the friend who makes every day brighter. Or for you, because you deserve it. Twelve colors, two sizes, and any name or short line. Link in our bio."],
+  ["talk", "business", SOC_TS, "How a logo quote works", "Here's what happens when you ask us for a logo quote. You send the logo. We send you a free digital proof. You approve it, and we make them. No surprises. Link in our bio."],
+  ["product", "craft", "hero-laser-tumbler.mp4", "Three styles to pick from", "Three styles to pick from: classic, script and bold. When you make your cup online, you see a preview of your name in each style before you buy. Pick the one that feels like them. Link in our bio."],
+  ["talk", "season", SOC_T, "Secret Santa idea", "Secret Santa with a budget? A cup with their name on it is personal without being awkward. It's useful, and it shows you put in a little thought. Link in our bio."],
+  ["product", "color", "social/cup-dark-gray.jpg", "Dark gray, 16 oz, Dad", "Dark gray, sixteen ounces, Dad. Simple, strong, and the engraving shines silver. It keeps his coffee hot on the drive to work. Make one for Dad with the link in our bio."],
+  ["talk", "gift", SOC_TS, "Treat yourself", "You're allowed to buy yourself a gift. A cup with your name, in your color, that's actually yours. Pick from twelve colors and three styles. Link in our bio."],
+  ["product", "names", "social/names-team.jpg", "Six or more? Everyone saves.", "Ordering for a group? Add every name in one order. Once you have six or more cups, every single cup costs less. Teams, offices, families, wedding parties. Link in our bio."],
+  ["talk", "coffee", SOC_T, "Cold brew, hot tea, any of it", "Cold brew, iced coffee, hot tea. Your cup doesn't care. It keeps cold drinks cold and hot drinks hot. Make it yours with a name. Link in our bio."],
+  ["product", "logo", "social/logo-crest.jpg", "Crests, seals, logos", "Crests, seals and detailed logos come out crisp with a laser. Every fine line, engraved right into the cup. Send us your logo for a free quote and a free proof with the link in our bio."],
+  ["talk", "gift", SOC_TS, "How it works, in three steps", "Here's how it works. One: pick twelve or sixteen ounces and a color. Two: type the name and pick a style. Three: we laser engrave it in Pacific Beach and ship it in three to five business days. That's it. Link in our bio."],
+  ["product", "craft", "engrave-red-tumbler.mp4", "Caring for your cup", "Want your cup to look new for years? Hand wash it to keep the color fresh. The engraving itself is permanent, so the name stays sharp no matter what. Make one with the link in our bio."],
+  ["talk", "season", SOC_T, "Local and in a hurry?", "In San Diego and in a hurry? Call or text the shop in Pacific Beach and ask how fast we can do it. Everywhere else, order soon so it ships in time. Link in our bio."],
+  ["product", "color", "social/cup-navy.jpg", "Pick a color, any color", "Twelve colors. Navy, black, cream, pink, purple, yellow and more. Pick the one that looks like them, type their name, and we take it from there. Link in our bio."],
+  ["talk", "business", SOC_TS, "Engraved or printed?", "Engraved or printed? Engraving is one tone, cut into the cup, and it lasts forever. Printing is full color, great for colorful logos. Not sure? Ask for a free quote and we'll show you both. Link in our bio."],
+  ["product", "names", "social/names-tumblers.jpg", "Spell it right", "Quick tip: we engrave exactly what you type. So double check the spelling, especially names like Caitlin, Kaitlyn or Katelyn. You'll see a preview before you buy. Link in our bio."],
+  ["talk", "season", SOC_TS, "New year, new routine", "New year, new routine, same coffee. Start it with a cup that's yours, with your name or your new motto on it. Link in our bio."],
+  ["product", "craft", "engrave-copper-plate.mp4", "From our shop to your door", "From our shop in Pacific Beach to your door, anywhere in the US. Engraved, checked, packed and shipped in three to five business days. Make yours with the link in our bio."],
+];
+let socialReady = false;
+async function ensureSocial(env) { if (socialReady) return; for (const q of SOCIAL_SCHEMA) await env.DB.prepare(q).run(); socialReady = true; }
+async function socialSettings(env) {
+  const row = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'social_settings'`).first().catch(() => null);
+  let s = {}; try { s = row ? JSON.parse(row.v) : {}; } catch {}
+  return { ...SOCIAL_DEFAULTS, ...s, platforms: { ...SOCIAL_DEFAULTS.platforms, ...(s.platforms || {}) }, product_offset: { ...SOCIAL_DEFAULTS.product_offset, ...(s.product_offset || {}) } };
+}
+async function saveSocialSettings(env, b) {
+  const s = await socialSettings(env), str = (v, n) => String(v == null ? "" : v).trim().slice(0, n);
+  if ("enabled" in b) s.enabled = !!b.enabled;
+  if ("auto_approve" in b) s.auto_approve = !!b.auto_approve;
+  if ("host" in b) s.host = str(b.host, 40) || "Sunny";
+  if (Array.isArray(b.times)) { const t = b.times.map((x) => str(x, 5)).filter((x) => /^([01]\d|2[0-3]):[0-5]\d$/.test(x)); if (t.length === 2 && t[0] !== t[1]) s.times = t.sort(); else return { ok: false, error: "Give two different posting times, like 09:00 and 18:00" }; }
+  if ("avatar_type" in b) s.avatar_type = b.avatar_type === "talking_photo" ? "talking_photo" : "avatar";
+  for (const k of ["avatar_id", "voice_id"]) if (k in b) s[k] = str(b[k], 120);
+  for (const k of ["talk_style", "product_style"]) if (k in b) s[k] = ["normal", "circle", "closeUp"].includes(b[k]) ? b[k] : s[k];
+  if ("product_scale" in b) { const v = Number(b.product_scale); if (v >= 0.1 && v <= 1.5) s.product_scale = v; }
+  if (b.product_offset) { const x = Number(b.product_offset.x), y = Number(b.product_offset.y); if (Math.abs(x) <= 1 && Math.abs(y) <= 1) s.product_offset = { x, y }; }
+  if (b.platforms) for (const k of Object.keys(SOCIAL_DEFAULTS.platforms)) if (k in b.platforms) s.platforms[k] = str(b.platforms[k], 120);
+  await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('social_settings', ?)`).bind(JSON.stringify(s)).run();
+  return { ok: true, settings: s };
+}
+// Times are Pacific. ptToUtc turns a Pacific date and HH:MM into a UTC timestamp (works across daylight saving).
+function ptYmd(ms) { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms)); }
+function ptToUtc(ymd, hm) {
+  const [y, m, d] = ymd.split("-").map(Number), [H, M] = hm.split(":").map(Number);
+  let t = Date.UTC(y, m - 1, d, H + 8, M);
+  const h = +new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "2-digit", hourCycle: "h23" }).format(new Date(t));
+  return t - ((h - H + 24) % 24) * 3600000;
+}
+function socialSlots(times, now, hours) {
+  const out = [];
+  for (let day = 0; day < 3; day++) { const ymd = ptYmd(now + day * 864e5); times.forEach((hm, i) => { const t = ptToUtc(ymd, hm); if (t > now + 15 * 60000 && t <= now + hours * 3600000 && !out.some((o) => o.t === t)) out.push({ t, at: new Date(t).toISOString(), i }); }); }
+  return out.sort((a, b) => a.t - b.t);
+}
+function socialCaption(env, s, p, platform) {
+  const link = `${env.SITE_URL || "https://hdlaser.net"}/cups/?src=ai-${platform}`, quote = p.pillar === "business" || p.pillar === "logo";
+  const cta = platform === "facebook" ? (quote ? `Free quote for logo cups: ${link.replace("/cups/", "/order/")}&product=cup16` : `Make yours: ${link}`) : (quote ? "Free quote: link in bio" : "Make yours: link in bio");
+  return `${p.hook}\n\n${cta}\n${s.host} is our AI host. Made by real people in Pacific Beach, CA.\n${SOCIAL_TAGS[p.pillar] || SOCIAL_TAGS.gift}`.slice(0, 2000);
+}
+async function socialLoadStarter(env) {
+  await ensureSocial(env);
+  const have = await env.DB.prepare(`SELECT COUNT(*) n FROM social_posts WHERE source = 'starter'`).first();
+  if (have && have.n) return { ok: false, error: "The starter posts are already loaded" };
+  const now = new Date().toISOString();
+  const stmts = SOCIAL_STARTER.map(([kind, pillar, bg, hook, script]) => env.DB.prepare(`INSERT INTO social_posts (created_at, kind, pillar, hook, script, bg, status, source) VALUES (?,?,?,?,?,?,'approved','starter')`).bind(now, kind, pillar, hook, script, bg));
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  return { ok: true, added: stmts.length };
+}
+// HeyGen: one scene, the host saying the script over the background; product posts put the host small in a corner
+async function heygenRender(env, s, p) {
+  const product = p.kind === "product", bgUrl = `${env.SITE_URL || "https://hdlaser.net"}/assets/${p.bg}`;
+  const character = s.avatar_type === "talking_photo" ? { type: "talking_photo", talking_photo_id: s.avatar_id } : { type: "avatar", avatar_id: s.avatar_id, avatar_style: product ? s.product_style : s.talk_style };
+  if (product) { character.scale = s.product_scale; character.offset = s.product_offset; }
+  const voice = { type: "text", input_text: p.script }; if (s.voice_id) voice.voice_id = s.voice_id;
+  const background = /\.mp4$/.test(p.bg) ? { type: "video", url: bgUrl, play_style: "loop", fit: "cover" } : { type: "image", url: bgUrl, fit: "cover" };
+  const body = { video_inputs: [{ character, voice, background }], dimension: { width: 1080, height: 1920 }, caption: true, title: `HD Laser post ${p.id || "test"}` };
+  const r = await fetch("https://api.heygen.com/v2/video/generate", { method: "POST", headers: { "X-Api-Key": env.HEYGEN_API_KEY, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const d = await r.json().catch(() => ({}));
+  const id = d && d.data && d.data.video_id;
+  if (!r.ok || !id) throw new Error("HeyGen said: " + (d && d.error && (d.error.message || d.error.code) || d.message || JSON.stringify(d).slice(0, 300) || r.status));
+  return id;
+}
+async function heygenStatus(env, id) {
+  const r = await fetch("https://api.heygen.com/v1/video_status.get?video_id=" + encodeURIComponent(id), { headers: { "X-Api-Key": env.HEYGEN_API_KEY } });
+  const d = await r.json().catch(() => ({})), x = (d && d.data) || {};
+  if (!r.ok) return { status: "error", error: "HeyGen said: " + (d.message || JSON.stringify(d).slice(0, 300) || r.status) };
+  return { status: x.status || "unknown", url: x.video_url_caption || x.video_url || null, thumb: x.thumbnail_url || null, error: x.error ? (x.error.message || x.error.detail || JSON.stringify(x.error)).slice(0, 300) : null };
+}
+// Blotato: re-host the video, then one post per platform, scheduled for the slot (or now if the slot has passed)
+async function blotatoPost(env, s, p, videoUrl, platform, when) {
+  const H = { "blotato-api-key": env.BLOTATO_API_KEY, "Content-Type": "application/json" }, accountId = s.platforms[platform];
+  if (!accountId) return { ok: false, skipped: true, error: "no account" };
+  const target = platform === "tiktok" ? { targetType: "tiktok", privacyLevel: "PUBLIC_TO_EVERYONE", disabledComments: false, disabledDuet: false, disabledStitch: false, isBrandedContent: false, isYourBrand: true, isAiGenerated: true }
+    : platform === "youtube" ? { targetType: "youtube", title: (p.hook + " #shorts").slice(0, 100), privacyStatus: "public", shouldNotifySubscribers: false }
+    : platform === "facebook" ? { targetType: "facebook", pageId: s.platforms.facebook_page }
+    : { targetType: "instagram" };
+  const body = { post: { accountId, content: { text: socialCaption(env, s, p, platform), mediaUrls: [videoUrl], platform }, target } };
+  if (when && Date.parse(when) > Date.now() + 3 * 60000) body.scheduledTime = when;
+  const r = await fetch("https://backend.blotato.com/v2/posts", { method: "POST", headers: H, body: JSON.stringify(body) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return { ok: false, error: "Blotato said: " + (d.message || d.error || JSON.stringify(d).slice(0, 300) || r.status) };
+  return { ok: true, id: d.postSubmissionId || d.id || null, scheduled: body.scheduledTime || "now" };
+}
+async function blotatoMedia(env, url) {
+  const r = await fetch("https://backend.blotato.com/v2/media", { method: "POST", headers: { "blotato-api-key": env.BLOTATO_API_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+  const d = await r.json().catch(() => ({}));
+  return r.ok && d.url ? d.url : url; // if re-hosting fails, HeyGen's own link still works for a few days
+}
+// Something went wrong that will keep going wrong (a wrong avatar ID, a disconnected account): stop, so it doesn't spend money on
+// videos that can't post or work through the whole list, and tell Hugh exactly what the service said.
+async function socialProblem(env, msg, pause) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('social_error', ?)`).bind(JSON.stringify({ at: now, msg: String(msg).slice(0, 500), paused: !!pause })).run();
+  if (pause) { const s = await socialSettings(env); if (s.enabled) await saveSocialSettings(env, { enabled: false }); }
+  const last = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'social_alerted_at'`).first().catch(() => null);
+  if (last && Date.now() - Date.parse(last.v) < 6 * 3600000) return;
+  await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('social_alerted_at', ?)`).bind(now).run();
+  await sendAlert(env, `AI host${pause ? " paused" : ""}: ${String(msg).slice(0, 200)} Fix it on /admin/social${pause ? ", then turn it back on" : ""}.`, { emailShop: true }).catch(() => {});
+}
+async function socialPublish(env, s, p) {
+  const media = await blotatoMedia(env, p.video_url), results = {};
+  for (const pl of SOCIAL_PLATFORMS) results[pl] = await blotatoPost(env, s, p, media, pl, p.slot_at).catch((e) => ({ ok: false, error: String(e.message || e).slice(0, 300) }));
+  const tried = Object.values(results).filter((r) => !r.skipped), ok = tried.filter((r) => r.ok).length;
+  const status = !tried.length ? "failed" : ok ? "scheduled" : "failed", err = tried.filter((r) => !r.ok).map((r) => r.error).join(" | ") || (tried.length ? null : "No social accounts are set up on /admin/social");
+  await env.DB.prepare(`UPDATE social_posts SET status = ?, results = ?, error = ?, posted_at = ? WHERE id = ?`).bind(status, JSON.stringify(results), err, new Date().toISOString(), p.id).run();
+  if (err) await socialProblem(env, `Post ${p.id} (${p.hook}): ${ok ? "some platforms failed" : "not posted"}. ${err}`, !ok);
+  return { status, results };
+}
+async function socialTick(env, force) {
+  if (!env.DB) return { skipped: "no database" };
+  await ensureSocial(env);
+  const s = await socialSettings(env), log = [];
+  if (!s.enabled && !force) return { skipped: "off" };
+  if (!env.HEYGEN_API_KEY || !env.BLOTATO_API_KEY || !s.avatar_id) return { skipped: "HeyGen or Blotato key, or the avatar, is missing" };
+  // 1. videos HeyGen finished: hand them to Blotato for their slot
+  for (const p of (await env.DB.prepare(`SELECT * FROM social_posts WHERE status = 'rendering' ORDER BY slot_at`).all()).results) {
+    const st = await heygenStatus(env, p.video_id);
+    if (st.status === "completed" && st.url) { await env.DB.prepare(`UPDATE social_posts SET video_url = ? WHERE id = ?`).bind(st.url, p.id).run(); p.video_url = st.url; log.push({ id: p.id, ...(await socialPublish(env, s, p)) }); }
+    else if (st.status === "failed" || (Date.now() - Date.parse(p.slot_at) > 12 * 3600000)) {
+      await env.DB.prepare(`UPDATE social_posts SET status = 'failed', error = ? WHERE id = ?`).bind(st.error || "HeyGen did not finish the video", p.id).run();
+      await socialProblem(env, `HeyGen could not make the video for post ${p.id}. ${st.error || ""}`, true);
+      log.push({ id: p.id, status: "failed" });
+    } else log.push({ id: p.id, status: st.status });
+  }
+  // 2. the slots in the next 30 hours that have no post yet: the morning slot takes a talk post, the evening one a product post
+  for (const slot of socialSlots(s.times, Date.now(), 30)) {
+    if (await env.DB.prepare(`SELECT 1 FROM social_posts WHERE slot_at = ? AND status NOT IN ('skipped','failed')`).bind(slot.at).first()) continue;
+    const want = slot.i === 0 ? "talk" : "product";
+    const p = await env.DB.prepare(`SELECT * FROM social_posts WHERE status = 'approved' AND slot_at IS NULL ORDER BY (kind = ?) DESC, id LIMIT 1`).bind(want).first();
+    if (!p) { log.push({ slot: slot.at, status: "nothing approved to post" }); break; }
+    try { const vid = await heygenRender(env, s, p); await env.DB.prepare(`UPDATE social_posts SET status = 'rendering', slot_at = ?, video_id = ?, error = NULL WHERE id = ?`).bind(slot.at, vid, p.id).run(); log.push({ id: p.id, slot: slot.at, status: "rendering" }); }
+    catch (e) { // the post stays in line; the engine pauses until the setup is fixed
+      await env.DB.prepare(`UPDATE social_posts SET error = ? WHERE id = ?`).bind(String(e.message || e).slice(0, 400), p.id).run();
+      await socialProblem(env, String(e.message || e), true); log.push({ id: p.id, status: "paused", error: String(e.message || e) }); break; }
+  }
+  // 3. running low: Claude writes the next 14 (at most every two days)
+  const left = await env.DB.prepare(`SELECT COUNT(*) n FROM social_posts WHERE status IN ('approved','draft') AND slot_at IS NULL`).first();
+  if (left && left.n < 8 && env.ANTHROPIC_API_KEY) {
+    const last = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'social_written_at'`).first().catch(() => null);
+    if (!last || Date.now() - Date.parse(last.v) > 48 * 3600000) log.push({ wrote: await socialWrite(env, 14).catch((e) => ({ ok: false, error: String(e.message || e) })) });
+  }
+  return { ok: true, log };
+}
+// Claude writes the next batch of posts: half talk, half product, in the brand voice, no repeats, as JSON that matches the schema
+async function socialWrite(env, n) {
+  if (!env.ANTHROPIC_API_KEY) return { ok: false, error: "Add ANTHROPIC_API_KEY in Cloudflare to have new posts written" };
+  await ensureSocial(env);
+  const s = await socialSettings(env);
+  await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('social_written_at', ?)`).bind(new Date().toISOString()).run();
+  const recent = (await env.DB.prepare(`SELECT hook FROM social_posts ORDER BY id DESC LIMIT 80`).all()).results.map((r) => r.hook);
+  const since = new Date(Date.now() - 30 * 864e5).toISOString();
+  const sales = (await env.DB.prepare(`SELECT channel, COUNT(*) n, COALESCE(SUM(paid_cents),0) c FROM orders WHERE status = 'paid' AND channel LIKE 'AI influencer%' AND paid_at >= ? GROUP BY channel`).bind(since).all()).results;
+  const schema = { type: "object", additionalProperties: false, required: ["posts"], properties: { posts: { type: "array", items: { type: "object", additionalProperties: false, required: ["kind", "pillar", "bg", "hook", "script"], properties: {
+    kind: { type: "string", enum: ["talk", "product"] }, pillar: { type: "string", enum: Object.keys(SOCIAL_TAGS) }, bg: { type: "string", enum: [...SOCIAL_BGS.talk, ...SOCIAL_BGS.product] }, hook: { type: "string" }, script: { type: "string" } } } } } };
+  const system = `You write short vertical videos for ${s.host}, the AI host of HD Laser Studio, a small laser engraving shop at 759 Turquoise St in Pacific Beach, San Diego (since 2018). The videos sell two things:
+1. Name cups at hdlaser.net/cups: insulated stainless cups, 12 oz or 16 oz, 12 colors (navy, black, dark gray, cream, light blue, light green, army green, pink, bikini pink, purple, orange, yellow), laser engraved with a name or a short line of up to 24 letters in one of three styles (classic, script, bold). The buyer sees a preview, pays online, and it ships anywhere in the US in 3-5 business days. Six or more cups in one order cost less each.
+2. Cups with a business logo for cafes, teams, offices and events, engraved or printed in full color, with a free quote and a free digital proof.
+How the laser works: it removes the thin color layer and reveals the steel, so the engraving is permanent and never peels or washes off.
+
+Each post is one spoken script of 45 to 75 words (about 25 seconds), read by the AI host. Write the way a friendly local shop owner talks: plain words, short sentences, no jargon, no hype words like "elevate" or "game-changer". The first sentence is the hook and must make someone stop scrolling. End with one call to action: "link in our bio" (for logo cups: ask for a free quote with the link in our bio).
+Rules: never say a price or a discount amount (say "costs less" for 6 or more). Never invent reviews, testimonials, customers, statistics, delivery dates or awards. Never name other brands or companies. No health or safety claims. The host may say it is an AI host; it never claims to engrave anything itself (the team in Pacific Beach does). Never promise same-day service.
+"talk" posts: the host on a plain backdrop, bg is one of ${SOCIAL_BGS.talk.join(", ")}; pillars gift, coffee, business or season. "product" posts: the host small in a corner over the bg; pillars color (bg is that color's cup photo, and the script names the color and an example name), craft (bg is a laser video, .mp4), names (bg names-*.jpg) or logo (bg logo-*.jpg). The hook is a short title for the post (under 60 characters), used as the caption's first line.`;
+  const user = `Today is ${ptYmd(Date.now())}. Write ${n} new posts: ${Math.ceil(n / 2)} talk and ${Math.floor(n / 2)} product, mixing the pillars, and use seasonal angles that fit the next three weeks.
+Do not repeat or closely copy these recent hooks:
+${recent.map((h) => "- " + h).join("\n")}
+Sales from the AI host in the last 30 days: ${sales.length ? sales.map((r) => `${r.channel}: ${r.n} orders`).join("; ") : "none yet"}.`;
+  const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2026-10-21", "anthropic-beta": "server-side-fallback-2026-07-01", "content-type": "application/json" },
+    body: JSON.stringify({ model: "claude-opus-5-5", max_tokens: 16000, fallbacks: "default", output_config: { effort: "medium", format: { type: "json_schema", schema } }, system, messages: [{ role: "user", content: user }] }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return { ok: false, error: "Claude said: " + ((d.error && d.error.message) || r.status) };
+  if (d.stop_reason === "refusal") return { ok: false, error: "Claude declined to write this batch" + (d.stop_details && d.stop_details.explanation ? ": " + d.stop_details.explanation : "") };
+  if (d.stop_reason === "max_tokens") return { ok: false, error: "Claude ran out of room; try again" };
+  let posts = []; try { posts = JSON.parse((d.content || []).filter((b) => b.type === "text").map((b) => b.text).join("")).posts || []; } catch { return { ok: false, error: "Claude's answer wasn't readable; try again" }; }
+  const bgs = new Set([...SOCIAL_BGS.talk, ...SOCIAL_BGS.product]), now = new Date().toISOString();
+  const good = posts.filter((p) => p && ["talk", "product"].includes(p.kind) && SOCIAL_TAGS[p.pillar] && bgs.has(p.bg) && String(p.script || "").split(/\s+/).length >= 25 && String(p.script).length <= 900 && !/\$\s?\d/.test(p.script));
+  if (good.length) await env.DB.batch(good.map((p) => env.DB.prepare(`INSERT INTO social_posts (created_at, kind, pillar, hook, script, bg, status, source) VALUES (?,?,?,?,?,?,?,'ai')`).bind(now, p.kind, p.pillar, String(p.hook).slice(0, 100), String(p.script).slice(0, 900), p.bg, s.auto_approve ? "approved" : "draft")));
+  if (good.length && !s.auto_approve) await sendAlert(env, `${good.length} new AI host posts are waiting for your OK on /admin/social`, { emailShop: true }).catch(() => {});
+  return { ok: true, added: good.length, dropped: posts.length - good.length };
+}
+async function socialState(env) {
+  await ensureSocial(env);
+  const s = await socialSettings(env), q = async (sql, ...a) => (await env.DB.prepare(sql).bind(...a).all()).results;
+  const since = new Date(Date.now() - 30 * 864e5).toISOString();
+  const pe = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'social_error'`).first().catch(() => null);
+  return { settings: s, keys: { heygen: !!env.HEYGEN_API_KEY, blotato: !!env.BLOTATO_API_KEY, anthropic: !!env.ANTHROPIC_API_KEY }, problem: pe ? JSON.parse(pe.v) : null,
+    slots: socialSlots(s.times, Date.now(), 48).map((x) => x.at), starter_loaded: !!(await env.DB.prepare(`SELECT 1 FROM social_posts WHERE source = 'starter'`).first()),
+    upcoming: await q(`SELECT id, kind, pillar, hook, script, bg, status, source, slot_at, error FROM social_posts WHERE status IN ('approved','draft','rendering') ORDER BY slot_at IS NULL, slot_at, id LIMIT 60`),
+    done: await q(`SELECT id, kind, pillar, hook, bg, status, slot_at, video_url, results, error, posted_at FROM social_posts WHERE status IN ('scheduled','failed','skipped') ORDER BY COALESCE(posted_at, slot_at) DESC LIMIT 40`),
+    left: (await env.DB.prepare(`SELECT COUNT(*) n FROM social_posts WHERE status = 'approved' AND slot_at IS NULL`).first()).n,
+    sales: await q(`SELECT channel, COUNT(*) orders, COALESCE(SUM(paid_cents - refunded_cents),0) revenue_cents FROM orders WHERE status IN ('paid','refunded') AND channel LIKE 'AI influencer%' AND paid_at >= ? GROUP BY channel ORDER BY revenue_cents DESC`, since),
+    quotes: (await env.DB.prepare(`SELECT COUNT(*) n FROM orders WHERE status = 'quote' AND channel LIKE 'AI influencer%' AND created_at >= ?`).bind(since).first()).n };
+}
+async function socialEdit(env, b) {
+  await ensureSocial(env);
+  const id = +b.id || 0, p = await env.DB.prepare(`SELECT * FROM social_posts WHERE id = ?`).bind(id).first();
+  if (!p) return { ok: false, error: "No such post" };
+  if (b.action === "skip") { if (p.status === "rendering" || p.status === "scheduled") return { ok: false, error: "It's already being made or scheduled. Delete it in Blotato if it shouldn't go out." }; await env.DB.prepare(`UPDATE social_posts SET status = 'skipped', slot_at = NULL WHERE id = ?`).bind(id).run(); return { ok: true }; }
+  if (b.action === "approve") { await env.DB.prepare(`UPDATE social_posts SET status = 'approved', slot_at = NULL, error = NULL, video_id = NULL WHERE id = ? AND status IN ('draft','skipped','failed')`).bind(id).run(); return { ok: true }; }
+  if (b.action === "save") {
+    if (!["approved", "draft"].includes(p.status)) return { ok: false, error: "Only posts that haven't been made yet can be edited" };
+    const script = String(b.script || "").trim().slice(0, 900), hook = String(b.hook || "").trim().slice(0, 100);
+    if (script.split(/\s+/).length < 8 || !hook) return { ok: false, error: "Give it a title and a script" };
+    await env.DB.prepare(`UPDATE social_posts SET script = ?, hook = ? WHERE id = ?`).bind(script, hook, id).run(); return { ok: true };
+  }
+  return { ok: false, error: "Unknown action" };
+}
+// The test button: make one video now from a post (or a typed script), check on it, and post it now to one platform
+async function socialTest(env, b) {
+  await ensureSocial(env);
+  const s = await socialSettings(env);
+  if (!env.HEYGEN_API_KEY) return { ok: false, error: "HEYGEN_API_KEY isn't set in Cloudflare yet" };
+  if (b.step === "render") {
+    if (!s.avatar_id) return { ok: false, error: "Save the HeyGen avatar ID first" };
+    const p = b.id ? await env.DB.prepare(`SELECT * FROM social_posts WHERE id = ?`).bind(+b.id).first() : { kind: b.kind === "product" ? "product" : "talk", pillar: "gift", bg: b.kind === "product" ? "social/cup-navy.jpg" : SOCIAL_BGS.talk[0], hook: "Test video", script: String(b.script || `Hi, I'm ${s.host}, the AI host for HD Laser Studio in Pacific Beach. This is a test video.`).slice(0, 900) };
+    if (!p) return { ok: false, error: "No such post" };
+    try { return { ok: true, video_id: await heygenRender(env, s, p) }; } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  }
+  if (b.step === "status") return { ok: true, ...(await heygenStatus(env, String(b.video_id || ""))) };
+  if (b.step === "post") {
+    if (!env.BLOTATO_API_KEY) return { ok: false, error: "BLOTATO_API_KEY isn't set in Cloudflare yet" };
+    if (!SOCIAL_PLATFORMS.includes(b.platform)) return { ok: false, error: "Pick a platform" };
+    const p = { id: 0, kind: "talk", pillar: "gift", hook: "Test post, please ignore", script: "" };
+    const media = await blotatoMedia(env, String(b.url || ""));
+    return await blotatoPost(env, s, p, media, b.platform, null);
+  }
+  return { ok: false, error: "Unknown step" };
+}
+
+const SOCIAL_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI host | HD Laser</title><meta name="robots" content="noindex">
+<style>
+:root{--bg:#F6F4EF;--ink:#15191E;--mut:#545B63;--red:#C8372A;--line:#E4E0D8;--ok:#1F6B36;--warn:#8A1C12}
+*{box-sizing:border-box}[hidden]{display:none !important}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 60px}h1{margin:0 0 4px;font-size:28px}h2{margin:0 0 10px;font-size:20px}
+.sub{color:var(--mut);margin:0 0 16px}.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;margin:0 0 14px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+label{display:block;font-size:14px;font-weight:700;color:var(--mut)}input,select,textarea{font:inherit;width:100%;padding:9px 10px;border:1px solid #BDB6AA;border-radius:10px;background:#fff;color:var(--ink)}
+textarea{min-height:92px}.btn{font:inherit;font-weight:700;padding:10px 16px;border-radius:999px;border:2px solid var(--ink);background:#fff;color:var(--ink);cursor:pointer}
+.btn.red{background:var(--red);border-color:var(--red);color:#fff}.btn.sm{padding:5px 11px;font-size:14px}.btn:disabled{opacity:.55}
+.pill{display:inline-block;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;background:#EEF0F2;color:#3B434B;white-space:nowrap}
+.pill.on,.pill.scheduled{background:#E9F4EC;color:var(--ok)}.pill.off,.pill.failed{background:#FDECEA;color:var(--warn)}.pill.rendering{background:#FFF4D6;color:#7A5300}.pill.draft{background:#E8EEF8;color:#2F4F7F}
+.msg{margin:10px 0 0;font-weight:700}.msg.bad{color:var(--warn)}.msg.good{color:var(--ok)}.small{font-size:13px;color:var(--mut)}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:9px 6px;border-bottom:1px solid var(--line);vertical-align:top;font-size:15px}th{font-size:13px;color:var(--mut)}
+td.bg img,td.bg video{width:54px;height:96px;object-fit:cover;border-radius:8px;background:#ddd}.problem{background:#FDECEA;border-color:#F3B9B1}
+.switch{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px}.switch input{width:26px;height:26px}
+video.test{width:220px;border-radius:12px;background:#000}
+</style></head><body><main>
+<h1>AI host</h1><p class="sub">Two videos a day, made and posted by themselves. Morning: the host talks. Evening: the host over a cup, a name, a logo job or a laser video. Times are Pacific.</p>
+<div class="card problem" id="problem" hidden></div>
+<div class="card"><div class="row" style="justify-content:space-between"><label class="switch"><input type="checkbox" id="on"> <span id="ontext">Posting is off</span></label><div class="row"><span id="keys"></span><button class="btn sm" id="run">Run now</button></div></div>
+<p class="small" id="next" style="margin:10px 0 0"></p><p class="msg" id="runmsg"></p></div>
+<div class="card"><h2>Sales from the AI host, last 30 days</h2><div id="sales" class="small"></div></div>
+<div class="card"><h2>Setup</h2>
+<div class="grid">
+<div><label>Host name</label><input id="host"></div>
+<div><label>Morning post (Pacific)</label><input id="t0" type="time"></div>
+<div><label>Evening post (Pacific)</label><input id="t1" type="time"></div>
+<div><label>New posts written by AI</label><select id="auto"><option value="1">Go out by themselves</option><option value="0">Wait for my OK</option></select></div>
+</div>
+<h3 style="margin:16px 0 8px">HeyGen (the video)</h3>
+<div class="grid">
+<div><label>Avatar type</label><select id="atype"><option value="avatar">Avatar from HeyGen's list</option><option value="talking_photo">Photo avatar (my own AI character)</option></select></div>
+<div><label>Avatar ID</label><input id="aid" placeholder="from HeyGen"></div>
+<div><label>Voice ID</label><input id="vid" placeholder="from HeyGen"></div>
+</div>
+<details style="margin-top:10px"><summary class="small">Where the host sits in product videos</summary><div class="grid" style="margin-top:8px">
+<div><label>Style</label><select id="pstyle"><option value="circle">Circle</option><option value="normal">Normal</option><option value="closeUp">Close up</option></select></div>
+<div><label>Size (0.1 to 1.5)</label><input id="pscale" type="number" step="0.05"></div>
+<div><label>Left/right (-1 to 1)</label><input id="px" type="number" step="0.05"></div>
+<div><label>Up/down (-1 to 1)</label><input id="py" type="number" step="0.05"></div></div></details>
+<h3 style="margin:16px 0 8px">Blotato (the posting), account IDs</h3>
+<div class="grid">
+<div><label>TikTok</label><input id="p_tiktok"></div><div><label>Instagram</label><input id="p_instagram"></div><div><label>YouTube</label><input id="p_youtube"></div>
+<div><label>Facebook</label><input id="p_facebook"></div><div><label>Facebook page ID</label><input id="p_facebook_page"></div></div>
+<div class="row" style="margin-top:14px"><button class="btn red" id="save">Save setup</button><span class="msg" id="savemsg"></span></div></div>
+<div class="card"><h2>Test it</h2><p class="small">1. Make one video now (about 2 to 10 minutes). 2. Watch it. 3. Post it to one platform. Each step shows exactly what HeyGen or Blotato said.</p>
+<div class="row"><select id="tkind" style="width:auto"><option value="talk">Talking video</option><option value="product">Product video</option></select><button class="btn" id="trender">1. Make a test video</button></div>
+<p class="msg" id="tmsg"></p><div id="tvideo"></div>
+<div class="row" id="tpost" hidden style="margin-top:10px">Post it now to: <button class="btn sm" data-pf="tiktok">TikTok</button><button class="btn sm" data-pf="instagram">Instagram</button><button class="btn sm" data-pf="youtube">YouTube</button><button class="btn sm" data-pf="facebook">Facebook</button></div>
+<p class="msg" id="tpmsg"></p></div>
+<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Coming up <span class="small" id="left"></span></h2><div class="row"><button class="btn sm" id="starter">Load the 60 starter posts</button><button class="btn sm" id="write">Write 14 more with AI</button></div></div>
+<p class="msg" id="qmsg"></p><table id="up"></table></div>
+<div class="card"><h2>Already made</h2><p class="small">Scheduled means Blotato has it for that time. Check Blotato's calendar to see it go live.</p><table id="done"></table></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);let S=null;
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const when=iso=>iso?new Date(iso).toLocaleString('en-US',{timeZone:'America/Los_Angeles',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'next in line';
+const money=c=>'$'+(c/100).toFixed(2);
+async function api(path,body){const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'});return r.json();}
+function bgEl(bg){const u='https://hdlaser.net/assets/'+bg;return /\\.mp4$/.test(bg)?'<video src="'+u+'" muted playsinline preload="metadata"></video>':'<img src="'+u+'" alt="" loading="lazy">';}
+function render(){const s=S.settings;
+ $('#on').checked=s.enabled;$('#ontext').textContent=s.enabled?'Posting is on':'Posting is off';
+ $('#keys').innerHTML=['heygen','blotato','anthropic'].map(k=>'<span class="pill '+(S.keys[k]?'on':'off')+'">'+({heygen:'HeyGen',blotato:'Blotato',anthropic:'AI writer'})[k]+(S.keys[k]?' key set':' key missing')+'</span>').join(' ');
+ $('#next').textContent=S.slots.length?'Next slots: '+S.slots.slice(0,4).map(when).join(' · '):'';
+ const p=S.problem;$('#problem').hidden=!p;if(p)$('#problem').innerHTML='<b>'+(p.paused?'Paused because of a problem':'Last problem')+'</b> ('+when(p.at)+')<br>'+esc(p.msg)+(p.paused?'<br><span class="small">Fix it, then turn posting back on.</span>':'');
+ $('#host').value=s.host;$('#t0').value=s.times[0];$('#t1').value=s.times[1];$('#auto').value=s.auto_approve?'1':'0';
+ $('#atype').value=s.avatar_type;$('#aid').value=s.avatar_id;$('#vid').value=s.voice_id;$('#pstyle').value=s.product_style;$('#pscale').value=s.product_scale;$('#px').value=s.product_offset.x;$('#py').value=s.product_offset.y;
+ for(const k in s.platforms)$('#p_'+k).value=s.platforms[k];
+ $('#sales').innerHTML=(S.sales.length?'<table><tr><th>Came from</th><th>Paid orders</th><th>Sales</th></tr>'+S.sales.map(r=>'<tr><td>'+esc(r.channel)+'</td><td>'+r.orders+'</td><td>'+money(r.revenue_cents)+'</td></tr>').join('')+'</table>':'No sales from the AI host yet.')+'<p>'+S.quotes+' logo quote request'+(S.quotes===1?'':'s')+' from the AI host.</p>';
+ $('#starter').hidden=S.starter_loaded;$('#write').disabled=!S.keys.anthropic;$('#write').title=S.keys.anthropic?'':'Add ANTHROPIC_API_KEY in Cloudflare first';
+ $('#left').textContent='('+S.left+' waiting'+(S.left?', about '+Math.floor(S.left/2)+' days':'')+')';
+ $('#up').innerHTML=S.upcoming.length?'<tr><th></th><th>When</th><th>Post</th><th></th></tr>'+S.upcoming.map(p=>'<tr data-id="'+p.id+'"><td class="bg">'+bgEl(p.bg)+'</td><td style="white-space:nowrap">'+when(p.slot_at)+'<br><span class="pill '+p.status+'">'+p.status+'</span><br><span class="small">'+p.kind+', '+p.pillar+(p.source==='ai'?', by AI':'')+'</span></td><td><input class="hk" value="'+esc(p.hook)+'"><textarea class="sc">'+esc(p.script)+'</textarea>'+(p.error?'<div class="msg bad">'+esc(p.error)+'</div>':'')+'</td><td>'+(p.status==='rendering'?'':'<button class="btn sm" data-act="save">Save</button><br><br>'+(p.status==='draft'?'<button class="btn sm red" data-act="approve">OK</button><br><br>':'')+'<button class="btn sm" data-act="skip">Skip</button>')+'</td></tr>').join(''):'<tr><td class="small">Nothing waiting. Load the starter posts or write more.</td></tr>';
+ $('#done').innerHTML=S.done.length?'<tr><th></th><th>When</th><th>Post</th><th>Result</th></tr>'+S.done.map(p=>{let r={};try{r=JSON.parse(p.results||'{}');}catch(e){}return '<tr data-id="'+p.id+'"><td class="bg">'+bgEl(p.bg)+'</td><td style="white-space:nowrap">'+when(p.slot_at)+'<br><span class="pill '+p.status+'">'+p.status+'</span></td><td><b>'+esc(p.hook)+'</b>'+(p.video_url?'<br><a href="'+esc(p.video_url)+'" target="_blank" rel="noopener">Watch the video</a>':'')+'</td><td class="small">'+Object.keys(r).map(k=>k+': '+(r[k].ok?'ok':r[k].skipped?'not set up':esc(r[k].error))).join('<br>')+(p.error&&!Object.keys(r).length?'<span class="msg bad">'+esc(p.error)+'</span>':'')+(p.status!=='scheduled'?'<br><button class="btn sm" data-act="approve">Put back in line</button>':'')+'</td></tr>';}).join(''):'<tr><td class="small">Nothing yet.</td></tr>';
+}
+async function load(){S=await api('/api/social');render();}
+$('#on').onchange=async e=>{const r=await api('/api/social/settings',{enabled:e.target.checked});if(!r.ok)alert(r.error);load();};
+$('#save').onclick=async()=>{const pf={};for(const k of ['tiktok','instagram','youtube','facebook','facebook_page'])pf[k]=$('#p_'+k).value;
+ const r=await api('/api/social/settings',{host:$('#host').value,times:[$('#t0').value,$('#t1').value],auto_approve:$('#auto').value==='1',avatar_type:$('#atype').value,avatar_id:$('#aid').value,voice_id:$('#vid').value,product_style:$('#pstyle').value,product_scale:$('#pscale').value,product_offset:{x:$('#px').value,y:$('#py').value},platforms:pf});
+ $('#savemsg').className='msg '+(r.ok?'good':'bad');$('#savemsg').textContent=r.ok?'Saved.':r.error;if(r.ok)load();};
+$('#run').onclick=async()=>{$('#run').disabled=true;$('#runmsg').textContent='Running\\u2026';const r=await api('/api/social/run',{});$('#runmsg').textContent=r.skipped?'Not run: '+r.skipped:'Done. '+(r.log||[]).map(x=>(x.id?'post '+x.id+': ':'')+(x.status||'')+(x.error?' ('+x.error+')':'')).join(' · ');$('#run').disabled=false;load();};
+let TV=null;
+$('#trender').onclick=async()=>{$('#trender').disabled=true;$('#tvideo').innerHTML='';$('#tpost').hidden=true;$('#tmsg').className='msg';$('#tmsg').textContent='Asking HeyGen\\u2026';
+ const r=await api('/api/social/test',{step:'render',kind:$('#tkind').value});if(!r.ok){$('#tmsg').className='msg bad';$('#tmsg').textContent=r.error;$('#trender').disabled=false;return;}
+ TV={id:r.video_id};$('#tmsg').textContent='HeyGen is making it. This page checks every 15 seconds\\u2026';
+ const tick=async()=>{const st=await api('/api/social/test',{step:'status',video_id:TV.id});
+  if(st.status==='completed'&&st.url){TV.url=st.url;$('#tmsg').className='msg good';$('#tmsg').textContent='Ready. Watch it, then post it if it looks right.';$('#tvideo').innerHTML='<video class="test" controls playsinline src="'+esc(st.url)+'"></video>';$('#tpost').hidden=false;$('#trender').disabled=false;return;}
+  if(st.status==='failed'||st.status==='error'){$('#tmsg').className='msg bad';$('#tmsg').textContent='HeyGen: '+(st.error||st.status);$('#trender').disabled=false;return;}
+  $('#tmsg').textContent='HeyGen is making it ('+st.status+'). Checking again in 15 seconds\\u2026';setTimeout(tick,15000);};setTimeout(tick,15000);};
+$('#tpost').onclick=async e=>{const b=e.target.closest('[data-pf]');if(!b||!TV||!TV.url)return;$('#tpmsg').className='msg';$('#tpmsg').textContent='Sending to '+b.textContent+'\\u2026';
+ const r=await api('/api/social/test',{step:'post',platform:b.dataset.pf,url:TV.url});$('#tpmsg').className='msg '+(r.ok?'good':'bad');$('#tpmsg').textContent=r.ok?b.textContent+': Blotato took it. It should show up on the account in a few minutes.':b.textContent+': '+(r.error||'failed');};
+$('#starter').onclick=async()=>{const r=await api('/api/social/starter',{});$('#qmsg').className='msg '+(r.ok?'good':'bad');$('#qmsg').textContent=r.ok?r.added+' posts added.':r.error;load();};
+$('#write').onclick=async()=>{$('#write').disabled=true;$('#qmsg').className='msg';$('#qmsg').textContent='Writing 14 posts, about a minute\\u2026';const r=await api('/api/social/write',{});$('#qmsg').className='msg '+(r.ok?'good':'bad');$('#qmsg').textContent=r.ok?r.added+' new posts added.':r.error;load();};
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-act]');if(!b)return;const tr=b.closest('tr'),id=tr.dataset.id,act=b.dataset.act;
+ const body={id,action:act};if(act==='save'){body.hook=tr.querySelector('.hk').value;body.script=tr.querySelector('.sc').value;}
+ const r=await api('/api/social/post',body);if(!r.ok)alert(r.error);else if(act==='save'){b.textContent='Saved';setTimeout(()=>b.textContent='Save',1500);}else load();});
+load();
+</script></body></html>`;
+
 
 // ---------------------------------------------------------------- customers (Hugh, Oct 7)
 // One list of everyone who has bought or asked: web and counter orders, quote requests, walk-in jobs, coffee orders, and

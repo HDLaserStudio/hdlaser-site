@@ -139,7 +139,7 @@ button[type=submit]:hover{background:var(--redd)}
 <script src="/assets/site-config.js?v=7"></script>
 <script>
   var qs = new URLSearchParams(location.search), ref = (qs.get('ref') || '').replace(/[^A-Z0-9-]/gi, ''), h1 = document.getElementById('h1'), lead = document.getElementById('lead');
-  var quote = qs.get('kind') === 'quote', custom = qs.get('kind') === 'custom' || quote, hasLogo = qs.get('logo') === '1';
+  var quote = qs.get('kind') === 'quote', cups = qs.get('kind') === 'cups', custom = qs.get('kind') === 'custom' || quote || cups, hasLogo = qs.get('logo') === '1';
   if (custom) {
     // an order from the order builder: no cups, no resale certificate; tax was charged at checkout
     var pb = document.querySelector('.pb'); if (pb) pb.hidden = true;
@@ -154,6 +154,7 @@ button[type=submit]:hover{background:var(--redd)}
     h1.textContent = 'You’re in. Order ' + ref + ' is confirmed.';
     lead.textContent = qs.get('counter') === '1' ? 'Paid at the counter. Your proof is next; your receipt is on its way from Square.' : custom ? 'Payment received. Your proof is next, and your receipt from Square is on its way to your inbox.' : 'Payment received. Two quick things below and we’ll get your proof started. Your receipt from Square is on its way to your inbox.';
     document.getElementById('paid').hidden = qs.get('done') === '1'; // paid at pickup: the work is done, so no logo or proof steps
+    if (cups) { h1.textContent = 'Paid! Your cups are next.'; lead.textContent = 'We\u2019ll engrave your cups and ship them within 3\u20135 business days. Your order number is ' + ref + '. We\u2019ll email you the tracking number, and your receipt from Square is on its way.'; document.getElementById('paid').hidden = true; var nc = document.querySelector('ul.steps'); if (nc && nc.closest('.card')) nc.closest('.card').hidden = true; }
     if (qs.get('done') === '1') { h1.textContent = 'Thank you! Order ' + ref + ' is paid.'; lead.textContent = 'Paid at the counter. Thank you for coming in, we hope you love it.'; var nx = document.querySelector('ul.steps'); if (nx && nx.closest('.card')) nx.closest('.card').hidden = true; }
     if (qs.get('counter') === '1' && (window.HD_CONFIG || {}).WORKER_BASE) {
       var pb = document.createElement('button'); pb.id = 'printrc'; pb.type = 'button'; pb.textContent = 'Print receipt on the Terminal'; pb.style.cssText = 'font:inherit;font-weight:700;padding:12px 22px;border-radius:999px;border:2px solid #15191E;background:#fff;cursor:pointer;margin:12px 0 0';
