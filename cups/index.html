@@ -18,6 +18,8 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <meta name="theme-color" content="#15191E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&amp;family=Figtree:wght@400;500;700;800&amp;family=Playfair+Display:wght@600&amp;family=Dancing+Script:wght@700&amp;display=swap">
 <style>
 :root{--bg:#F6F4EF;--ink:#15191E;--muted:#545B63;--red:#C8372A;--redd:#A32C21;--line:#E4E0D8;--field:#A9A196;--sel:#FBE9E6}
@@ -252,8 +254,25 @@ input[type=text],input[type=email],input[type=tel],select,textarea{font:inherit;
     var b = d.book, p = function(k){ for (var i = 0; i < b.products.length; i++) if (b.products[i].key === k) return b.products[i]; return {}; };
     var u = function(x){ return (x.blank_cents || 0) + ((x.flat_work && x.flat_work.engrave) || 1500); }, off = p('cup16').qty_off || { min:6, cents:500 };
     P = { '12': u(p('cup12')), '16': u(p('cup16')), off_min: off.min, off_cents: off.cents, ship_cents: b.ship_cents == null ? 995 : b.ship_cents, ship_free_cents: b.ship_free_cents || 0 };
-    TAX = d.tax_rate || TAX; render();
+    TAX = d.tax_rate || TAX; render(); schema();
   }).catch(function(){ $('#loaderr').hidden = false; });
+  // Product details for Google (Oct 28), from the live price list so the price Google shows always matches the page.
+  function schema() {
+    try {
+      var m = function(c){ return (c / 100).toFixed(2); };
+      var offer = function(c){ return { '@type':'Offer', url:'https://hdlaser.net/cups/', price:m(c), priceCurrency:'USD', availability:'https://schema.org/InStock', itemCondition:'https://schema.org/NewCondition',
+        shippingDetails:{ '@type':'OfferShippingDetails', shippingRate:{ '@type':'MonetaryAmount', value:m(P.ship_cents), currency:'USD' }, shippingDestination:{ '@type':'DefinedRegion', addressCountry:'US' },
+          deliveryTime:{ '@type':'ShippingDeliveryTime', handlingTime:{ '@type':'QuantitativeValue', minValue:3, maxValue:5, unitCode:'DAY' }, transitTime:{ '@type':'QuantitativeValue', minValue:2, maxValue:5, unitCode:'DAY' } } },
+        hasMerchantReturnPolicy:{ '@type':'MerchantReturnPolicy', applicableCountry:'US', returnPolicyCategory:'https://schema.org/MerchantReturnNotPermitted' } }; };
+      var cup = function(sz, color){ return { '@type':'Product', name:'Custom name cup, ' + sz + ' oz, laser engraved', sku:'namecup-' + sz, size:sz + ' oz', image:'https://hdlaser.net/assets/cup-' + color + '.jpg', offers:offer(P[sz]) }; };
+      var el = document.createElement('script'); el.type = 'application/ld+json';
+      el.textContent = JSON.stringify({ '@context':'https://schema.org', '@type':'ProductGroup', productGroupID:'namecup', name:'Custom name cup, laser engraved',
+        description:'A 12 or 16 oz cup in 12 colors, laser engraved with your name or a short line. Made in Pacific Beach, San Diego and shipped anywhere in the US.',
+        brand:{ '@type':'Brand', name:'HD Laser Studio' }, url:'https://hdlaser.net/cups/', image:['https://hdlaser.net/assets/cup-navy.jpg','https://hdlaser.net/assets/cup-pink.jpg','https://hdlaser.net/assets/cup-black.jpg'],
+        variesBy:['https://schema.org/size'], hasVariant:[cup('12', 'navy'), cup('16', 'black')] });
+      document.head.appendChild(el);
+    } catch (e) {}
+  }
   render();
 })();
 </script>
