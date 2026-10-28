@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-28 v61"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-28 v62"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -428,12 +428,13 @@ async function submitInquiry(request, env, cors) {
   return json({ ok: r1.ok, ref, emailed_customer: r2.ok, error: r1.ok ? undefined : r1.error }, r1.ok ? 200 : 502, cors);
 }
 
-async function sendEmail(env, { to, subject, text, html, replyTo }) {
+async function sendEmail(env, { to, subject, text, html, replyTo, attachments }) {
   if (!env.RESEND_API_KEY) return { ok: false, error: "RESEND_API_KEY not set" };
   const from = env.FROM_EMAIL || `HD Laser Studio <contact@hdlaser.net>`;
   if (!to || (Array.isArray(to) && !to.filter(Boolean).length)) return { ok: false, error: "No email address" }; // counter orders may have no customer email
   const body = { from, to: Array.isArray(to) ? to : [to], subject, text };
   if (html) body.html = html;
+  if (attachments && attachments.length) body.attachments = attachments; // [{ filename, content: base64 }]
   // Replies always land in a real inbox: the customer's address when we're emailing the shop, otherwise contact@.
   const fallbackReply = env.SUPPORT_EMAIL || "contact@hdlaser.net";
   body.reply_to = replyTo || fallbackReply;
@@ -2976,7 +2977,9 @@ async function orderCheckout(request, env, cors) {
       env.DB.prepare(`INSERT INTO events (ts, name, session, ref, path, detail) VALUES (?,?,?,?,?,?)`).bind(now, quoteReq ? "quote_request" : "order_checkout", null, ref, "/order/", JSON.stringify({ product: q.product.key, service: q.service.key, inches: q.inches, qty: q.qty })),
     ]);
   }
-  // tell the shop and the customer straight away; payment confirmation follows from the Square webhook
+  // tell the shop and the customer straight away; payment confirmation follows from the Square webhook.
+  // The customer's logo is attached to the shop's email (Hugh, Oct 28: "i didnt get the attached file for logo"); it is also on the order in the dashboard.
+  const logoFiles = logo ? [{ filename: logo.name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_") || "logo", content: logo.data.slice(logo.data.indexOf(",") + 1) }] : undefined;
   const $ = (n) => "$" + (n / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const who = c.business ? `${c.business} (${name})` : name;
   const breakdown = [q.custom && q.lines ? q.lines.map((l) => `${l.qty} × ${l.name} @ ${$(l.unit_cents)}`).join("\n") + ` (prices set by ${takenBy})` : q.custom ? `${q.qty} × ${q.product.name} @ ${$(q.work_unit_cents)} (custom price set by ${takenBy})` : `${q.qty * q.prints} × ${lcName(q.service.name)} ${q.inches} in${q.sides ? " (" + (q.sides === "both" ? "front and back" : q.sides) + ")" : ""} @ ${$(q.work_unit_after_cents)}${q.discount_pct ? ` (${q.discount_pct}% off for quantity)` : q.discount_off_cents ? ` (${$(q.discount_off_cents)} off each for quantity)` : ""}`, q.blank_unit_cents ? `${q.qty} × ${q.product.name} @ ${$(q.blank_unit_cents)}` : "", q.handling_unit_cents ? `${q.qty} × customer-supplied item handling @ ${$(q.handling_unit_cents)}` : "", q.setup_cents ? `Setup ${$(q.setup_cents)}` : `Setup: none (${q.art === "text" ? "text only" : "logo on file"})`, q.rush_cents ? `Rush ${$(q.rush_cents)}` : "", q.minimum_top_up_cents ? `Shop minimum ${$(q.minimum_top_up_cents)}` : "", tax ? `Sales tax ${$(tax)}` : "", `Total ${$(total)}`].filter(Boolean).join("\n");
@@ -3002,8 +3005,8 @@ Dashboard: ${env.WORKER_URL || ""}/admin` });
 Customer: ${[name, c.business, email, c.phone].filter(Boolean).join(" · ")}
 ${q.summary}
 Artwork: ${artLine}
-Logo file: ${logo ? "came through with the request (" + logo.name + ")" : "not uploaded yet"}
-${neededBy ? "Needed by: " + neededBy + "\n" : ""}${q.rush ? "Rush: yes\n" : ""}${notes ? "Notes: " + notes + "\n" : ""}` });
+Logo file: ${logo ? "attached to this email (" + logo.name + ")" : "not uploaded yet"}
+${neededBy ? "Needed by: " + neededBy + "\n" : ""}${q.rush ? "Rush: yes\n" : ""}${notes ? "Notes: " + notes + "\n" : ""}`, attachments: logoFiles });
       await sendEmail(env, { to: email, subject: `We've got your quote request ${ref}`, text:
 `Hi ${first},
 
@@ -3034,12 +3037,12 @@ ${q.summary}
 ${neededBy ? "Needed by: " + neededBy + "\n" : ""}${notes ? "Notes: " + notes + "\n" : ""}
 ${breakdown}
 
-Logo: ${logo ? "attached to the order in the dashboard (" + logo.name + ")" : "not uploaded, ask for it"}
+Logo: ${logo ? "attached to this email (" + logo.name + "), and on the order in the dashboard" : "not uploaded, ask for it"}
 Sizing confirmation: initialed "${initials}" at ${now} from ${ip || "unknown IP"}.
 "${text}"
 
 ${terminal ? "Paying on the Terminal at the counter." : linkOk ? "They were sent to Square to pay." : "Square did not return a payment link. Send them a Square invoice for " + $(total) + "."}
-Dashboard: ${env.WORKER_URL || ""}/admin` });
+Dashboard: ${env.WORKER_URL || ""}/admin`, attachments: logoFiles });
     const first = name.split(" ")[0] || "there";
     // paid at pickup with the work done: no "we've got your order, proof next"; the thank-you comes once they've paid
     await sendEmail(env, { to: terminal && b.done_on_pay !== false ? null : email, subject: `We've got your order ${ref}`, text:
