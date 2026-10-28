@@ -132,7 +132,13 @@ input[type=text],input[type=email],input[type=tel],select,textarea{font:inherit;
       <table class="cart" id="cart"></table>
     </div>
 
-    <div class="box">
+    <div class="box soon" id="soonbox">
+      <h2>Online ordering opens soon</h2>
+      <p style="margin:6px 0 0">Try the colors and styles above to see your name on a cup. We&#8217;ll open online orders on this page shortly.</p>
+      <p class="note" style="margin:10px 0 0">Questions? Call or text <a href="tel:8583739866">(858) 373-9866</a>.</p>
+    </div>
+
+    <div class="box" id="shipbox" hidden>
       <h2>4. Where do we ship them?</h2>
       <div class="grid2">
         <div><label class="t" for="cname2">Your name</label><input type="text" id="cname2" autocomplete="name"></div>
@@ -149,7 +155,7 @@ input[type=text],input[type=email],input[type=tel],select,textarea{font:inherit;
       <div style="margin-top:12px"><label class="t" for="notes">A gift note or anything we should know <span class="note">(optional)</span></label><textarea id="notes" rows="2" maxlength="500"></textarea></div>
     </div>
 
-    <div class="box">
+    <div class="box" id="paybox" hidden>
       <h2>5. Check and pay</h2>
       <div id="totals"></div>
       <label class="check"><input type="checkbox" id="spelled"><span><b>I checked the spelling.</b> You engrave exactly what I typed. Engraving is permanent.</span></label>
@@ -162,7 +168,7 @@ input[type=text],input[type=email],input[type=tel],select,textarea{font:inherit;
     <div class="biz"><span><b>Cups with your business logo?</b><br>For caf&#233;s, teams and events. Free quote and proof.</span><a id="bizlink" href="/order/?product=cup16">Get a free quote &#8594;</a></div>
   </div>
 </main>
-<div class="bar" id="bar"><span id="barcount">1 cup</span><b id="bartot"></b><button type="button" class="btn" id="barpay" style="padding:11px 18px;font-size:15px">Check out</button></div>
+<div class="bar" id="bar" style="visibility:hidden"><span id="barcount">1 cup</span><b id="bartot"></b><button type="button" class="btn" id="barpay" style="padding:11px 18px;font-size:15px">Check out</button></div>
 <script src="/assets/site-config.js?v=7"></script>
 <script>
 (function(){
@@ -172,7 +178,7 @@ input[type=text],input[type=email],input[type=tel],select,textarea{font:inherit;
   var DARK = { navy:1, black:1, 'dark-gray':1, 'army-green':1, purple:1 };
   var FONTS = { classic:'Classic', script:'Script', bold:'Bold' };
   var STATES = 'AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY'.split(' ');
-  var P = null, TAX = 0.0775, CART = [], CUR = { size:'16', color:'navy', text:'', font:'classic', qty:1 };
+  var P = null, TAX = 0.0775, OPEN = false, CART = [], CUR = { size:'16', color:'navy', text:'', font:'classic', qty:1 };
   var qs = new URLSearchParams(location.search);
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
   function money(c){ return '$' + (c/100).toFixed(2).replace(/\.00$/, ''); }
@@ -233,7 +239,7 @@ input[type=text],input[type=email],input[type=tel],select,textarea{font:inherit;
   window.addEventListener('resize', preview);
   function fail(m){ var e = $('#err'); e.textContent = m; e.hidden = false; e.scrollIntoView({ behavior:'smooth', block:'center' }); $('#pay').disabled = false; $('#pay').textContent = 'Pay securely with Square'; }
   $('#barpay').onclick = function(){ $('#pay').scrollIntoView({ behavior:'smooth', block:'center' }); };
-  $('#pay').onclick = function(){
+  $('#pay').onclick = function(){ if (!OPEN) return;
     $('#err').hidden = true;
     var L = lines(); if (!L.length) { $('#text').focus(); return fail('Type the name for your cup first.'); }
     var need = [['#cname2','your name'],['#email','your email'],['#line1','the street address'],['#city','the city'],['#state','the state'],['#zip','the ZIP code']];
@@ -254,7 +260,11 @@ input[type=text],input[type=email],input[type=tel],select,textarea{font:inherit;
     var b = d.book, p = function(k){ for (var i = 0; i < b.products.length; i++) if (b.products[i].key === k) return b.products[i]; return {}; };
     var u = function(x){ return (x.blank_cents || 0) + ((x.flat_work && x.flat_work.engrave) || 1500); }, off = p('cup16').qty_off || { min:6, cents:500 };
     P = { '12': u(p('cup12')), '16': u(p('cup16')), off_min: off.min, off_cents: off.cents, ship_cents: b.ship_cents == null ? 995 : b.ship_cents, ship_free_cents: b.ship_free_cents || 0 };
-    TAX = d.tax_rate || TAX; render(); schema();
+    TAX = d.tax_rate || TAX; render();
+    // Online orders stay closed until the shop switches them on (/admin/prices, Oct 28): the preview works, the checkout is hidden
+    OPEN = b.cups_open === true;
+    $('#soonbox').hidden = OPEN; $('#shipbox').hidden = !OPEN; $('#paybox').hidden = !OPEN; $('#bar').style.visibility = OPEN ? '' : 'hidden';
+    if (OPEN) schema();
   }).catch(function(){ $('#loaderr').hidden = false; });
   // Product details for Google (Oct 28), from the live price list so the price Google shows always matches the page.
   function schema() {

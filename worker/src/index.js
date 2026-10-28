@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-28 v64"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-28 v65"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -2618,6 +2618,9 @@ const DEFAULT_BOOK = {
   // order; free from ship_free_cents when that is above 0. Both are on /admin/prices.
   ship_cents: 995,
   ship_free_cents: 0,
+  // Online cup orders on /cups/ are paused until Hugh switches them on (Oct 28: "i dont have resale permit so i cant start
+  // selling right now"). Off: the page still shows the name preview, but no checkout, and POST /cups/checkout refuses.
+  cups_open: false,
 };
 function ladderPrices(l, steps) { const out = []; let p = l.start_cents, climbs = 0; const flat = Math.round((l.flat_to_inches || 0) * 2); for (let i = 0; i < steps; i++) { out.push(Math.round(p / 25) * 25); if (i + 1 >= flat) { p += l.first_gap_cents + climbs * l.gap_growth_cents; climbs++; } } return out; }
 function buildSizes(book) { const n = Math.round(book.max_inches / 0.5); const cols = Object.fromEntries(Object.entries(book.ladders).map(([k, l]) => [k, ladderPrices(l, n)])); return Array.from({ length: n }, (_, i) => { const row = { inches: (i + 1) / 2 }; for (const k of Object.keys(cols)) row[k + "_cents"] = cols[k][i]; return row; }); }
@@ -2828,7 +2831,9 @@ async function cupsCheckout(request, env, cors) {
   let b; try { b = await request.json(); } catch { return json({ error: "Bad JSON" }, 400, cors); }
   const ip = request.headers.get("CF-Connecting-IP") || "";
   if (rateLimited("cups:" + ip, 10, 600000)) return json({ error: "Too many attempts. Please wait a few minutes." }, 429, cors);
-  const P = cupPrices(await priceBook(env)), colors = Object.fromEntries(CUP_COLORS);
+  const book = await priceBook(env);
+  if (book.cups_open !== true) return json({ error: "Online cup orders open soon. Questions? Call or text (858) 373-9866." }, 403, cors);
+  const P = cupPrices(book), colors = Object.fromEntries(CUP_COLORS);
   const clean = (v, n) => String(v || "").replace(/[\u0000-\u001f<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, n);
   const lines = (Array.isArray(b.lines) ? b.lines : []).slice(0, 20).map((l) => ({ size: String(l.size) === "12" ? "12" : "16", color: colors[l.color] ? l.color : null, text: clean(l.text, 24), font: CUP_FONTS[l.font] ? l.font : "classic", qty: Math.max(1, Math.min(50, parseInt(l.qty, 10) || 1)) }));
   if (!lines.length) return json({ error: "Add at least one cup" }, 400, cors);
@@ -3304,6 +3309,7 @@ async function saveWholeBook(env, body) {
   // quantity breaks, rush, handling, minimum
   if (Array.isArray(b.qty_breaks)) { const qb = b.qty_breaks.map((x) => ({ min: int(x.min, 1, 100000), off_pct: int(x.off_pct, 0, 90) })).filter((x) => x.min != null && x.off_pct != null).sort((x, y) => x.min - y.min); if (!qb.length || qb[0].min !== 1) qb.unshift({ min: 1, off_pct: 0 }); next.qty_breaks = qb.filter((x, i, a) => i === 0 || x.min !== a[i - 1].min); }
   if (b.show_prices != null) next.show_prices = !!b.show_prices;
+  if (b.cups_open != null) next.cups_open = !!b.cups_open;
   if (b.rush_pct != null) next.rush_pct = int(b.rush_pct, 0, 300) ?? next.rush_pct;
   if (b.own_item_handling_cents != null) next.own_item_handling_cents = int(b.own_item_handling_cents, 0, 100000) ?? next.own_item_handling_cents;
   if (b.min_order_cents != null) next.min_order_cents = int(b.min_order_cents, 0, 1000000) ?? next.min_order_cents;
@@ -3346,7 +3352,7 @@ input.n{text-align:right}input:focus{outline:3px solid #F2B63D;outline-offset:1p
 <main>
 <p class="sub" style="font-size:16px">Everything the order page charges, on one screen. Change any number, then press <b>Save all prices</b> at the bottom. Changed cells turn yellow until saved. Nothing goes live until you save.</p>
 <div id="err" class="sub" style="color:var(--red);font-weight:700"></div>
-<label class="sub" style="display:flex;gap:10px;align-items:flex-start;font-size:16px;margin:4px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fff"><input type="checkbox" id="showprices" style="width:20px;height:20px;flex:none;margin-top:2px"><span><b>Show prices to customers on the website</b><br>Off: customers see no prices, they send a quote request with every detail, and you reply with your price. The shop iPad always shows prices. Press Save all prices after changing this.</span></label>
+<label class="sub" style="display:flex;gap:10px;align-items:flex-start;font-size:16px;margin:4px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fff"><input type="checkbox" id="showprices" style="width:20px;height:20px;flex:none;margin-top:2px"><span><b>Show prices to customers on the website</b><br>Off: customers see no prices, they send a quote request with every detail, and you reply with your price. The shop iPad always shows prices. Press Save all prices after changing this.</span></label><label class="sub" style="display:flex;gap:10px;align-items:flex-start;font-size:16px;margin:-8px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fff"><input type="checkbox" id="cupsopen" style="width:20px;height:20px;flex:none;margin-top:2px"><span><b>Name cups shop open for online orders</b> (hdlaser.net/cups/)<br>Off: people can try the name preview, but there is no checkout; the page says online ordering opens soon. Turn it on once the seller\u2019s permit is in place, then press Save all prices.</span></label>
 
 <h2>Per piece, by artwork size</h2>
 <p class="sub">The work only, on wood (other materials multiply it, see below). Type into any cell, or fill a whole column from three numbers.</p>
@@ -3378,7 +3384,7 @@ function render(){
   $('#f-svc').innerHTML=B.services.map(s=>'<option value="'+s.key+'">'+esc(s.name)+'</option>').join('');
   $('#sizes').innerHTML='<tr><th>Artwork, longest side</th>'+B.services.map(s=>'<th>'+esc(s.name)+' ($)</th>').join('')+'</tr>'+B.sizes.map(z=>'<tr><td><b>'+z.inches+' in</b></td>'+B.services.map(s=>'<td><input class="n" type="number" step="0.25" min="0" data-size="'+z.inches+'" data-svc="'+s.key+'" value="'+d2(z[s.key+'_cents'])+'"></td>').join('')+'</tr>').join('');
   $('#services').innerHTML='<tr><th>Finish</th><th>Setup, once per order, new logo only ($)</th><th>Minutes per piece</th><th>Extra minutes per inch</th><th>Consumables per piece ($)</th></tr>'+B.services.map(s=>'<tr><td><b>'+esc(s.name)+'</b></td><td><input class="n" type="number" step="1" min="0" data-svc="'+s.key+'" data-f="setup_cents" value="'+d2(s.setup_cents)+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="min_per_piece" value="'+s.min_per_piece+'"></td><td><input class="n" type="number" step="0.5" min="0" data-svc="'+s.key+'" data-f="per_inch" value="'+s.per_inch+'"></td><td><input class="n" type="number" step="0.05" min="0" data-svc="'+s.key+'" data-f="consumable_cents" value="'+d2(s.consumable_cents)+'"></td></tr>').join('');
-  $('#showprices').checked=B.show_prices!==false; $('#rush').value=B.rush_pct; $('#min').value=d2(B.min_order_cents); $('#textown').value=d2(B.text_only_own_cents||0); $('#sameown').value=d2(B.same_own_cents||0); $('#samemax').value=B.same_own_max_inches||0; $('#shipc').value=d2(B.ship_cents||0); $('#shipfree').value=d2(B.ship_free_cents||0);
+  $('#showprices').checked=B.show_prices!==false; $('#cupsopen').checked=B.cups_open===true; $('#rush').value=B.rush_pct; $('#min').value=d2(B.min_order_cents); $('#textown').value=d2(B.text_only_own_cents||0); $('#sameown').value=d2(B.same_own_cents||0); $('#samemax').value=B.same_own_max_inches||0; $('#shipc').value=d2(B.ship_cents||0); $('#shipfree').value=d2(B.ship_free_cents||0);
   $('#cutdetail').innerHTML='<tr>'+(B.cut_detail||[]).map(d=>'<th>'+esc(d.name)+' cut, \u00d7</th>').join('')+'</tr><tr>'+(B.cut_detail||[]).map(d=>'<td><input class="n" type="number" step="0.1" min="0.25" data-cd="'+d.key+'" value="'+d.factor+'"></td>').join('')+'</tr>';
   $('#materials').innerHTML='<tr><th>Material</th><th>Factor</th><th>Offered</th></tr>'+B.materials.map(m=>'<tr><td><b>'+esc(m.name)+'</b></td><td><input class="n" type="number" step="0.05" min="0.1" data-mat="'+m.key+'" data-f="factor" value="'+m.factor+'"></td><td>'+B.services.map(s=>'<label class="chk"><input type="checkbox" data-mat="'+m.key+'" data-svc="'+s.key+'" '+(m.services.includes(s.key)?'checked':'')+'>'+esc(s.name)+'</label>').join('')+'</td></tr>').join('');
   $('#products').innerHTML='<tr><th>Item</th><th>Material</th><th>Customer pays ($)</th><th>Costs us ($)</th><th>Largest artwork (in)</th><th></th></tr>'+B.products.filter(p=>p.key!=='own').map(p=>prow(p)).join('')
@@ -3399,7 +3405,7 @@ function collect(){ const book={services:[],sizes:[],materials:[],products:[],qt
   document.querySelectorAll('#products tr[data-p]').forEach(tr=>{ const g=f=>tr.querySelector('[data-pf="'+f+'"]').value; book.products.push({key:tr.dataset.p,name:g('name'),material:g('material'),blank_cents:Math.round(+g('blank_cents')*100),cost_cents:Math.round(+g('cost_cents')*100),max_inches:+g('max_inches'),removed:!!tr.dataset.removed}); });
   book.products.push({key:'own'});
   document.querySelectorAll('#qty tr[data-q]').forEach(tr=>{ const mn=+tr.querySelector('[data-qf="min"]').value, off=+tr.querySelector('[data-qf="off_pct"]').value; if(mn>=1) book.qty_breaks.push({min:mn,off_pct:off}); });
-  book.show_prices=$('#showprices').checked; book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); book.text_only_own_cents=Math.round(+$('#textown').value*100); book.same_own_cents=Math.round(+$('#sameown').value*100); book.same_own_max_inches=+$('#samemax').value; book.ship_cents=Math.round(+$('#shipc').value*100); book.ship_free_cents=Math.round(+$('#shipfree').value*100); book.cut_detail=[...document.querySelectorAll('input[data-cd]')].map(i=>({key:i.dataset.cd,factor:+i.value})); return book; }
+  book.show_prices=$('#showprices').checked; book.cups_open=$('#cupsopen').checked; book.rush_pct=+$('#rush').value; book.own_item_handling_cents=Math.round(+$('#own').value*100); book.min_order_cents=Math.round(+$('#min').value*100); book.text_only_own_cents=Math.round(+$('#textown').value*100); book.same_own_cents=Math.round(+$('#sameown').value*100); book.same_own_max_inches=+$('#samemax').value; book.ship_cents=Math.round(+$('#shipc').value*100); book.ship_free_cents=Math.round(+$('#shipfree').value*100); book.cut_detail=[...document.querySelectorAll('input[data-cd]')].map(i=>({key:i.dataset.cd,factor:+i.value})); return book; }
 $('#save').onclick=async()=>{ const b=$('#save'); b.disabled=true; $('#msg').textContent='Saving\\u2026'; $('#msg').className='msg';
   try{ const r=await fetch('/api/pricing/book/all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({book:collect(),note:'edited on the prices page'})}); const j=await r.json(); if(!j.ok) throw new Error(j.error||'Save failed'); B=j.book; render(); $('#msg').textContent='Saved. '+j.changed+' price'+(j.changed===1?'':'s')+' changed. The order page uses these now.'; $('#msg').className='msg ok'; }
   catch(e){ $('#msg').textContent=e.message; $('#msg').className='msg bad'; } b.disabled=false; };
