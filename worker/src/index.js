@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-27 v60"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-28 v61"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -239,7 +239,7 @@ export default {
     ctx.waitUntil((async () => {
       const d = new Date(event.scheduledTime || Date.now());
       await noShowCheck(env);                                              // staffing watchdog: every tick during open hours
-      if (d.getUTCMinutes() >= 10) return;                                 // the :15 crons exist only for the 10:15 check
+      if (d.getUTCMinutes() >= 10) return;                                 // the :15 crons only add no-show checks
       await googleReviews(env, false).catch((e) => console.error("reviews", e)); // refreshes itself at most once a day
       await socialTick(env, false).catch((e) => console.error("social", e));       // the AI host's two videos a day (off until switched on)
       await syncSquare(env, 3);
@@ -1041,7 +1041,7 @@ function e164(phone) { const d = String(phone || "").replace(/\D/g, ""); if (d.l
 // Owner/manager create staff from the /admin dashboard or from the portal's Team tab.
 
 const TZ = "America/Los_Angeles";
-const OPEN_HOUR = 10;                                   // shop opens 10:00 every day
+const OPEN_MIN = (dow) => (dow === 0 ? 11 * 60 : 10 * 60 + 30); // shop opens 10:30, Sunday 11:00 (Hugh, Oct 28; was 10:00 every day)
 const CLOSE_HOUR = (dow) => (dow === 0 ? 15 : 17);      // Sunday closes 3 PM, otherwise 5 PM
 const OPEN_STEPS = [
   "Unlock front door, turn off alarm",
@@ -1080,7 +1080,7 @@ const PRODUCTS = [
 ];
 const WALKIN_MINUTES = 30;       // planning size of a typical same-day walk-in job
 const UTILIZATION = 0.7;         // share of a shift that is real machine time; the rest is customers, cleanup, breaks
-const ON_TIME_GRACE_MIN = 5;     // clock-in by 10:05 counts as on time
+const ON_TIME_GRACE_MIN = 5;     // clock-in by 10:35 (Sunday 11:05) counts as on time
 
 function products(env) {
   if (env.PRODUCT_MINUTES) { try { const p = JSON.parse(env.PRODUCT_MINUTES); if (Array.isArray(p) && p.length) return p; } catch {} }
@@ -1473,7 +1473,7 @@ function prodName(env, key) { const p = products(env).find((x) => x.key === key)
 // How much same-day work the shop can still take today.
 function capacity(l, queue) {
   const closeMin = CLOSE_HOUR(l.dow) * 60;
-  const left = Math.max(0, closeMin - Math.max(l.minutes, OPEN_HOUR * 60));
+  const left = Math.max(0, closeMin - Math.max(l.minutes, OPEN_MIN(l.dow)));
   const workable = Math.round(left * UTILIZATION);
   const committed = queue.filter((i) => i.status !== "waiting for logo" && (!i.due_at || new Date(i.due_at) <= new Date(new Date().getTime() + 86400000))).reduce((n, i) => n + (i.minutes || 0), 0);
   const free = Math.max(0, workable - committed);
@@ -1492,9 +1492,9 @@ async function staffStats(env, staffId, fromIso, toIso) {
   for (const s of shifts) {
     minutes += s.minutes || (s.out_at ? 0 : Math.round((Date.now() - new Date(s.in_at)) / 60000));
     const li = local(new Date(s.in_at));
-    if (li.minutes <= OPEN_HOUR * 60 + 60) { // an opening shift
+    if (li.minutes <= OPEN_MIN(li.dow) + 60) { // an opening shift
       const first = await q(`SELECT MIN(in_at) m FROM shifts WHERE in_at >= ? AND in_at < ?`, localDayRange(li.date).from, localDayRange(li.date).to).first();
-      if (first.m === s.in_at) { openers++; if (li.minutes <= OPEN_HOUR * 60 + ON_TIME_GRACE_MIN) onTime++; }
+      if (first.m === s.in_at) { openers++; if (li.minutes <= OPEN_MIN(li.dow) + ON_TIME_GRACE_MIN) onTime++; }
       expected += OPEN_STEPS.length;
     }
     if (s.out_at && local(new Date(s.out_at)).minutes >= CLOSE_HOUR(li.dow) * 60 - 90) expected += CLOSE_STEPS.length;
@@ -1518,13 +1518,13 @@ async function teamKpis(env, from, to) {
   return { range: { from: fromIso, to: toIso }, team: rows, aggregate: agg, log: recentLog, shifts: shiftsList, open_steps: OPEN_STEPS.length, close_steps: CLOSE_STEPS.length };
 }
 
-// Staffing watchdog, runs on every cron tick. During open hours (10 AM to closing), if nobody is clocked in:
+// Staffing watchdog, runs on every cron tick. During open hours (opening to closing), if nobody is clocked in:
 // first alert of the day texts the on-call employee and the owner; then the owner gets one reminder per hour until
 // someone clocks in or the owner replies 2. Clocking in clears it.
 async function noShowCheck(env) {
   const l = local();
-  if (l.hour < OPEN_HOUR || l.hour >= CLOSE_HOUR(l.dow)) return { skipped: "outside open hours" };
-  if (l.hour === OPEN_HOUR && l.minute < 10) return { skipped: "before 10:10, opener may still be walking in" };
+  // The opener is due 10 minutes before opening, so the first tick at or after opening checks (11:00 every day with the crons in wrangler.toml).
+  if (l.minutes < OPEN_MIN(l.dow) || l.hour >= CLOSE_HOUR(l.dow)) return { skipped: "outside open hours" };
   const day = localDayRange(l.date);
   const n = (await env.DB.prepare(`SELECT COUNT(*) n FROM shifts WHERE in_at >= ? AND in_at < ? AND out_at IS NULL`).bind(day.from, day.to).first()).n;
   if (n > 0) { await env.DB.prepare(`DELETE FROM meta WHERE k = 'noshow_pending'`).run(); return { ok: true, clocked_in: n }; }
