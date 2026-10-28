@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-28 v62"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-28 v63"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -124,6 +124,12 @@ export default {
       if (path === "/webhooks/square" && request.method === "POST") return squareWebhook(request, env);
       if (path === "/webhooks/twilio" && request.method === "POST") return twilioInbound(request, env);
       if (path === "/unsubscribe") return unsubscribePage(env, url);
+      const lm = path.match(/^\/logo\/(\d+)$/);
+      if (lm) {
+        const id = +lm[1], e = +url.searchParams.get("e") || 0, t = String(url.searchParams.get("t") || "");
+        if (!env.DB || e < Date.now() / 1000 || !timingSafeEqual(t, await logoSig(env, id, e))) return new Response("This logo link has expired. Open Projects & logos on the hub again for a fresh one.", { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8", "X-Robots-Tag": "noindex" } });
+        return assetResponse(env, id, url.searchParams.get("dl") === "1");
+      }
       if (path === "/reviews") return json(await googleReviews(env, false), 200, { ...cors, "Cache-Control": "public, max-age=3600" });
       // ---- shop iPad time clock: everyone on one screen, each person punches with their own PIN ----
       if (path === "/clock") return new Response(CLOCK_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } });
@@ -1269,6 +1275,11 @@ async function staffRoutes(request, env, cors, path, url) {
     return json({ customer: { id: c.id, name: c.name || "", business: c.business || "", email: c.email || "", phone: fmtPhone(c.phone), orders: c.orders || 0, spent_cents: c.spent_cents || 0, note: c.note || "" }, history: await customerHistory(env, c) }, 200, { ...cors, "Cache-Control": "no-store" });
   }
 
+  // Projects and logos for the hub (Hugh, Oct 28: "bring it to the hub the logos with project so i can easily access"):
+  // every order and quote request, newest first, with the customer's logo as a signed link. No money in it: a quote's
+  // price-list amount is for Hugh's email only, and a customer may be standing at the counter.
+  if (path === "/staff/projects") return json(await projectList(env, url.searchParams.get("q")), 200, { ...cors, "Cache-Control": "no-store" });
+
   // Receipts: every Square payment we know of (web, counter and register), newest first, printable on the Terminal.
   if (path === "/staff/receipts") {
     const rows = (await env.DB.prepare(`SELECT p.payment_id, p.created_at, p.amount_cents, p.refunded_cents, p.source, p.card_brand, p.ref, o.name, o.business, o.kind, o.spec, o.taken_by FROM payments p LEFT JOIN orders o ON o.ref = p.ref WHERE p.status = 'COMPLETED' AND p.created_at >= ? ORDER BY p.created_at DESC LIMIT 300`).bind(new Date(Date.now() - 30 * 86400000).toISOString()).all()).results;
@@ -1410,6 +1421,7 @@ async function staffHome(env, me) {
   const done = shift ? (await q(`SELECT kind, step FROM checklist WHERE shift_id = ?`, shift.id).all()).results : [];
   const onToday = (await q(`SELECT s.in_at, s.out_at, p.name FROM shifts s JOIN staff p ON p.id = s.staff_id WHERE s.in_at >= ? AND s.in_at < ? ORDER BY s.in_at`, day.from, day.to).all()).results;
   const queue = await workQueue(env);
+  for (const it of queue) if (it.logo_id) it.logo_path = await logoPath(env, it.logo_id);
   const cap = capacity(l, queue);
   const week = weekRange(l.date);
   const mine = await staffStats(env, me.id, week.from, week.to);
@@ -1455,7 +1467,7 @@ async function workQueue(env) {
     const wait = spec.product === "namecup" ? 3 : custom ? (o.rush ? 3 : 7) : 21;
     let due = o.proof_approved_at ? new Date(new Date(o.proof_approved_at).getTime() + wait * 86400000).toISOString() : (o.logo_received_at ? new Date(new Date(o.logo_received_at).getTime() + 2 * 86400000).toISOString() : null);
     if (custom && o.needed_by && (!due || o.needed_by + "T23:00:00Z" < due)) due = o.needed_by + "T23:00:00Z";
-    items.push({ kind: "order", id: o.ref, title: custom ? `${o.business || o.name}: ${spec.summary || "custom order"}` : `${o.business || o.name}: ${o.cups} logo cups`, note: spec.product === "namecup" ? `Ship to: ${o.ship_to || "?"}` : custom ? `Initialed ${o.attest_initials || "?"}${o.logo_asset_id ? " · logo on file" : ""}` : o.items, phone: o.phone, minutes: stage === "in production" ? Math.round(o.minutes || 0) : stage === "send proof" ? 20 : 0, amount_cents: o.paid_cents, due_at: due, created_at: o.paid_at, status: stage, stage, logo: !!o.logo_received_at, proof: !!o.proof_approved_at });
+    items.push({ kind: "order", id: o.ref, title: custom ? `${o.business || o.name}: ${spec.summary || "custom order"}` : `${o.business || o.name}: ${o.cups} logo cups`, note: spec.product === "namecup" ? `Ship to: ${o.ship_to || "?"}` : custom ? `Initialed ${o.attest_initials || "?"}${o.logo_asset_id ? " · logo on file" : ""}` : o.items, phone: o.phone, minutes: stage === "in production" ? Math.round(o.minutes || 0) : stage === "send proof" ? 20 : 0, amount_cents: o.paid_cents, due_at: due, created_at: o.paid_at, status: stage, stage, logo: !!o.logo_received_at, proof: !!o.proof_approved_at, logo_id: o.logo_asset_id || null });
   }
   const now = Date.now();
   for (const it of items) {
@@ -3214,11 +3226,42 @@ async function reloadBook(env) {
   for (const p of book.products) for (const field of ["blank_cents", "cost_cents"]) { const t = { type: "product", key: p.key, field }; const from = readTarget(before, t), to = readTarget(book, t); if (from !== to) { changed++; await env.DB.prepare(`INSERT INTO price_history (ts, target, from_cents, to_cents, source, suggestion_id, note) VALUES (?,?,?,?,?,?,?)`).bind(now, JSON.stringify(t), from, to, "reload", null, "loaded from the code").run(); } }
   return { ok: true, changed, version: book.version };
 }
-async function assetResponse(env, id) {
+async function assetResponse(env, id, download) {
   const a = await env.DB.prepare(`SELECT * FROM order_assets WHERE id = ?`).bind(id).first();
   if (!a) return json({ error: "Not found" }, 404);
   const comma = a.data.indexOf(","); const bin = Uint8Array.from(atob(a.data.slice(comma + 1)), (c) => c.charCodeAt(0));
-  return new Response(bin, { headers: { "Content-Type": a.type, "Content-Disposition": `inline; filename="${a.ref}-${a.name.replace(/[^\w.-]/g, "_")}"`, "Cache-Control": "private, max-age=3600" } });
+  // customers upload these, so an SVG must not be able to run a script here (the admin pages share this address)
+  return new Response(bin, { headers: { "Content-Type": a.type, "Content-Disposition": `${download ? "attachment" : "inline"}; filename="${a.ref}-${a.name.replace(/[^\w.-]/g, "_")}"`, "Cache-Control": "private, max-age=3600",
+    "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox", "X-Content-Type-Options": "nosniff", "X-Robots-Tag": "noindex" } });
+}
+// A logo link that works without the admin password, so a tap on the hub opens the file to view, save or AirDrop to
+// the laser computer. It stops working after 7 days; the hub and the work queue get fresh ones every time they load.
+async function logoSig(env, id, exp) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode("hd-logo:" + (env.PIN_PEPPER || env.ADMIN_KEY || "hdlaser")), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return [...new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(id + ":" + exp)))].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function logoPath(env, id) { const exp = Math.floor(Date.now() / 1000) + 7 * 86400; return `/logo/${id}?e=${exp}&t=${await logoSig(env, id, exp)}`; }
+// Every order and quote request for the hub's Projects & logos, newest first (80), or the ones matching a search.
+async function projectList(env, query) {
+  const t = String(query || "").trim().slice(0, 60), digits = t.replace(/\D/g, ""), binds = [];
+  let where = "";
+  if (t) {
+    const like = "%" + t.replace(/[%_]/g, "") + "%";
+    where = "WHERE (o.ref LIKE ? OR o.name LIKE ? OR o.business LIKE ? OR o.email LIKE ? OR o.notes LIKE ?" + (digits.length >= 3 ? " OR replace(replace(replace(replace(replace(o.phone,'-',''),' ',''),'(',''),')',''),'.','') LIKE ?" : "") + ")";
+    binds.push(like, like, like, like, like); if (digits.length >= 3) binds.push("%" + digits + "%");
+  }
+  const rows = (await env.DB.prepare(`SELECT o.ref, o.created_at, o.status, o.completed_at, o.name, o.business, o.email, o.phone, o.notes, o.needed_by, o.rush, o.kind, o.spec, o.cups, o.ship_to, o.taken_by,
+      o.logo_asset_id, a.name logo_name, a.type logo_type FROM orders o LEFT JOIN order_assets a ON a.id = o.logo_asset_id ${where} ORDER BY o.created_at DESC LIMIT 80`).bind(...binds).all()).results;
+  const out = [];
+  for (const o of rows) {
+    let sp = {}; try { sp = JSON.parse(o.spec || "{}"); } catch {}
+    const status = o.status === "quote" ? "Quote request" : o.status === "refunded" ? "Refunded" : o.status === "paid" ? (o.completed_at ? "Done" : "Paid, in the works") : "Not paid";
+    const art = o.kind !== "custom" || sp.product === "custom" ? "" : sp.art === "text" ? (sp.text ? "Text only: \u201c" + sp.text + "\u201d" : "Text only") : sp.art === "file" ? "A logo we have on file" + (sp.art_ref ? ": " + sp.art_ref : "") : sp.no_logo ? "" : o.logo_asset_id ? "Their logo, attached" : "New logo: not sent yet";
+    out.push({ ref: o.ref, at: o.created_at, status, quote: o.status === "quote", done: !!o.completed_at, name: o.name || "", business: o.business || "", email: o.email || "", phone: o.phone ? fmtPhone(o.phone) : "",
+      what: o.kind === "custom" ? (sp.product === "namecup" ? "Name cups: " : "") + (sp.summary || "Custom order") : (o.cups ? o.cups + " logo cups" : "Order"), art, notes: o.notes || "", needed_by: o.needed_by || "", rush: !!o.rush,
+      ship_to: o.ship_to || "", taken_by: o.taken_by || "", logo: o.logo_asset_id ? { name: o.logo_name || "logo", type: o.logo_type || "", path: await logoPath(env, o.logo_asset_id) } : null });
+  }
+  return { ok: true, projects: out };
 }
 
 // ---------------------------------------------------------------- the prices page: every price on one screen, one Save
