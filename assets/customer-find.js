@@ -17,11 +17,11 @@
     '.cf-tbl{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}.cf-tbl th{text-align:left;color:#545B63;font-weight:700;padding:6px 6px 6px 0;border-bottom:1px solid #E4E0D8}' +
     '.cf-tbl td{padding:8px 6px 8px 0;border-bottom:1px solid #EFEBE4;vertical-align:top}.cf-tbl td.n{text-align:right;white-space:nowrap}.cf-tbl small{color:#545B63}' +
     '.cf-pill{display:inline-block;font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;background:#EEF0F2;color:#3B434B;white-space:nowrap}' +
-    '.cf-pill.done,.cf-pill.paid{background:#E9F4EC;color:#1F6B36}.cf-pill.quote{background:#E8EEF8;color:#2F4F7F}';
+    '.cf-pill.done,.cf-pill.paid,.cf-pill.paid_square{background:#E9F4EC;color:#1F6B36}.cf-pill.quote{background:#E8EEF8;color:#2F4F7F}';
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function money(c) { return '$' + ((c || 0) / 100).toFixed(2); }
   function day(iso) { var d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Los_Angeles' }); }
-  var STATUS = { paid: 'Paid', done: 'Done', refunded: 'Refunded', quote: 'Quote', queued: 'In the queue', checkout_started: 'Not paid', pay_later: 'Not paid' };
+  var STATUS = { paid: 'Paid', done: 'Done', refunded: 'Refunded', quote: 'Quote', queued: 'In the queue', checkout_started: 'Not paid', pay_later: 'Not paid', paid_square: 'Paid in Square', cancelled: 'Cancelled' };
 
   window.hdCustomerFind = function (opts) {
     var base = (window.HD_CONFIG || {}).WORKER_BASE, tok = null;

@@ -28,7 +28,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-28 v63"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-10-28 v64"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -795,7 +795,9 @@ async function kpis(env, from, to) {
   const cards = (await q(`SELECT COALESCE(card_brand, source, 'other') k, COUNT(*) n, SUM(amount_cents) amount FROM payments WHERE status='COMPLETED' AND created_at >= ? AND created_at < ? GROUP BY k ORDER BY amount DESC`, fromIso, toIso).all()).results;
 
   const attention = {
-    unpaid: (await q(`SELECT ref, created_at, business, name, email, phone, total_cents, status FROM orders WHERE status IN ('checkout_started','pay_later') AND created_at < ? ORDER BY created_at DESC LIMIT 50`, new Date(Date.now() - 3600000).toISOString()).all()).results,
+    unpaid: (await q(`SELECT o.ref, o.created_at, o.business, o.name, o.email, o.phone, o.total_cents, o.status,
+        (SELECT p.created_at FROM payments p WHERE p.amount_cents = o.total_cents AND (p.ref IS NULL OR p.ref = '') AND p.created_at >= strftime('%Y-%m-%dT%H:%M:%SZ', o.created_at, '-1 day') AND p.created_at <= strftime('%Y-%m-%dT%H:%M:%SZ', o.created_at, '+14 days') ORDER BY p.created_at LIMIT 1) sq_match_at
+        FROM orders o WHERE o.status IN ('checkout_started','pay_later') AND o.created_at < ? ORDER BY o.created_at DESC LIMIT 50`, new Date(Date.now() - 3600000).toISOString()).all()).results,
     missing_logo: (await q(`SELECT ref, paid_at, business, name, email, phone FROM orders WHERE status = 'paid' AND logo_received_at IS NULL ORDER BY paid_at DESC LIMIT 50`).all()).results,
     tax_due: (await q(`SELECT ref, paid_at, business, name, email, phone, cups_subtotal_cents + setup_fee_cents base_cents, resale_permit FROM orders WHERE status = 'paid' AND resale_received_at IS NULL AND tax_invoiced_at IS NULL ORDER BY paid_at ASC LIMIT 50`).all()).results.map((r) => ({ ...r, tax_cents: Math.round(r.base_cents * taxRate) })),
     in_production: (await q(`SELECT ref, paid_at, proof_approved_at, business, name, cups FROM orders WHERE status = 'paid' AND proof_approved_at IS NOT NULL AND completed_at IS NULL ORDER BY proof_approved_at ASC LIMIT 50`).all()).results,
@@ -843,7 +845,11 @@ async function updateOrder(env, ref, body) {
   const sets = [], args = [];
   for (const f of fields) if (f in body) { sets.push(`${f} = ?`); args.push(body[f] ? new Date().toISOString() : null); }
   if ("admin_notes" in body) { sets.push("admin_notes = ?"); args.push(String(body.admin_notes || "").slice(0, 2000)); }
-  if ("status" in body && ["paid", "pay_later", "checkout_started", "refunded", "cancelled"].includes(body.status)) { sets.push("status = ?"); args.push(body.status); }
+  if ("status" in body && ["paid", "pay_later", "checkout_started", "refunded", "cancelled", "paid_square"].includes(body.status)) { sets.push("status = ?"); args.push(body.status); }
+  // Paid in Square (Hugh, Oct 28: "this projects are done and payment received through square"): an order the website never
+  // saw paid, because it was charged in Square another way. It leaves Unpaid checkouts and the Receivable, counts as done,
+  // and adds no money here: the Square sync already counts that payment as a register sale.
+  if (body.status === "paid_square" || body.status === "cancelled") sets.push(`completed_at = COALESCE(completed_at, '${new Date().toISOString()}')`);
   if (!sets.length) return { ok: false, error: "Nothing to update" };
   args.push(ref);
   const r = await env.DB.prepare(`UPDATE orders SET ${sets.join(", ")} WHERE ref = ?`).bind(...args).run();
@@ -979,7 +985,8 @@ async function load(){
   const a=k.attention;
   const list=(title,rows,fn)=>'<div class="card"><h3 style="margin:0 0 6px">'+title+' <span class="pill">'+rows.length+'</span></h3>'+(rows.length?'<table>'+rows.map(fn).join('')+'</table>':'<p class="empty">Nothing here</p>')+'</div>';
   $('#attention').innerHTML=
-    list('Unpaid checkouts',a.unpaid,r=>'<tr><td><b>'+r.ref+'</b><div class="small">'+fmtDate(r.created_at)+' · '+esc(r.status)+'</div></td><td>'+who(r)+'</td><td class="num">'+money(r.total_cents)+'</td></tr>')+
+    list('Unpaid checkouts',a.unpaid,r=>'<tr><td><b>'+r.ref+'</b><div class="small">'+fmtDate(r.created_at)+' · '+esc(r.status)+'</div></td><td>'+who(r)+(r.sq_match_at?'<div class="small" style="color:#1F6B36">Square has a '+money(r.total_cents)+' payment on '+fmtDate(r.sq_match_at)+'</div>':'')+'</td><td class="num">'+money(r.total_cents)+'<div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap"><button class="btn" data-close="'+r.ref+'" data-status="paid_square">Paid in Square</button><button class="btn" data-close="'+r.ref+'" data-status="cancelled">Cancel</button></div></td></tr>')+
+    (a.unpaid.length>1?'<div style="margin:-6px 0 14px;text-align:right"><button class="btn" id="closeall" data-refs="'+a.unpaid.map(r=>r.ref).join(',')+'">All '+a.unpaid.length+' were paid in Square</button> <span class="small">Paid in Square closes them as done and takes them off the Receivable; it adds no money (Square already counts the payment).</span></div>':'')+
     list('Missing logo',a.missing_logo,r=>'<tr><td><b>'+r.ref+'</b><div class="small">paid '+fmtDate(r.paid_at)+'</div></td><td>'+who(r)+'</td><td>'+flag(r.ref,'logo_received_at',0,'Logo received')+'</td></tr>')+
     list('Sales tax to invoice',a.tax_due,r=>'<tr><td><b>'+r.ref+'</b><div class="small">paid '+fmtDate(r.paid_at)+'</div></td><td>'+who(r)+'</td><td class="num">'+money(r.tax_cents)+'<div class="small">on '+money(r.base_cents)+'</div></td><td>'+flag(r.ref,'tax_invoiced_at',0,'Invoiced')+flag(r.ref,'resale_received_at',0,'Cert received')+'</td></tr>')+
     list('In production',a.in_production,r=>'<tr><td><b>'+r.ref+'</b><div class="small">approved '+fmtDate(r.proof_approved_at)+'</div></td><td>'+esc(r.business||r.name)+'<div class="small">'+r.cups+' cups</div></td><td>'+flag(r.ref,'completed_at',0,'Done')+'</td></tr>');
@@ -995,6 +1002,8 @@ async function loadTeam(){ const q=new URLSearchParams(); if(from){q.set('from',
     +'<div class="card"><h3 style="margin:0 0 6px">Activity log</h3>'+(t.log.length?'<table>'+t.log.slice(0,25).map(l=>'<tr><td class="small">'+new Date(l.ts).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'</td><td>'+esc(l.name||'')+'</td><td class="small">'+esc(l.action)+' '+esc(l.detail||'')+'</td></tr>').join('')+'</table>':'<p class="empty">Nothing yet</p>')+'</div>'; }
 $('#addstaff').onsubmit=async e=>{ e.preventDefault(); const f=e.target; const body={name:f.name.value,role:f.role.value,phone:f.phone.value,pin:f.pin.value,on_call:f.on_call.checked}; const r=await fetch('/api/staff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json(); $('#addmsg').textContent=j.ok?'Added. They can sign in now.':(j.error||'Failed'); if(j.ok){ f.reset(); loadTeam(); } };
 document.addEventListener('click',async e=>{
+  const cl=e.target.closest('button[data-close]'); if(cl){ cl.disabled=true; await fetch('/api/orders/'+cl.dataset.close,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:cl.dataset.status})}); load(); return; }
+  if(e.target.id==='closeall'){ const refs=e.target.dataset.refs.split(','); if(!confirm('Mark all '+refs.length+' unpaid checkouts as paid in Square and done?')) return; e.target.disabled=true; e.target.textContent='Closing\u2026'; for(const r of refs) await fetch('/api/orders/'+r,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'paid_square'})}); load(); return; }
   const b=e.target.closest('button[data-ref]'); if(b){ const body={}; body[b.dataset.field]=b.dataset.val==='1'; await fetch('/api/orders/'+b.dataset.ref,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); load(); return; }
   const rb=e.target.closest('#ranges button[data-d]'); if(rb){ document.querySelectorAll('#ranges button').forEach(x=>x.classList.remove('on')); rb.classList.add('on'); days=+rb.dataset.d; from=to=null; $('#from').value=''; $('#to').value=''; load(); }
 });
@@ -3255,7 +3264,7 @@ async function projectList(env, query) {
   const out = [];
   for (const o of rows) {
     let sp = {}; try { sp = JSON.parse(o.spec || "{}"); } catch {}
-    const status = o.status === "quote" ? "Quote request" : o.status === "refunded" ? "Refunded" : o.status === "paid" ? (o.completed_at ? "Done" : "Paid, in the works") : "Not paid";
+    const status = o.status === "quote" ? "Quote request" : o.status === "refunded" ? "Refunded" : o.status === "paid_square" ? "Done, paid in Square" : o.status === "cancelled" ? "Cancelled" : o.status === "paid" ? (o.completed_at ? "Done" : "Paid, in the works") : "Not paid";
     const art = o.kind !== "custom" || sp.product === "custom" ? "" : sp.art === "text" ? (sp.text ? "Text only: \u201c" + sp.text + "\u201d" : "Text only") : sp.art === "file" ? "A logo we have on file" + (sp.art_ref ? ": " + sp.art_ref : "") : sp.no_logo ? "" : o.logo_asset_id ? "Their logo, attached" : "New logo: not sent yet";
     out.push({ ref: o.ref, at: o.created_at, status, quote: o.status === "quote", done: !!o.completed_at, name: o.name || "", business: o.business || "", email: o.email || "", phone: o.phone ? fmtPhone(o.phone) : "",
       what: o.kind === "custom" ? (sp.product === "namecup" ? "Name cups: " : "") + (sp.summary || "Custom order") : (o.cups ? o.cups + " logo cups" : "Order"), art, notes: o.notes || "", needed_by: o.needed_by || "", rush: !!o.rush,
