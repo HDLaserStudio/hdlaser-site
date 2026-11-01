@@ -10,7 +10,7 @@
   var q = (location.search.match(/[?&]theme=(\w+)/) || [])[1], now = new Date(), y = now.getFullYear();
   var fourthThu = function (yr) { var d = new Date(yr, 10, 1).getDay(); return new Date(yr, 10, 1 + (4 - d + 7) % 7 + 21); };
   var tday = fourthThu(y), dayAfter = new Date(y, 10, tday.getDate() + 1);
-  if (!(q === 'thanksgiving' || (q !== 'holiday' && now.getMonth() === 10 && now < dayAfter))) return;
+  if (!(q === 'thanksgiving' || (!/^(holiday|plain|christmas|halloween)$/.test(q || '') && now.getMonth() === 10 && now < dayAfter))) return;
   var T = now >= dayAfter ? fourthThu(y + 1) : tday, me = document.currentScript || {}, opt = me.dataset || {};
   document.documentElement.classList.add('thanksgiving');
   var tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.setAttribute('content', '#7A3B12');

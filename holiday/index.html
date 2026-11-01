@@ -22,17 +22,19 @@
 // Seasonal looks, each switching on and off by itself. Halloween every October (Hugh, Oct 7): dark, with bats, ghosts, a
 // spider and a pumpkin. Thanksgiving from November 1 to Thanksgiving Day (Hugh, Nov 1): autumn colors, a countdown,
 // falling leaves and a turkey. The day after Thanksgiving it is the holiday page again.
-// ?theme=halloween, ?theme=thanksgiving or ?theme=holiday previews a look.
+// From the day after Thanksgiving through December 31 /assets/christmas.js adds snow and a Christmas countdown (Nov 1).
+// ?theme=halloween, ?theme=thanksgiving, ?theme=christmas or ?theme=plain previews a look.
 (function(){ var t = (location.search.match(/[?&]theme=(\w+)/) || [])[1], now = new Date(), y = now.getFullYear();
   var fourthThu = function(yr){ var d = new Date(yr, 10, 1).getDay(); return new Date(yr, 10, 1 + (4 - d + 7) % 7 + 21); };
   var tday = fourthThu(y), dayAfter = new Date(y, 10, tday.getDate() + 1);
-  var look = /^(halloween|thanksgiving|holiday)$/.test(t || '') ? t : now.getMonth() === 9 ? 'halloween' : now.getMonth() === 10 && now < dayAfter ? 'thanksgiving' : 'holiday';
+  var look = /^(halloween|thanksgiving|holiday)$/.test(t || '') ? t : /^(christmas|plain)$/.test(t || '') ? 'holiday' : now.getMonth() === 9 ? 'halloween' : now.getMonth() === 10 && now < dayAfter ? 'thanksgiving' : 'holiday';
   window.HD_THANKSGIVING = now >= dayAfter ? fourthThu(y + 1) : tday;   // a preview after this year's Thanksgiving counts to next year's
   if (look === 'holiday') return;
   document.documentElement.classList.add(look);
   document.querySelector('meta[name=theme-color]').setAttribute('content', look === 'halloween' ? '#15111F' : '#7A3B12');
   var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=' + (look === 'halloween' ? 'Creepster' : 'Dancing+Script:wght@700') + '&display=swap'; document.head.appendChild(l); })();
 </script>
+<script src="/assets/christmas.js?v=2" data-hello=".hero .eyebrow" data-count=".hero > div:first-child" data-deco=".himg" data-link="/quote/?gift=Holiday%20gifts" data-link-text="Get a free quote"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&amp;family=Figtree:wght@400;500;700;800&amp;display=swap">
