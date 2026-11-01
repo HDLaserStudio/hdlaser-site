@@ -19,13 +19,19 @@
 <link rel="manifest" href="/site.webmanifest">
 <meta name="theme-color" content="#15191E">
 <script>
-// Halloween look every October (Hugh, Oct 7): the page goes dark with bats, ghosts, a spider and a pumpkin, and on
-// November 1 it is the holiday page again by itself. ?theme=halloween or ?theme=holiday previews either look.
-(function(){ var t = (location.search.match(/[?&]theme=(\w+)/) || [])[1];
-  if (t !== 'halloween' && (t === 'holiday' || new Date().getMonth() !== 9)) return;
-  document.documentElement.classList.add('halloween');
-  document.querySelector('meta[name=theme-color]').setAttribute('content', '#15111F');
-  var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Creepster&display=swap'; document.head.appendChild(l); })();
+// Seasonal looks, each switching on and off by itself. Halloween every October (Hugh, Oct 7): dark, with bats, ghosts, a
+// spider and a pumpkin. Thanksgiving from November 1 to Thanksgiving Day (Hugh, Nov 1): autumn colors, a countdown,
+// falling leaves and a turkey. The day after Thanksgiving it is the holiday page again.
+// ?theme=halloween, ?theme=thanksgiving or ?theme=holiday previews a look.
+(function(){ var t = (location.search.match(/[?&]theme=(\w+)/) || [])[1], now = new Date(), y = now.getFullYear();
+  var fourthThu = function(yr){ var d = new Date(yr, 10, 1).getDay(); return new Date(yr, 10, 1 + (4 - d + 7) % 7 + 21); };
+  var tday = fourthThu(y), dayAfter = new Date(y, 10, tday.getDate() + 1);
+  var look = /^(halloween|thanksgiving|holiday)$/.test(t || '') ? t : now.getMonth() === 9 ? 'halloween' : now.getMonth() === 10 && now < dayAfter ? 'thanksgiving' : 'holiday';
+  window.HD_THANKSGIVING = now >= dayAfter ? fourthThu(y + 1) : tday;   // a preview after this year's Thanksgiving counts to next year's
+  if (look === 'holiday') return;
+  document.documentElement.classList.add(look);
+  document.querySelector('meta[name=theme-color]').setAttribute('content', look === 'halloween' ? '#15111F' : '#7A3B12');
+  var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=' + (look === 'halloween' ? 'Creepster' : 'Dancing+Script:wght@700') + '&display=swap'; document.head.appendChild(l); })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -81,6 +87,44 @@ footer{max-width:1200px;margin:0 auto;padding:24px;border-top:1px solid var(--li
 @media (max-width:1000px){.packs,.what,.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}.hero{grid-template-columns:1fr}.hero img{height:280px}}
 @media (max-width:640px){.packs,.steps{grid-template-columns:1fr}.hero h1{font-size:38px}header{padding:14px 16px}main{padding:0 16px 56px}section h2{font-size:28px}.more{padding:24px}}
 .himg{position:relative;isolation:isolate}
+
+/* Thanksgiving (html.thanksgiving, November 1 to Thanksgiving Day, set by the script in the head): warm autumn colors,
+   a countdown, leaves, acorns and little pumpkins falling, and a turkey that gobbles when tapped. Nothing that falls takes
+   a tap, and all motion stops for people who turn animations off. */
+.tg{display:none}
+html.thanksgiving .tg{display:block}
+html.thanksgiving{--bg:#FBF3E6;--ink:#3A2414;--muted:#6E5643;--red:#C4561D;--redd:#9E3D12;--line:#EAD9C2;--gold:#E0A23B}
+html.thanksgiving body{background:var(--bg) radial-gradient(ellipse at 12% 0%,rgba(224,162,59,.22),transparent 55%) no-repeat;overflow-x:clip}
+html.thanksgiving .tg-hi{font-family:"Dancing Script","Brush Script MT","Snell Roundhand",cursive;font-weight:700;font-size:54px;line-height:1;color:var(--red);margin:0 0 10px;text-shadow:0 2px 0 rgba(224,162,59,.35)}
+html.thanksgiving .eyebrow{color:#7A4A1E}
+html.thanksgiving .more{background:linear-gradient(135deg,#6A3416,#3A2414)}
+html.thanksgiving .pack{transition:transform .25s,box-shadow .25s}
+html.thanksgiving .pack:hover{transform:translateY(-4px);box-shadow:0 12px 30px rgba(196,86,29,.18)}
+.tg-count{margin-top:22px;background:#fff;border:1px solid var(--line);border-radius:20px;padding:16px 18px;box-shadow:0 8px 24px rgba(122,59,18,.10);max-width:480px}
+.tg-count .lbl{font-weight:800;font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:var(--redd);margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.tg-count .lbl svg{width:22px;height:22px;color:#C4561D;flex:none}
+.tg-count .clock{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.tg-count .clock[hidden]{display:none}
+.tg-count .u{background:linear-gradient(180deg,#D06A2A,#9E3D12);color:#fff;border-radius:14px;padding:10px 4px 8px;text-align:center;box-shadow:inset 0 -3px 0 rgba(0,0,0,.15)}
+.tg-count .u b{display:block;font-family:"Bricolage Grotesque","Trebuchet MS",sans-serif;font-size:34px;line-height:1;font-variant-numeric:tabular-nums}
+.tg-count .u span{display:block;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.92;margin-top:4px}
+.tg-count .note{margin:10px 0 0;color:var(--muted);font-size:15px}
+.tg-fall{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:30}
+.tg-fall i{position:absolute;top:0;left:var(--x);width:var(--s);animation:tg-fall var(--d) linear var(--w) infinite;will-change:transform}
+.tg-fall i svg{display:block;width:100%;height:auto;animation:tg-sway var(--sw) ease-in-out infinite alternate;filter:drop-shadow(0 2px 2px rgba(58,36,20,.2))}
+html.thanksgiving .tg-garland{position:absolute;left:4%;right:4%;top:-16px;width:92%;height:auto;z-index:2;pointer-events:none}
+html.thanksgiving .tg-turkey{position:absolute;right:-14px;bottom:-34px;width:122px;height:112px;border:0;background:none;padding:0;cursor:pointer;z-index:3;animation:tg-strut 2.8s ease-in-out infinite}
+.tg-turkey svg{display:block;width:100%;height:100%;filter:drop-shadow(0 6px 14px rgba(122,59,18,.35))}
+.tg-turkey .say{position:absolute;right:96px;bottom:80px;background:#fff;color:#9E3D12;font-family:"Dancing Script","Brush Script MT",cursive;font-weight:700;font-size:28px;line-height:1;padding:8px 14px;border-radius:16px 16px 4px 16px;box-shadow:0 4px 14px rgba(0,0,0,.15);opacity:0;transform:scale(.3);transform-origin:right bottom;transition:opacity .2s,transform .25s;white-space:nowrap;pointer-events:none}
+.tg-turkey.on .say{opacity:1;transform:scale(1)}
+.tg-turkey.on{animation:hw-jump .5s ease-out}
+.tg-pop{position:absolute;left:46px;top:34px;width:26px;pointer-events:none;animation:hw-pop 1.3s ease-out forwards}
+.tg-pop svg{display:block;width:100%;height:auto}
+@keyframes tg-fall{0%{transform:translateY(-70px) rotate(0deg)}100%{transform:translateY(calc(100vh + 90px)) rotate(var(--r))}}
+@keyframes tg-sway{from{transform:translateX(-28px) rotate(-20deg)}to{transform:translateX(28px) rotate(20deg)}}
+@keyframes tg-strut{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg) translateY(-2px)}}
+@media (max-width:640px){html.thanksgiving .tg-hi{font-size:42px}.tg-count .u b{font-size:28px}html.thanksgiving .tg-turkey{right:-4px;bottom:-28px;width:94px;height:86px}.tg-turkey .say{right:72px;bottom:62px;font-size:24px}}
+@media (prefers-reduced-motion:reduce){html.thanksgiving .tg-fall{display:none}html.thanksgiving .tg-turkey{animation:none}html.thanksgiving .pack:hover{transform:none}}
 
 /* Halloween (html.halloween, set by the script in the head). Decorations never take a tap except the pumpkin, and all
    motion stops for people who turn animations off on their phone or computer. */
@@ -153,6 +197,13 @@ html.halloween .hw-pumpkin{position:absolute;right:-12px;bottom:-26px;width:100p
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<symbol id="tg-maple" viewBox="0 0 100 100"><path d="M50 4L58 22L68 16L64 38L80 30L76 42L92 44L80 56L86 60L66 66L68 76L54 70L52 96L48 96L46 70L32 76L34 66L14 60L20 56L8 44L24 42L20 30L36 38L32 16L42 22Z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M50 94V30M50 62L28 46M50 62L72 46M50 46L38 28M50 46L62 28" fill="none" stroke="rgba(0,0,0,.22)" stroke-width="2.4" stroke-linecap="round"/></symbol>
+<symbol id="tg-oak" viewBox="0 0 100 100"><path d="M50 6C60 10 56 20 64 22C74 24 70 34 78 38C86 42 78 52 84 58C90 66 78 70 72 74C66 80 58 78 54 86L52 96L48 96L46 86C42 78 34 80 28 74C22 70 10 66 16 58C22 52 14 42 22 38C30 34 26 24 36 22C44 20 40 10 50 6Z" fill="currentColor"/><path d="M50 94V16M50 40L34 30M50 40L66 30M50 58L30 50M50 58L70 50M50 74L36 70M50 74L64 70" fill="none" stroke="rgba(0,0,0,.22)" stroke-width="2.2" stroke-linecap="round"/></symbol>
+<symbol id="tg-acorn" viewBox="0 0 60 80"><ellipse cx="30" cy="52" rx="17" ry="22" fill="#C98F52"/><ellipse cx="24" cy="48" rx="5" ry="10" fill="#E2B27A" opacity=".6"/><path d="M7 38Q30 12 53 38Q30 46 7 38Z" fill="#6A3F18"/><path d="M14 33Q30 22 46 33" fill="none" stroke="#8A5A2A" stroke-width="2"/><rect x="28" y="8" width="4.5" height="14" rx="2" fill="#5A3412"/></symbol>
+<symbol id="tg-pumpkin" viewBox="0 0 100 90"><path d="M47 20C46 12 48 6 55 3L58 7C53 9 53 14 54 20Z" fill="#4B6B2A"/><ellipse cx="31" cy="53" rx="23" ry="32" fill="#D96A1A"/><ellipse cx="69" cy="53" rx="23" ry="32" fill="#D96A1A"/><ellipse cx="50" cy="53" rx="25" ry="34" fill="#F08A2C"/><ellipse cx="42" cy="40" rx="6" ry="14" fill="#FFB067" opacity=".55"/></symbol>
+</defs></svg>
+<div class="tg tg-fall" id="tgfall" aria-hidden="true"></div>
 <div class="hw hw-sky" aria-hidden="true"><span class="bat" style="--y:9vh;--d:15s;--w:1s;--s:1"><i><svg viewBox="0 0 100 44"><path d="M50 13C47 7 44 7 43 12C38 7 28 3 13 5C19 10 19 16 13 21C21 19 28 22 31 27C34 23 39 23 42 28L50 37L58 28C61 23 66 23 69 27C72 22 79 19 87 21C81 16 81 10 87 5C72 3 62 7 57 12C56 7 53 7 50 13ZM45 11L44 4L48 9ZM55 11L56 4L52 9Z"/></svg></i></span><span class="bat back" style="--y:26vh;--d:19s;--w:6s;--s:.8"><i><svg viewBox="0 0 100 44"><path d="M50 13C47 7 44 7 43 12C38 7 28 3 13 5C19 10 19 16 13 21C21 19 28 22 31 27C34 23 39 23 42 28L50 37L58 28C61 23 66 23 69 27C72 22 79 19 87 21C81 16 81 10 87 5C72 3 62 7 57 12C56 7 53 7 50 13ZM45 11L44 4L48 9ZM55 11L56 4L52 9Z"/></svg></i></span><span class="bat" style="--y:44vh;--d:17s;--w:11s;--s:.65"><i><svg viewBox="0 0 100 44"><path d="M50 13C47 7 44 7 43 12C38 7 28 3 13 5C19 10 19 16 13 21C21 19 28 22 31 27C34 23 39 23 42 28L50 37L58 28C61 23 66 23 69 27C72 22 79 19 87 21C81 16 81 10 87 5C72 3 62 7 57 12C56 7 53 7 50 13ZM45 11L44 4L48 9ZM55 11L56 4L52 9Z"/></svg></i></span><span class="bat back" style="--y:14vh;--d:22s;--w:15s;--s:1.15"><i><svg viewBox="0 0 100 44"><path d="M50 13C47 7 44 7 43 12C38 7 28 3 13 5C19 10 19 16 13 21C21 19 28 22 31 27C34 23 39 23 42 28L50 37L58 28C61 23 66 23 69 27C72 22 79 19 87 21C81 16 81 10 87 5C72 3 62 7 57 12C56 7 53 7 50 13ZM45 11L44 4L48 9ZM55 11L56 4L52 9Z"/></svg></i></span><span class="bat" style="--y:62vh;--d:20s;--w:20s;--s:.75"><i><svg viewBox="0 0 100 44"><path d="M50 13C47 7 44 7 43 12C38 7 28 3 13 5C19 10 19 16 13 21C21 19 28 22 31 27C34 23 39 23 42 28L50 37L58 28C61 23 66 23 69 27C72 22 79 19 87 21C81 16 81 10 87 5C72 3 62 7 57 12C56 7 53 7 50 13ZM45 11L44 4L48 9ZM55 11L56 4L52 9Z"/></svg></i></span></div>
 <header>
   <a class="brand" href="/" aria-label="HD Laser Studio home"><svg width="78" height="26" viewBox="220 115 1930 640" aria-hidden="true"><path fill="#C8372A" d="M510 125 L730 125 L636 371 L963 371 L1072 125 L2000 125 C2100 125 2160 210 2130 300 L2010 610 C1970 700 1880 742 1790 742 L1115 742 L1283 341 L1525 341 L1425 595 L1800 595 L1938 272 L1222 272 L1030 742 L808 742 L907 523 L572 523 L483 742 L232 742 Z"></path></svg><span>LASER STUDIO</span></a>
@@ -162,10 +213,12 @@ html.halloween .hw-pumpkin{position:absolute;right:-12px;bottom:-26px;width:100p
   <div class="hero">
     <div>
       <p class="hw boo">Happy Halloween!</p>
+      <p class="tg tg-hi">Happy Thanksgiving!</p>
       <p class="eyebrow">Holiday gifts for your team and clients</p>
       <h1>A gift with your logo that they&#8217;ll use every day.</h1>
       <p class="lead">Tumblers, cups, bottles, cutting boards, or <b>any gift you bring in</b>. We engrave your logo, a design, a message or a name, right here in our Pacific Beach shop. Tell us your idea and we&#8217;ll send a free digital proof before we make anything.</p>
       <div class="cta"><a class="btn" href="/quote/?gift=Holiday%20gifts">Get a free quote</a> <a class="btn ghost" href="tel:+18583739866">Call or text (858) 373-9866</a></div>
+      <div class="tg tg-count" id="tgcount"><p class="lbl"><svg viewBox="0 0 100 100" aria-hidden="true"><use href="#tg-maple"/></svg><span>Thanksgiving is in</span></p><div class="clock" role="timer" aria-label="Time until Thanksgiving"><div class="u"><b id="tgd">--</b><span>days</span></div><div class="u"><b id="tgh">--</b><span>hours</span></div><div class="u"><b id="tgm">--</b><span>minutes</span></div><div class="u"><b id="tgs">--</b><span>seconds</span></div></div><p class="note">Thank your host, your team and your clients with a gift that has their name or your logo on it. Ask now so it&#8217;s ready for the big day.</p></div>
       <div class="deadline" id="deadline">Holiday orders are open until December 31</div>
     </div>
     <div class="himg">
@@ -174,6 +227,8 @@ html.halloween .hw-pumpkin{position:absolute;right:-12px;bottom:-26px;width:100p
       <svg class="hw hw-web" viewBox="0 0 100 100" aria-hidden="true"><path fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1" d="M0 0L100 0M0 0L93 37M0 0L71 71M0 0L37 93M0 0L0 100M26 0Q21 4 24 10Q18 12 18 18Q12 18 10 24Q4 21 0 26M50 0Q40 8 46 19Q34 23 35 35Q23 34 19 46Q8 40 0 50M74 0Q60 12 69 28Q51 33 52 52Q33 51 28 69Q12 60 0 74M98 0Q79 15 91 37Q67 44 69 69Q44 67 37 91Q15 79 0 98"/></svg>
       <span class="hw hw-spider" aria-hidden="true"><b></b><svg viewBox="0 0 40 40"><g stroke="#0D0A14" stroke-width="2.2" fill="none" stroke-linecap="round"><path d="M14 18L4 10M14 21L2 20M14 24L4 31M15 26L8 37M26 18L36 10M26 21L38 20M26 24L36 31M25 26L32 37"/></g><ellipse cx="20" cy="22" rx="8" ry="9" fill="#0D0A14"/><circle cx="20" cy="12" r="5.5" fill="#0D0A14"/><circle cx="18" cy="11.5" r="1.4" fill="#FF6B3D"/><circle cx="22" cy="11.5" r="1.4" fill="#FF6B3D"/></svg></span>
       <svg class="hw hw-ghost" viewBox="0 0 60 70" aria-hidden="true"><path fill="#F7F4FF" d="M30 2C14 2 6 14 6 30V62L13 56L20 64L27 56L34 64L41 56L48 64L54 58V30C54 14 46 2 30 2Z"/><ellipse cx="22" cy="28" rx="3.6" ry="5" fill="#2A2140"/><ellipse cx="38" cy="28" rx="3.6" ry="5" fill="#2A2140"/><ellipse cx="30" cy="42" rx="4" ry="5" fill="#2A2140"/><circle cx="16" cy="36" r="3" fill="#FFB3C7" opacity=".7"/><circle cx="44" cy="36" r="3" fill="#FFB3C7" opacity=".7"/></svg>
+      <svg class="tg tg-garland" viewBox="0 0 400 54" aria-hidden="true"><path d="M0 6Q200 40 400 6" fill="none" stroke="#7A4A1E" stroke-width="1.6"/><use href="#tg-maple" x="27.0" y="10.1" width="26" height="26" style="color:#C4561D" transform="rotate(14 40.0 23.1)"/><use href="#tg-oak" x="67.0" y="14.9" width="26" height="26" style="color:#E0A23B" transform="rotate(-14 80.0 27.9)"/><use href="#tg-maple" x="107.0" y="18.3" width="26" height="26" style="color:#9E2B25" transform="rotate(14 120.0 31.3)"/><use href="#tg-oak" x="147.0" y="20.3" width="26" height="26" style="color:#D9782D" transform="rotate(-14 160.0 33.3)"/><use href="#tg-maple" x="187.0" y="21.0" width="26" height="26" style="color:#7A4A1E" transform="rotate(14 200.0 34.0)"/><use href="#tg-oak" x="227.0" y="20.3" width="26" height="26" style="color:#E0A23B" transform="rotate(-14 240.0 33.3)"/><use href="#tg-maple" x="267.0" y="18.3" width="26" height="26" style="color:#C4561D" transform="rotate(14 280.0 31.3)"/><use href="#tg-oak" x="307.0" y="14.9" width="26" height="26" style="color:#9E2B25" transform="rotate(-14 320.0 27.9)"/><use href="#tg-maple" x="347.0" y="10.1" width="26" height="26" style="color:#D9782D" transform="rotate(14 360.0 23.1)"/></svg>
+      <button type="button" class="tg tg-turkey" id="tgturkey" aria-label="Gobble gobble! Tap the turkey"><span class="say">Gobble gobble!</span><svg viewBox="0 0 120 112" aria-hidden="true"><ellipse cx="60" cy="26" rx="11" ry="28" fill="#9E2B25" transform="rotate(-78 60 64)"/><ellipse cx="60" cy="26" rx="11" ry="28" fill="#E0A23B" transform="rotate(-52 60 64)"/><ellipse cx="60" cy="26" rx="11" ry="28" fill="#C4561D" transform="rotate(-26 60 64)"/><ellipse cx="60" cy="26" rx="11" ry="28" fill="#9E2B25" transform="rotate(0 60 64)"/><ellipse cx="60" cy="26" rx="11" ry="28" fill="#C4561D" transform="rotate(26 60 64)"/><ellipse cx="60" cy="26" rx="11" ry="28" fill="#E0A23B" transform="rotate(52 60 64)"/><ellipse cx="60" cy="26" rx="11" ry="28" fill="#9E2B25" transform="rotate(78 60 64)"/><ellipse cx="60" cy="38" rx="7.5" ry="20" fill="#F0C060" transform="rotate(-65 60 64)"/><ellipse cx="60" cy="38" rx="7.5" ry="20" fill="#D06A2A" transform="rotate(-39 60 64)"/><ellipse cx="60" cy="38" rx="7.5" ry="20" fill="#F0C060" transform="rotate(-13 60 64)"/><ellipse cx="60" cy="38" rx="7.5" ry="20" fill="#D06A2A" transform="rotate(13 60 64)"/><ellipse cx="60" cy="38" rx="7.5" ry="20" fill="#F0C060" transform="rotate(39 60 64)"/><ellipse cx="60" cy="38" rx="7.5" ry="20" fill="#D06A2A" transform="rotate(65 60 64)"/><path d="M50 96L47 106M47 106L41 108M47 106L49 110M70 96L73 106M73 106L79 108M73 106L71 110" stroke="#E0A23B" stroke-width="3" stroke-linecap="round" fill="none"/><ellipse cx="60" cy="76" rx="27" ry="25" fill="#7A4A1E"/><ellipse cx="39" cy="78" rx="9" ry="15" fill="#6A3F18" transform="rotate(18 39 78)"/><ellipse cx="81" cy="78" rx="9" ry="15" fill="#6A3F18" transform="rotate(-18 81 78)"/><ellipse cx="60" cy="82" rx="15" ry="14" fill="#8F5A2A"/><circle cx="60" cy="49" r="14" fill="#8F5A2A"/><circle cx="54.5" cy="46" r="3" fill="#1E120A"/><circle cx="65.5" cy="46" r="3" fill="#1E120A"/><circle cx="55.4" cy="45" r="1" fill="#fff"/><circle cx="66.4" cy="45" r="1" fill="#fff"/><path d="M56.5 52L63.5 52L60 58Z" fill="#E0A23B"/><path d="M61.5 55C67 57 67 66 62 68C58.5 64 58.5 59 61.5 55Z" fill="#C62828"/></svg></button>
       <button type="button" class="hw hw-pumpkin" id="hwpumpkin" aria-label="Boo! Tap the pumpkin"><svg viewBox="0 0 100 90" aria-hidden="true"><path d="M47 20C46 12 48 6 55 3L58 7C53 9 53 14 54 20Z" fill="#4B6B2A"/><ellipse cx="31" cy="53" rx="23" ry="33" fill="#E2650E"/><ellipse cx="69" cy="53" rx="23" ry="33" fill="#E2650E"/><ellipse cx="50" cy="53" rx="22" ry="35" fill="#FF8A2A"/><g class="face" fill="#FFD45A"><path d="M30 42L40 42L35 32Z"/><path d="M60 42L70 42L65 32Z"/><path d="M46 52L54 52L50 45Z"/><path d="M26 60Q50 80 74 60L68 62L64 58L58 64L54 59L50 65L46 59L42 64L36 58L32 62Z"/></g></svg><span class="say">Boo!</span></button>
     </div>
   </div>
@@ -206,6 +261,13 @@ html.halloween .hw-pumpkin{position:absolute;right:-12px;bottom:-26px;width:100p
     <p class="intro">We make Halloween things too, right here in Pacific Beach.</p>
     <div class="what"><div><b>Party cups</b><span>Each guest&#8217;s name on their cup</span></div><div><b>A spooky sign</b><span>Cut from wood for the front door</span></div><div><b>Party glasses</b><span>Bring yours, we add the names</span></div><div><b>Your idea</b><span>Tell us and we&#8217;ll make it spooky</span></div></div>
     <p style="margin-top:18px"><a class="btn" href="/quote/?gift=Halloween%20idea">Ask about a Halloween idea</a></p>
+  </section>
+
+  <section class="tg tg-ideas">
+    <h2>Hosting Thanksgiving?</h2>
+    <p class="intro">We make Thanksgiving things too, right here in Pacific Beach.</p>
+    <div class="what"><div><b>Place cards</b><span>Each guest&#8217;s name, cut from wood</span></div><div><b>A board for the host</b><span>A cutting board with the family name</span></div><div><b>Wine glasses</b><span>Bring yours, we add the names</span></div><div><b>A thank-you</b><span>For your team or your clients</span></div></div>
+    <p style="margin-top:18px"><a class="btn" href="/quote/?gift=Thanksgiving%20idea">Ask about a Thanksgiving idea</a></p>
   </section>
 
   <section>
@@ -245,6 +307,36 @@ html.halloween .hw-pumpkin{position:absolute;right:-12px;bottom:-26px;width:100p
     p.classList.remove('on'); void p.offsetWidth; p.classList.add('on'); clearTimeout(p.t); p.t = setTimeout(function(){ p.classList.remove('on'); }, 1600);
     if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     [-70, 0, 70].forEach(function(x, i){ var b = document.createElement('span'); b.className = 'hw-pop'; b.style.setProperty('--x', x + 'px'); b.style.animationDelay = (i * 0.08) + 's'; b.innerHTML = bat.innerHTML; p.appendChild(b); setTimeout(function(){ b.remove(); }, 1500); });
+  }); })();
+</script>
+<script>
+// Thanksgiving: the countdown, the leaves, acorns and pumpkins that fall, and the turkey that gobbles.
+(function(){ if (!document.documentElement.classList.contains('thanksgiving')) return;
+  var T = window.HD_THANKSGIVING, $ = function(id){ return document.getElementById(id); }, box = $('tgcount');
+  var pad = function(n){ return (n < 10 ? '0' : '') + n; }, iv;
+  function tick(){
+    var ms = T - new Date();
+    if (ms <= 0) { box.querySelector('.lbl span').textContent = 'Today is Thanksgiving'; box.querySelector('.clock').hidden = true;
+      box.querySelector('.note').textContent = 'Happy Thanksgiving from all of us at HD Laser Studio. Thank you for a wonderful year, San Diego.'; clearInterval(iv); return; }
+    var s = Math.floor(ms / 1000);
+    $('tgd').textContent = Math.floor(s / 86400); $('tgh').textContent = pad(Math.floor(s % 86400 / 3600)); $('tgm').textContent = pad(Math.floor(s % 3600 / 60)); $('tgs').textContent = pad(s % 60);
+  }
+  tick(); iv = setInterval(tick, 1000);
+  var still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var kinds = [['tg-maple', '#C4561D'], ['tg-maple', '#E0A23B'], ['tg-maple', '#9E2B25'], ['tg-oak', '#D9782D'], ['tg-oak', '#7A4A1E'], ['tg-maple', '#D9782D'], ['tg-acorn'], ['tg-pumpkin']];
+  var piece = function(k){ var vb = k[0] === 'tg-acorn' ? '0 0 60 80' : k[0] === 'tg-pumpkin' ? '0 0 100 90' : '0 0 100 100';
+    return '<svg viewBox="' + vb + '"' + (k[1] ? ' style="color:' + k[1] + '"' : '') + '><use href="#' + k[0] + '"/></svg>'; };
+  if (!still) {
+    var fall = $('tgfall'), n = window.innerWidth < 640 ? 12 : 22, r = Math.random, html = '';
+    for (var i = 0; i < n; i++) { var k = kinds[i % kinds.length], big = k[0] === 'tg-pumpkin' ? 1.25 : k[0] === 'tg-acorn' ? .7 : 1, d = 10 + r() * 10;
+      html += '<i style="--x:' + (r() * 100).toFixed(1) + 'vw;--s:' + Math.round((20 + r() * 20) * big) + 'px;--d:' + d.toFixed(1) + 's;--w:' + (-r() * d).toFixed(1) + 's;--sw:' + (2 + r() * 2).toFixed(1) + 's;--r:' + Math.round(180 + r() * 360) * (r() < .5 ? -1 : 1) + 'deg">' + piece(k) + '</i>'; }
+    fall.innerHTML = html;
+  }
+  var tk = $('tgturkey'); if (!tk) return;
+  tk.addEventListener('click', function(){
+    tk.classList.remove('on'); void tk.offsetWidth; tk.classList.add('on'); clearTimeout(tk.t); tk.t = setTimeout(function(){ tk.classList.remove('on'); }, 1600);
+    if (still) return;
+    [-80, -26, 26, 80].forEach(function(x, i){ var b = document.createElement('span'); b.className = 'tg-pop'; b.style.setProperty('--x', x + 'px'); b.style.animationDelay = (i * 0.07) + 's'; b.innerHTML = piece(kinds[i]); tk.appendChild(b); setTimeout(function(){ b.remove(); }, 1600); });
   }); })();
 </script>
 <script src="/assets/site-config.js?v=7"></script>
