@@ -2,8 +2,8 @@
 // we can go back to normal after holiday season"). From November 1 through Thanksgiving Day: warm autumn colors, a
 // "Happy Thanksgiving!" headline, a live countdown, leaves, acorns and little pumpkins falling, and a turkey that gobbles
 // when tapped. The day after Thanksgiving the page is back to normal by itself. ?theme=thanksgiving previews it,
-// ?theme=holiday hides it. Load it in the <head> so the colors are there before the page paints:
-//   <script src="/assets/thanksgiving.js?v=1" data-hello="#top h1" data-count="#top > div:first-child" data-turkey="#top > div:nth-child(2)"></script>
+// ?theme=holiday hides it. Load it in the <head> with defer (Nov 2: a plain script there held up the first paint on phones):
+//   <script defer src="/assets/thanksgiving.js?v=4" data-hello="#top h1" data-count="#top > div:first-child" data-turkey="#top > div:nth-child(2)"></script>
 // data-hello: the headline goes just before this element. data-count: the countdown card goes at the end of this one.
 // data-turkey: a positioned box that gets the leaf garland and the turkey. (The holiday page has its own copy of this look.)
 (function () {
@@ -22,9 +22,9 @@
   var css = [
     'html.thanksgiving body{background:#FBF3E6 radial-gradient(ellipse at 12% 0%,rgba(224,162,59,.22),transparent 55%) no-repeat;overflow-x:clip}',
     'html.thanksgiving a{color:#9E3D12}',
-    swap('#C8372A', 'background', '#C4561D'), swap('#E0483A', 'background', '#D06A2A'), swap('#15191E', 'background', '#3A2414'),
+    swap('#C8372A', 'background', '#C0531B'), swap('#E0483A', 'background', '#D06A2A'), swap('#15191E', 'background', '#3A2414'),
     swap('#232931', 'background', '#4A2E1A'), swap('#2B5F8A', 'background', '#9E3D12'), swap('#F6F4EF', 'background', '#FBF3E6'),
-    swap('#EDE8DF', 'background', '#F5E6CF'), swap('#C8372A', 'color', '#C4561D'), swap('#A32C21', 'color', '#9E3D12'),
+    swap('#EDE8DF', 'background', '#F5E6CF'), swap('#C8372A', 'color', '#C0531B'), swap('#A32C21', 'color', '#9E3D12'),
     swap('#15191E', 'color', '#3A2414'), swap('#545B63', 'color', '#6E5643'), swap('#2B5F8A', 'color', '#9E3D12'), swap('#D5DADF', 'color', '#EBDCC8'),
     '.tg-hi{font-family:"Dancing Script","Brush Script MT","Snell Roundhand",cursive;font-weight:700;font-size:56px;line-height:1;color:#C4561D;margin:0;text-shadow:0 2px 0 rgba(224,162,59,.35)}',
     '.tg-count{background:#fff;border:1px solid #EAD9C2;border-radius:20px;padding:16px 18px;box-shadow:0 8px 24px rgba(122,59,18,.10);max-width:520px;font-family:Figtree,"Helvetica Neue",Helvetica,sans-serif;color:#3A2414}',

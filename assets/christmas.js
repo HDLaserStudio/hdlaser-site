@@ -3,8 +3,8 @@
 // red, evergreen and gold, a "Merry Christmas!" headline, a live countdown to Christmas (from December 26 a countdown to
 // the New Year), Christmas lights over the photo and a snowman that waves when tapped. January 1 the page is normal again
 // by itself. ?theme=christmas previews it; ?theme=plain, ?theme=halloween or ?theme=thanksgiving leaves it off. Load it in
-// the <head> so the colors are there before the page paints:
-//   <script src="/assets/christmas.js?v=1" data-hello="#top h1" data-count="#top > div:first-child" data-deco="#top > div:nth-child(2)" data-link="/holiday/" data-link-text="See holiday gift ideas"></script>
+// the <head> with defer (Nov 2: a plain script there held up the first paint on phones):
+//   <script defer src="/assets/christmas.js?v=1" data-hello="#top h1" data-count="#top > div:first-child" data-deco="#top > div:nth-child(2)" data-link="/holiday/" data-link-text="See holiday gift ideas"></script>
 // data-hello: the headline goes just before this element. data-count: the countdown card goes at the end of this one.
 // data-deco: a positioned box that gets the lights and the snowman. data-link and data-link-text: the link in the card.
 (function () {
