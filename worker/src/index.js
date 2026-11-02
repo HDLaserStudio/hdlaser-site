@@ -29,7 +29,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-11-02 v67"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-11-02 v68"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -4112,6 +4112,9 @@ function campaignHtml(body, unsubLink, subject) {
   const linkify = (t) => esc(t).replace(/https?:\/\/[^\s<>"]+/g, (u) => `<a href="${u}" style="color:#A32C21;font-weight:700">${u.replace(/^https?:\/\//, "").replace(/\?.*$/, "")}</a>`)
     .replace(/\((\d{3})\) (\d{3})-(\d{4})/g, (m, a, b, c) => `<a href="tel:+1${a}${b}${c}" style="color:#A32C21;font-weight:700;text-decoration:none;white-space:nowrap">${m}</a>`);
   const paras = body.split(/\n\s*\n/).map((p) => `<p style="margin:0 0 16px;font-size:17px;line-height:1.6;color:#15191E">${linkify(p.trim()).replace(/\n/g, "<br>")}</p>`).join("");
+  // The photo grid (Hugh, Nov 2: "change the photos to a better selection"): email-holiday-gifts-nov.jpg, the family name board,
+  // names on wine glasses, the Boards N' Beans logo cups and two name bottles. A new file name, not a replaced file, so inboxes
+  // that cached the October picture (email-holiday-gifts.jpg, still on the site for the October email) show the new one.
   // The line inboxes show next to the subject: the first real sentence, not "Hi there!" or the contact line.
   const pre = esc((body.split(/\n\s*\n/).map((p) => p.replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim()).find((p) => p.length > 30) || "").slice(0, 140));
   const head = subject ? `<tr><td align="center" style="padding:30px 28px 18px"><div style="font-family:'Dancing Script','Brush Script MT','Snell Roundhand',cursive;font-size:42px;line-height:1.1;font-weight:700;color:#A32C21">${esc(subject).replace(/ (\S+)$/, "&nbsp;$1")}</div></td></tr>` : "";
@@ -4124,7 +4127,7 @@ function campaignHtml(body, unsubLink, subject) {
 <div style="padding-top:12px;font-size:14px;line-height:1.7;color:#D9D4CA"><a href="mailto:contact@hdlaser.net" style="color:#FFFFFF;text-decoration:none">contact@hdlaser.net</a> &middot; <a href="tel:+18583739866" style="color:#FFFFFF;text-decoration:none">(858) 373-9866</a><br><a href="https://maps.google.com/?q=759+Turquoise+St,+San+Diego,+CA+92109" style="color:#D9D4CA;text-decoration:none">759 Turquoise St, Pacific Beach, San Diego</a></div></td></tr>
 <tr><td align="center" style="background:#F2B63D;padding:10px 12px;font-size:12px;font-weight:800;letter-spacing:1px;color:#15191E">&#10052; HOLIDAY GIFTS &middot; ORDER BY DEC 31 &#10052;</td></tr>
 ${head}
-<tr><td style="padding:${subject ? "0" : "28px"} 28px 0"><a href="${firstUrl}"><img src="https://hdlaser.net/assets/email-holiday-gifts.jpg" width="544" alt="Logo tumblers, engraved wine glasses, a flask and a heart box made at HD Laser Studio" style="width:100%;max-width:544px;height:auto;border:0;border-radius:12px;display:block"></a></td></tr>
+<tr><td style="padding:${subject ? "0" : "28px"} 28px 0"><a href="${firstUrl}"><img src="https://hdlaser.net/assets/email-holiday-gifts-nov.jpg" width="544" alt="A family name cutting board, names on wine glasses, logo cups and name bottles made at HD Laser Studio" style="width:100%;max-width:544px;height:auto;border:0;border-radius:12px;display:block"></a></td></tr>
 <tr><td style="padding:26px 28px 4px">${paras}</td></tr>
 <tr><td align="center" style="padding:6px 28px 8px"><a href="${firstUrl}" style="display:inline-block;background:#C8372A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:18px;padding:16px 32px;border-radius:999px">See holiday gift ideas</a></td></tr>
 <tr><td align="center" style="padding:6px 28px 26px;font-size:15px;color:#545B63">or call or text <a href="tel:+18583739866" style="color:#A32C21;font-weight:700;text-decoration:none">(858) 373-9866</a></td></tr>
