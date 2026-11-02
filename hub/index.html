@@ -160,6 +160,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
     team:'<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20a7 7 0 0 1 14 0M15 15a5 5 0 0 1 7 5"/></svg>',
     sales:'<svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 6-8 3 4"/><path d="M3 21h18"/></svg>',
     money:'<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 9h.01M18 15h.01"/></svg>',
+    bell:'<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
     web:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>',
     terms:'<svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>',
     logo:'<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="10" cy="12.5" r="1.6"/><path d="M19 17l-3.5-3.5L9 18"/></svg>'
@@ -184,6 +185,7 @@ input{font:inherit;font-size:17px;color:var(--ink);background:#fff;border:1px so
       own?{href:BASE+'/admin/money',ic:'money',t:'Money',s:'P&L, cash forecast, pricing review'}:null,
       own?{href:BASE+'/admin/customers',ic:'team',t:'Customers',s:'Everyone who bought or asked; copy emails, email everyone'}:null,
       own?{href:BASE+'/admin/prices',ic:'prices',t:'Edit prices',s:'Every price on one screen, one Save'}:null,
+      own?{href:BASE+'/admin/notify',ic:'bell',t:'Emails & texts',s:'Choose what reaches you; one summary at 6 PM'}:null,
       {href:'/',ic:'web',t:'The website',s:'What customers see'},
       {href:'/terms/',ic:'terms',t:'Terms of sale',s:'What every customer agrees to'}
     ].filter(Boolean);

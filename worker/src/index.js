@@ -11,6 +11,7 @@
 //   /staff/*                  employee portal API (login, clock, checklist, jobs, team KPIs); site page at /staff/
 //   POST /webhooks/twilio     inbound texts (owner replies 1/2 to the staffing alert)
 //   STAFF_ALERTS (optional)   which staff events text the owner: clockin,clockout,noshow (default all)
+//   GET  /admin/notify        which emails and texts the shop gets, per kind, plus the 6 PM summary (Basic auth; /api/notify)
 //   GET  /admin/money         P&L, bank ledger, reconciliation, unit economics, 13-week cash forecast (Basic auth)
 //   /api/money, /api/bank/*   data behind it; bank statements are imported as CSV rows from the page
 //   /api/plaid/*              live bank feed (PLAID_CLIENT_ID, PLAID_SECRET, PLAID_ENV); synced hourly with the Square job
@@ -28,7 +29,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-10-28 v65"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-11-02 v66"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -153,6 +154,10 @@ export default {
         if (denied) return denied;
         if (path === "/admin") return new Response(dashboardHtml(env), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
         if (path === "/admin/customers") return new Response(CUSTOMERS_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+        if (path === "/admin/notify") return new Response(NOTIFY_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+        if (path === "/api/notify" && request.method === "GET") return json(await notifyState(env), 200, { "Cache-Control": "no-store" });
+        if (path === "/api/notify" && request.method === "POST") return json(await saveNotify(env, await request.json().catch(() => ({}))), 200);
+        if (path === "/api/notify/summary" && request.method === "POST") return json(await dailySummary(env, true), 200);
         if (path === "/admin/social") return new Response(SOCIAL_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
         if (path === "/api/social") return json(await socialState(env), 200, { "Cache-Control": "no-store" });
         if (path.startsWith("/api/social/") && request.method === "POST") {
@@ -249,8 +254,9 @@ export default {
       await googleReviews(env, false).catch((e) => console.error("reviews", e)); // refreshes itself at most once a day
       await socialTick(env, false).catch((e) => console.error("social", e));       // the AI host's two videos a day (off until switched on)
       await syncSquare(env, 3);
+      await dailySummary(env, false).catch((e) => console.error("daily summary", e)); // from 6 PM: the day in one email
       if (env.PLAID_CLIENT_ID) await plaidSync(env, null, 12);
-      if (d.getUTCDay() === 1 && d.getUTCHours() === 15) { await analyzePricing(env).catch((e) => console.error("pricing review", e)); await sendDigest(env); }
+      if (d.getUTCDay() === 1 && d.getUTCHours() === 15) { await analyzePricing(env).catch((e) => console.error("pricing review", e)); await sendDigest(env, true); }
     })());
   },
 };
@@ -421,8 +427,8 @@ async function submitInquiry(request, env, cors) {
   const lines = Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join("\n");
   const subject = kind === "order" ? `Cup order ${ref || ""} from ${who}`.replace("  ", " ") : `Quote request from ${who}`;
   const toHugh = `${kind === "order" ? "New cup order details" : "New quote request"} via hdlaser.net\n\nFrom: ${name}${business ? ", " + business : ""}\nEmail: ${email}\nPhone: ${phone || "-"}\n${ref ? "Reference: " + ref + "\n" : ""}${b.Payment ? "Payment: " + b.Payment + "\n" : ""}\n${lines}\n\nReply to this email to answer them directly.`;
-  const r1 = await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject, text: toHugh });
-  await sendAlert(env, kind === "order" ? `New cup order ${ref || ""}: ${who}, ${fields["Order"] || ""}. Watch for payment.`.replace(/\s+/g, " ") : `Quote request from ${who}. ${phone ? "Ph " + phone + ". " : ""}Details in ${env.SUPPORT_EMAIL}.`);
+  const r1 = (await notifyOn(env, "quote", "email")) ? await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject, text: toHugh }) : { ok: true, skipped: true };
+  await sendAlert(env, kind === "order" ? `New cup order ${ref || ""}: ${who}, ${fields["Order"] || ""}. Watch for payment.`.replace(/\s+/g, " ") : `Quote request from ${who}. ${phone ? "Ph " + phone + ". " : ""}Details in ${env.SUPPORT_EMAIL}.`, { kind: "quote" });
 
   const first = name.split(" ")[0] || "there";
   const toCustomer = kind === "order"
@@ -456,12 +462,18 @@ async function sendEmail(env, { to, subject, text, html, replyTo, attachments })
 // gateways such as 5551234567@vtext.com, so a phone gets a text the moment something happens.
 // NTFY_TOPIC (optional) also pushes the same line to the free ntfy phone app: https://ntfy.sh/<topic>
 // opts.emailShop: also email SUPPORT_EMAIL when no ALERT_TO is set (used for staff alerts, which have no other email path)
+// opts.kind: one of NOTIFY_KINDS; its text switch on /admin/notify decides the text, ntfy and ALERT_TO (email-to-text) parts,
+// its email switch decides the emailShop email. Without a kind the alert always goes out.
 async function sendAlert(env, text, opts = {}) {
   const msg = String(text).slice(0, 300);
+  let wantText = true, wantEmail = true;
+  if (opts.kind) { const s = (await notifySettings(env))[opts.kind] || {}; wantText = s.text === true; wantEmail = s.email === true; }
+  if (!wantText && !wantEmail) return { ok: false, skipped: "turned off on /admin/notify" };
   const jobs = [];
-  let to = String(env.ALERT_TO || "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (!to.length && opts.emailShop && env.SUPPORT_EMAIL) to = [env.SUPPORT_EMAIL];
+  let to = wantText ? String(env.ALERT_TO || "").split(",").map((s) => s.trim()).filter(Boolean) : [];
+  if (!to.length && opts.emailShop && wantEmail && env.SUPPORT_EMAIL) to = [env.SUPPORT_EMAIL];
   if (to.length && env.RESEND_API_KEY) jobs.push(sendEmail(env, { to, subject: "HD Laser: " + msg.slice(0, 60), text: msg }));
+  if (!wantText) { if (!jobs.length) return { ok: false, skipped: true }; const r = await Promise.all(jobs); return { ok: r.some((x) => x && x.ok) }; }
   if (env.NTFY_TOPIC) jobs.push(fetch("https://ntfy.sh/" + encodeURIComponent(env.NTFY_TOPIC), { method: "POST", headers: { "Title": "HD Laser", "Priority": "high", "Tags": "moneybag" }, body: msg }).then((r) => ({ ok: r.ok })).catch((e) => ({ ok: false, error: String(e) })));
   // Real SMS through Twilio (see sendSms): ALERT_SMS_TO = comma-separated phones
   if (env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM && env.ALERT_SMS_TO)
@@ -469,6 +481,53 @@ async function sendAlert(env, text, opts = {}) {
   if (!jobs.length) return { ok: false, skipped: true };
   const results = await Promise.all(jobs);
   return { ok: results.some((r) => r && r.ok) };
+}
+
+// Which emails and texts the shop gets (Hugh, Nov 2: "i am receiving too many emails and texts for everything happening in hd laser
+// can we stop that ... or at least limit"). Each kind can email contact@, text ALERT_SMS_TO, both or neither; Hugh picks on /admin/notify
+// and it is kept in meta.notify. The defaults are quiet: an email only for what needs an answer (quote requests, online orders paid),
+// a text only when the shop isn't open on time or someone texts the shop number, and one end-of-day summary with every sale, quote
+// and shift. Square not giving a payment link always emails, because someone has to send an invoice. text: null = no text for that kind.
+const NOTIFY_KINDS = [
+  { k: "quote", label: "Quote requests from the website", note: "The order page and Tell us your idea. The email is the one you reply to with your price, with their logo attached.", email: true, text: false },
+  { k: "quote_price", label: "Price list email for each quote request", note: "Only for you: what the price list would charge. The end-of-day summary has it too.", email: true, text: null },
+  { k: "online_new", label: "Online order started, not paid yet", note: "They went to Square to pay. Many never do; you hear when they pay.", email: false, text: false },
+  { k: "online_paid", label: "Online order paid", note: "Proof or shipping is next. The email has their logo attached.", email: true, text: false },
+  { k: "counter", label: "Sales on the shop iPad and Terminal", note: "Every counter sale is in the end-of-day summary.", email: false, text: false },
+  { k: "clock", label: "Clock in and clock out", note: "Everyone's hours are in the end-of-day summary.", email: false, text: false },
+  { k: "noshow", label: "Nobody clocked in after opening", note: "Reply 1 to the text to text the team, 2 to stop for the day.", email: false, text: true },
+  { k: "inbound", label: "Texts to the shop's text number", note: "Customers and employees texting the Twilio number, and employees answering 1 or 2.", email: false, text: true },
+  { k: "ai", label: "AI host problems and posts waiting", note: "Only once the AI host is switched on.", email: true, text: false },
+  { k: "daily", label: "End-of-day summary", note: "One email at 6 PM: sales, quote requests, unpaid checkouts, who worked, texts. Not sent on a day with nothing in it.", email: true, text: null },
+  { k: "weekly", label: "Monday numbers", note: "The weekly sales email on Monday morning.", email: true, text: null },
+];
+async function notifySettings(env) {
+  const out = {};
+  for (const n of NOTIFY_KINDS) out[n.k] = { email: n.email, text: n.text === true };
+  let saved = {};
+  try { const row = env.DB ? await env.DB.prepare(`SELECT v FROM meta WHERE k = 'notify'`).first() : null; saved = row ? JSON.parse(row.v) || {} : {}; } catch {}
+  for (const n of NOTIFY_KINDS) {
+    const v = saved[n.k] || {};
+    if (typeof v.email === "boolean") out[n.k].email = v.email;
+    if (n.text !== null && typeof v.text === "boolean") out[n.k].text = v.text;
+  }
+  return out;
+}
+async function notifyOn(env, kind, how) { const s = (await notifySettings(env))[kind]; return !!(s && s[how] === true); }
+async function saveNotify(env, b) {
+  const cur = await notifySettings(env), next = {};
+  for (const n of NOTIFY_KINDS) {
+    const v = (b && b[n.k]) || {};
+    next[n.k] = { email: typeof v.email === "boolean" ? v.email : cur[n.k].email, text: n.text === null ? false : typeof v.text === "boolean" ? v.text : cur[n.k].text };
+  }
+  await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('notify', ?)`).bind(JSON.stringify(next)).run();
+  return { ok: true, settings: next };
+}
+async function notifyState(env) {
+  const last = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'daily_summary_date'`).first().catch(() => null);
+  return { kinds: NOTIFY_KINDS.map((n) => ({ k: n.k, label: n.label, note: n.note, has_text: n.text !== null, default_email: n.email, default_text: n.text === true })), settings: await notifySettings(env),
+    texts_to: String(env.ALERT_SMS_TO || "").split(",").map((x) => x.trim()).filter(Boolean).length, sms_ready: !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM), email_to: env.SUPPORT_EMAIL || "",
+    alert_to: !!String(env.ALERT_TO || "").trim(), ntfy: !!env.NTFY_TOPIC, last_summary: last ? last.v : null };
 }
 
 async function recordResale(request, env, cors) {
@@ -480,8 +539,8 @@ async function recordResale(request, env, cors) {
   if (!permit) return json({ error: "Permit required" }, 400, cors);
   const r = await env.DB.prepare(`UPDATE orders SET resale_permit = ?, resale_business = ?, resale_received_at = ? WHERE ref = ?`).bind(permit, business, new Date().toISOString(), ref).run();
   const o = await env.DB.prepare(`SELECT name, email, phone FROM orders WHERE ref = ?`).bind(ref).first();
-  await sendAlert(env, `Resale permit received for ${ref} (${business}).`);
-  if (env.RESEND_API_KEY) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o && o.email || undefined, subject: `Resale permit for order ${ref}: ${business}`, text: `Order ${ref}
+  await sendAlert(env, `Resale permit received for ${ref} (${business}).`, { kind: "online_paid" });
+  if (env.RESEND_API_KEY && await notifyOn(env, "online_paid", "email")) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o && o.email || undefined, subject: `Resale permit for order ${ref}: ${business}`, text: `Order ${ref}
 Business on permit: ${business}
 CA seller's permit: ${permit}
 Customer: ${o ? [o.name, o.email, o.phone].filter(Boolean).join(" · ") : "-"}
@@ -677,13 +736,14 @@ What happens next:
 HD Laser Studio
 759 Turquoise St, Pacific Beach
 (858) 373-9866 · hdlaser.net` });
-  await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o.email || undefined, subject: `PAID ${total}: ${o.business || o.name} (${ref})`, text: `Order ${ref} is paid.\n\nCustomer: ${[o.name, o.business, o.email, o.phone].filter(Boolean).join(" · ")}\n${items}\nTotal paid: ${total}\nResale permit: ${o.resale_permit || "not yet"}\n\nNext: watch for their logo, then send the proof. Dashboard: ${env.WORKER_URL || ""}/admin` });
-  await sendAlert(env, `PAID ${total} by ${o.business || o.name} (${ref}). ${lines.reduce((n, l) => n + l.qty, 0)} cups. Logo + proof next.`);
+  if (await notifyOn(env, "online_paid", "email")) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o.email || undefined, subject: `PAID ${total}: ${o.business || o.name} (${ref})`, text: `Order ${ref} is paid.\n\nCustomer: ${[o.name, o.business, o.email, o.phone].filter(Boolean).join(" · ")}\n${items}\nTotal paid: ${total}\nResale permit: ${o.resale_permit || "not yet"}\n\nNext: watch for their logo, then send the proof. Dashboard: ${env.WORKER_URL || ""}/admin` });
+  await sendAlert(env, `PAID ${total} by ${o.business || o.name} (${ref}). ${lines.reduce((n, l) => n + l.qty, 0)} cups. Logo + proof next.`, { kind: "online_paid" });
   await env.DB.prepare(`UPDATE orders SET notified_paid_at = ? WHERE ref = ?`).bind(new Date().toISOString(), ref).run();
 }
 
 async function notifyPaidCustom(env, o) {
   let spec = {}; try { spec = JSON.parse(o.spec || "{}"); } catch {}
+  const kind = o.taken_by ? "counter" : "online_paid", shopEmail = await notifyOn(env, kind, "email"); // a sale taken on the iPad is a counter sale
   const total = "$" + (o.paid_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 });
   const first = (o.name || "").split(" ")[0] || "there";
   if (spec.product === "namecup") { // name cups bought online: no proof, we engrave and ship
@@ -704,8 +764,8 @@ We'll email you the tracking number when they're on the way. Spot a typo? Reply 
 HD Laser Studio
 759 Turquoise St, Pacific Beach
 (858) 373-9866 · hdlaser.net` });
-    await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o.email || undefined, subject: `PAID ${total}: cups to ship, ${o.name} (${o.ref})`, text: `Order ${o.ref} is paid. Engrave and ship within 3-5 business days.\n\n${lines}\n\nShip to: ${o.ship_to || "(no address)"}\nCustomer: ${[o.name, o.email, o.phone].filter(Boolean).join(" · ")}\n\nDashboard: ${env.WORKER_URL || ""}/admin` });
-    await sendAlert(env, `PAID ${total} by ${o.name} (${o.ref}): ${spec.summary || "name cups"}. Ship to ${String(o.ship_to || "").split(", ").slice(-1)[0]}.`);
+    if (shopEmail) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o.email || undefined, subject: `PAID ${total}: cups to ship, ${o.name} (${o.ref})`, text: `Order ${o.ref} is paid. Engrave and ship within 3-5 business days.\n\n${lines}\n\nShip to: ${o.ship_to || "(no address)"}\nCustomer: ${[o.name, o.email, o.phone].filter(Boolean).join(" · ")}\n\nDashboard: ${env.WORKER_URL || ""}/admin` });
+    await sendAlert(env, `PAID ${total} by ${o.name} (${o.ref}): ${spec.summary || "name cups"}. Ship to ${String(o.ship_to || "").split(", ").slice(-1)[0]}.`, { kind });
     await env.DB.prepare(`UPDATE orders SET notified_paid_at = ? WHERE ref = ?`).bind(new Date().toISOString(), o.ref).run();
     return;
   }
@@ -722,8 +782,8 @@ We hope you love it. If anything isn't right, reply to this email or call or tex
 HD Laser Studio
 759 Turquoise St, Pacific Beach
 (858) 373-9866 · hdlaser.net` });
-    await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o.email || undefined, subject: `PAID ${total}: ${o.business || o.name} (${o.ref})`, text: `Order ${o.ref} is paid and marked done (paid at pickup, so it came off the work queue).\n\nCustomer: ${[o.name, o.business, o.email, o.phone].filter(Boolean).join(" · ")}\n${spec.summary || ""}\n\nDashboard: ${env.WORKER_URL || ""}/admin` });
-    await sendAlert(env, `PAID ${total} by ${o.business || o.name} (${o.ref}): ${spec.summary || "custom order"}. Done, off the queue.`);
+    if (shopEmail) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o.email || undefined, subject: `PAID ${total}: ${o.business || o.name} (${o.ref})`, text: `Order ${o.ref} is paid and marked done (paid at pickup, so it came off the work queue).\n\nCustomer: ${[o.name, o.business, o.email, o.phone].filter(Boolean).join(" · ")}\n${spec.summary || ""}\n\nDashboard: ${env.WORKER_URL || ""}/admin` });
+    await sendAlert(env, `PAID ${total} by ${o.business || o.name} (${o.ref}): ${spec.summary || "custom order"}. Done, off the queue.`, { kind });
     await env.DB.prepare(`UPDATE orders SET notified_paid_at = ? WHERE ref = ?`).bind(new Date().toISOString(), o.ref).run();
     return;
   }
@@ -744,8 +804,11 @@ Reminder of what you initialed (${o.attest_initials}): we make exactly what you 
 HD Laser Studio
 759 Turquoise St, Pacific Beach
 (858) 373-9866 · hdlaser.net` });
-  await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o.email || undefined, subject: `PAID ${total}: ${o.business || o.name} (${o.ref})`, text: `Order ${o.ref} is paid.\n\nCustomer: ${[o.name, o.business, o.email, o.phone].filter(Boolean).join(" · ")}\n${spec.summary || ""}\n${o.needed_by ? "Needed by " + o.needed_by + "\n" : ""}Logo: ${o.logo_asset_id ? "on the order in the dashboard" : "not uploaded yet"}\nInitialed ${o.attest_initials} at ${o.attest_at}\n\nNext: proof, then make it. Dashboard: ${env.WORKER_URL || ""}/admin` });
-  await sendAlert(env, `PAID ${total} by ${o.business || o.name} (${o.ref}): ${spec.summary || "custom order"}. Proof next.`);
+  // the order's own email may be switched off now, so the paid email carries the logo (Nov 2)
+  const logoRow = shopEmail && o.logo_asset_id ? await env.DB.prepare(`SELECT name, data FROM order_assets WHERE id = ?`).bind(o.logo_asset_id).first().catch(() => null) : null;
+  const logoFiles = logoRow && logoRow.data ? [{ filename: String(logoRow.name || "logo").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_") || "logo", content: logoRow.data.slice(logoRow.data.indexOf(",") + 1) }] : undefined;
+  if (shopEmail) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: o.email || undefined, attachments: logoFiles, subject: `PAID ${total}: ${o.business || o.name} (${o.ref})`, text: `Order ${o.ref} is paid.\n\nCustomer: ${[o.name, o.business, o.email, o.phone].filter(Boolean).join(" · ")}\n${spec.summary || ""}\n${o.needed_by ? "Needed by " + o.needed_by + "\n" : ""}Logo: ${logoFiles ? "attached to this email (" + logoRow.name + "), and on Projects & logos on the hub" : o.logo_asset_id ? "on the order in the dashboard" : "not uploaded yet"}\nInitialed ${o.attest_initials} at ${o.attest_at}\n\nNext: proof, then make it. Dashboard: ${env.WORKER_URL || ""}/admin` });
+  await sendAlert(env, `PAID ${total} by ${o.business || o.name} (${o.ref}): ${spec.summary || "custom order"}. Proof next.`, { kind });
   await env.DB.prepare(`UPDATE orders SET notified_paid_at = ? WHERE ref = ?`).bind(new Date().toISOString(), o.ref).run();
 }
 
@@ -865,7 +928,8 @@ async function ordersCsv(env) {
 }
 
 // ---------------------------------------------------------------- weekly digest
-async function sendDigest(env) {
+async function sendDigest(env, auto) {
+  if (auto && !(await notifyOn(env, "weekly", "email"))) return { ok: false, skipped: "turned off on /admin/notify" };
   if (!env.DB) return { ok: false, reason: "no db" };
   const to = new Date(), from = new Date(Date.now() - 7 * 86400000);
   const k = await kpis(env, from.toISOString(), to.toISOString());
@@ -907,6 +971,70 @@ async function sendDigest(env) {
   return { ok: res.ok, status: res.status, text };
 }
 
+// The whole day in one email at 6 PM (Hugh, Nov 2), so a sale, a quote or a clock-in doesn't need its own email or text.
+// The hourly cron calls it: it sends once a day, at the first tick from 6 PM (after Square's register sales are synced),
+// and not at all on a day with nothing in it. "Send today's summary now" on /admin/notify calls it with force.
+async function dailySummary(env, force) {
+  if (!env.DB || !env.RESEND_API_KEY) return { ok: false, skipped: "no database or no email key" };
+  const l = local();
+  if (!force) {
+    if (l.hour < 18) return { skipped: "before 6 PM" };
+    const last = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'daily_summary_date'`).first().catch(() => null);
+    if (last && last.v === l.date) return { skipped: "already sent today" };
+  }
+  const markSent = () => env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('daily_summary_date', ?)`).bind(l.date).run();
+  if (!force && !(await notifyOn(env, "daily", "email"))) { await markSent(); return { skipped: "turned off on /admin/notify" }; }
+  const day = localDayRange(l.date), all = async (sql) => (await env.DB.prepare(sql).bind(day.from, day.to).all().catch(() => ({ results: [] }))).results || [];
+  const $ = (c) => "$" + ((c || 0) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const summ = (spec) => { try { return JSON.parse(spec || "{}").summary || ""; } catch { return ""; } };
+  const pays = await all(`SELECT p.created_at, p.amount_cents, p.refunded_cents, p.card_brand, p.source, p.ref, o.name, o.business, o.spec, o.taken_by, o.cups FROM payments p LEFT JOIN orders o ON o.ref = p.ref
+    WHERE p.status = 'COMPLETED' AND p.created_at >= ? AND p.created_at < ? ORDER BY p.created_at`);
+  const quotes = await all(`SELECT ref, name, business, email, phone, spec, total_cents, logo_asset_id FROM orders WHERE status = 'quote' AND created_at >= ? AND created_at < ? ORDER BY created_at`);
+  const asks = await all(`SELECT kind, name, business, email, phone, fields FROM inquiries WHERE created_at >= ? AND created_at < ? ORDER BY created_at`);
+  const unpaid = await all(`SELECT ref, name, business, total_cents, spec, cups, taken_by FROM orders WHERE status IN ('checkout_started','pay_later') AND created_at >= ? AND created_at < ? ORDER BY created_at`);
+  const shifts = await all(`SELECT s.in_at, s.out_at, s.minutes, st.name FROM shifts s LEFT JOIN staff st ON st.id = s.staff_id WHERE s.in_at >= ? AND s.in_at < ? ORDER BY s.in_at`);
+  const owners = String(env.ALERT_SMS_TO || "").split(",").map((x) => e164(x.trim())).filter(Boolean);
+  const texts = (await all(`SELECT ts, detail FROM staff_log WHERE action = 'sms_in' AND ts >= ? AND ts < ? ORDER BY ts`)).filter((t) => !owners.some((n) => String(t.detail || "").startsWith(n + ":")));
+  const empty = !pays.length && !quotes.length && !asks.length && !unpaid.length && !shifts.length && !texts.length;
+  if (empty && !force) { await markSent(); return { ok: true, skipped: "nothing happened today" }; }
+  const net = pays.reduce((a, p) => a + (p.amount_cents || 0) - (p.refunded_cents || 0), 0);
+  const who = (r) => r.business ? `${r.business} (${r.name || ""})` : r.name || "";
+  const what = (r) => summ(r.spec) || (r.cups ? r.cups + " logo cups" : "");
+  const dateLabel = new Date().toLocaleDateString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric" });
+  const out = [`HD Laser, ${dateLabel}`, ``];
+  out.push(`SALES: ${$(net)} from ${pays.length} payment${pays.length === 1 ? "" : "s"}`);
+  for (const p of pays) {
+    const tag = !p.ref ? "register sale" + (p.card_brand || p.source ? ", " + String(p.card_brand || p.source).replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : "") : p.taken_by ? "at the counter by " + p.taken_by : p.name ? "online" : p.ref;
+    out.push(`${fmtLocal(p.created_at)}  ${$(p.amount_cents)}${p.refunded_cents ? " (refunded " + $(p.refunded_cents) + ")" : ""}  ${p.name || p.business ? who(p) + ", " : ""}${tag}${p.ref && p.name ? ", " + p.ref : ""}${what(p) ? ": " + what(p) : ""}`);
+  }
+  if (!pays.length) out.push("No payments today.");
+  out.push(``, `QUOTE REQUESTS: ${quotes.length + asks.length}${quotes.length + asks.length ? " (each one is on the hub under Projects & logos)" : ""}`);
+  for (const q of quotes) out.push(`${q.ref}  ${who(q)}, ${[q.phone, q.email].filter(Boolean).join(", ")}: ${what(q)}${q.logo_asset_id ? ", logo uploaded" : ""}. Price list ${$(q.total_cents)}, only for you.`);
+  for (const a of asks) {
+    let f = {}; try { f = JSON.parse(a.fields || "{}"); } catch {}
+    const skip = ["Name", "Business", "Phone", "Terms version", "Agreed to Terms of Sale", "Text message consent", "How did you find us", "Where they found us", "Reference", "description", "For"];
+    const body = Object.entries(f).filter(([k]) => !skip.includes(k)).map(([k, v]) => `${k}: ${String(v).replace(/\s+/g, " ")}`).join("; ").slice(0, 240);
+    out.push(`${a.kind === "order" ? "Cup order form" : "Tell us your idea"}  ${who(a)}, ${[a.phone, a.email].filter(Boolean).join(", ")}${body ? ": " + body : ""}`);
+  }
+  if (unpaid.length) {
+    out.push(``, `NOT PAID YET: ${unpaid.length} checkout${unpaid.length === 1 ? "" : "s"} started today and not paid`);
+    for (const u of unpaid) out.push(`${u.ref}  ${who(u)}, ${$(u.total_cents)}${u.taken_by ? ", at the counter by " + u.taken_by : ""}${what(u) ? ": " + what(u) : ""}`);
+  }
+  out.push(``, `WHO WORKED`);
+  for (const s of shifts) out.push(`${s.name || "Someone"}  ${fmtLocal(s.in_at)} to ${s.out_at ? fmtLocal(s.out_at) + ", " + ((s.minutes || 0) / 60).toFixed(1) + " h" : "now, still clocked in"}`);
+  if (!shifts.length) out.push("Nobody clocked in today.");
+  if (texts.length) {
+    out.push(``, `TEXTS TO THE SHOP'S TEXT NUMBER: ${texts.length}`);
+    for (const t of texts) out.push(`${fmtLocal(t.ts)}  ${String(t.detail || "").slice(0, 200)}`);
+  }
+  const base = env.WORKER_URL || "";
+  out.push(``, `Dashboard: ${base}/admin`, `Choose which emails and texts you get: ${base}/admin/notify`);
+  const subject = `HD Laser today: ${$(net)} in sales${quotes.length + asks.length ? ", " + (quotes.length + asks.length) + " quote request" + (quotes.length + asks.length === 1 ? "" : "s") : ""}`;
+  const r = await sendEmail(env, { to: env.SUPPORT_EMAIL, subject, text: out.join("\n") });
+  if (r.ok && !force) await markSent();
+  return { ok: r.ok, error: r.error, subject, text: out.join("\n") };
+}
+
 // ---------------------------------------------------------------- dashboard
 function dashboardHtml(env) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HD Laser numbers</title>
@@ -928,7 +1056,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
 </style></head><body>
 <header><h1>HD Laser numbers</h1>
 <div class="ranges" id="ranges"><button data-d="7">7 days</button><button data-d="30" class="on">30 days</button><button data-d="90">90 days</button><button data-d="365">12 months</button><input type="date" id="from"><input type="date" id="to"><button id="go">Apply</button></div>
-<div><a class="act" href="/admin/customers" style="text-decoration:none;color:inherit">Customers</a> <a class="act" href="/admin/money" style="text-decoration:none;color:inherit;background:var(--ink);color:#fff;border-color:var(--ink)">Money</a> <button class="act" id="sync">Sync Square now</button> <button class="act" id="backfill">Import 2 years of history</button> <a class="act" href="/api/orders.csv" style="text-decoration:none;color:inherit">Download CSV</a> <button class="act" id="digest">Email digest</button></div></header>
+<div><a class="act" href="/admin/customers" style="text-decoration:none;color:inherit">Customers</a> <a class="act" href="/admin/notify" style="text-decoration:none;color:inherit">Emails &amp; texts</a> <a class="act" href="/admin/money" style="text-decoration:none;color:inherit;background:var(--ink);color:#fff;border-color:var(--ink)">Money</a> <button class="act" id="sync">Sync Square now</button> <button class="act" id="backfill">Import 2 years of history</button> <a class="act" href="/api/orders.csv" style="text-decoration:none;color:inherit">Download CSV</a> <button class="act" id="digest">Email digest</button></div></header>
 <main>
 <div id="err"></div>
 <p class="small" id="meta"></p>
@@ -1221,7 +1349,7 @@ async function clockPunch(env, me, action, note) {
     await staffLog(env, me.id, "clock_in", "");
     const l = local();
     const first = await env.DB.prepare(`SELECT COUNT(*) n FROM shifts WHERE in_at >= ? AND in_at < ?`).bind(localDayRange(l.date).from, now).first();
-    if (staffAlertsOn(env, "clockin")) await sendAlert(env, `${me.name} clocked in at ${fmtLocal(now)}${first.n === 0 ? " (first in today)" : ""}.`, { emailShop: true });
+    if (staffAlertsOn(env, "clockin")) await sendAlert(env, `${me.name} clocked in at ${fmtLocal(now)}${first.n === 0 ? " (first in today)" : ""}.`, { emailShop: true, kind: "clock" });
     await env.DB.prepare(`DELETE FROM meta WHERE k = 'noshow_pending'`).run();
     return { status: 200, body: { ok: true, shift: { id: r.meta && r.meta.last_row_id, in_at: now } } };
   }
@@ -1230,7 +1358,7 @@ async function clockPunch(env, me, action, note) {
     const mins = Math.max(1, Math.round((Date.now() - new Date(open.in_at)) / 60000));
     await env.DB.prepare(`UPDATE shifts SET out_at = ?, minutes = ?, note = ? WHERE id = ?`).bind(now, mins, String(note || "").slice(0, 500) || null, open.id).run();
     await staffLog(env, me.id, "clock_out", mins + " min");
-    if (staffAlertsOn(env, "clockout")) await sendAlert(env, `${me.name} clocked out at ${fmtLocal(now)} (${(mins / 60).toFixed(1)} h).`, { emailShop: true });
+    if (staffAlertsOn(env, "clockout")) await sendAlert(env, `${me.name} clocked out at ${fmtLocal(now)} (${(mins / 60).toFixed(1)} h).`, { emailShop: true, kind: "clock" });
     return { status: 200, body: { ok: true, minutes: mins } };
   }
   return { status: 400, body: { error: "action must be in or out" } };
@@ -1560,13 +1688,13 @@ async function noShowCheck(env) {
     if (onCall && onCall.phone) sentToOnCall = (await sendSms(env, onCall.phone, `HD Laser: nobody has clocked in and the shop should be open. Are you on your way? Reply 1 for yes, 2 if you can't make it.`)).ok;
     p = { date: l.date, on_call_id: onCall ? onCall.id : null, on_call_name: onCall ? onCall.name : null, last_hour: l.hour, muted: false };
     await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('noshow_pending', ?)`).bind(JSON.stringify(p)).run();
-    if (staffAlertsOn(env, "noshow")) await sendAlert(env, `No employee is clocked in at ${hourLabel}.${onCall ? ` I texted ${onCall.name} (on call)${sentToOnCall ? "" : ", but the text failed"} asking for confirmation.` : " No on-call employee is set."} Reply 1 to text everyone else on the team, 2 to stop today's reminders.`, { emailShop: true });
+    if (staffAlertsOn(env, "noshow")) await sendAlert(env, `No employee is clocked in at ${hourLabel}.${onCall ? ` I texted ${onCall.name} (on call)${sentToOnCall ? "" : ", but the text failed"} asking for confirmation.` : " No on-call employee is set."} Reply 1 to text everyone else on the team, 2 to stop today's reminders.`, { emailShop: true, kind: "noshow" });
     return { ok: true, alerted: "first", on_call: onCall ? onCall.name : null };
   }
   if (p.muted || p.last_hour === l.hour) return { ok: true, already_alerted: true };
   p.last_hour = l.hour;
   await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('noshow_pending', ?)`).bind(JSON.stringify(p)).run();
-  if (staffAlertsOn(env, "noshow")) await sendAlert(env, `Still nobody clocked in at ${hourLabel}. Reply 1 to text the team, 2 to stop today's reminders.`, { emailShop: true });
+  if (staffAlertsOn(env, "noshow")) await sendAlert(env, `Still nobody clocked in at ${hourLabel}. Reply 1 to text the team, 2 to stop today's reminders.`, { emailShop: true, kind: "noshow" });
   return { ok: true, alerted: "reminder" };
 }
 
@@ -1602,13 +1730,13 @@ async function twilioInbound(request, env) {
     return twiml("Reply 1 to text the rest of the team, or 2 to ignore.");
   }
   if (sender) {
-    if (body === "1") { await sendAlert(env, `${sender.name} replied: on the way.`, { emailShop: true }); return twiml(`Thanks ${sender.name.split(" ")[0]}, see you soon. Remember to clock in at hdlaser.net/staff.`); }
-    if (body === "2") { await sendAlert(env, `${sender.name} replied: can't make it. Reply 1 to text the rest of the team.`, { emailShop: true }); return twiml("Got it, I've let the owner know."); }
-    await sendAlert(env, `Text from ${sender.name}: ${body.slice(0, 200)}`, { emailShop: true });
+    if (body === "1") { await sendAlert(env, `${sender.name} replied: on the way.`, { emailShop: true, kind: "inbound" }); return twiml(`Thanks ${sender.name.split(" ")[0]}, see you soon. Remember to clock in at hdlaser.net/staff.`); }
+    if (body === "2") { await sendAlert(env, `${sender.name} replied: can't make it. Reply 1 to text the rest of the team.`, { emailShop: true, kind: "inbound" }); return twiml("Got it, I've let the owner know."); }
+    await sendAlert(env, `Text from ${sender.name}: ${body.slice(0, 200)}`, { emailShop: true, kind: "inbound" });
     return twiml();
   }
   // Anyone else: forward to the owner, no auto-reply beyond Twilio's STOP/HELP handling.
-  await sendAlert(env, `Text from ${from}: ${body.slice(0, 200)}`, { emailShop: true });
+  await sendAlert(env, `Text from ${from}: ${body.slice(0, 200)}`, { emailShop: true, kind: "inbound" });
   return twiml();
 }
 
@@ -2883,7 +3011,7 @@ async function cupsCheckout(request, env, cors) {
     env.DB.prepare(`INSERT INTO events (ts, name, session, ref, path, detail) VALUES (?,?,?,?,?,?)`).bind(now, "order_checkout", null, ref, "/cups/", JSON.stringify({ product: "namecup", qty: count })),
   ]);
   const $ = (n) => "$" + (n / 100).toFixed(2);
-  if (env.RESEND_API_KEY) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Cup order" : "Cup order (needs payment link)"} ${ref}: ${name}, ${$(total)}`, text:
+  if (env.RESEND_API_KEY && (!linkOk || await notifyOn(env, "online_new", "email"))) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Cup order" : "Cup order (needs payment link)"} ${ref}: ${name}, ${$(total)}`, text:
 `New name cup order ${ref} from hdlaser.net/cups${src && src.tag ? " (came from " + channelOf(src) + ")" : ""}. ${linkOk ? "They were sent to Square to pay; you'll get a PAID email when they do." : "Square did not return a payment link. Send them a Square invoice for " + $(total) + "."}
 
 ${lines.map((l) => `${l.qty} × ${label(l)} @ ${$(l.unit_cents)}`).join("\n")}
@@ -3016,7 +3144,7 @@ async function orderCheckout(request, env, cors) {
       const first = name.split(" ")[0] || "there";
       // Two emails, because a reply carries the subject and usually the whole message underneath it: the private one has the
       // price list and replies come back to the shop; the one Hugh answers goes to the customer and has no money in it at all.
-      await sendEmail(env, { to: env.SUPPORT_EMAIL, subject: `Price list for ${ref}, only for you: ${$(total)}`, text:
+      if (await notifyOn(env, "quote_price", "email")) await sendEmail(env, { to: env.SUPPORT_EMAIL, subject: `Price list for ${ref}, only for you: ${$(total)}`, text:
 `Only for you. Don't reply to this one or forward it to the customer.
 To answer ${name}, reply to the other email, "Quote request ${ref}". It has no prices in it.
 
@@ -3025,7 +3153,7 @@ ${breakdown}
 ${logo ? "\nTheir logo (" + logo.name + ") is on the request in the dashboard.\n" : ""}
 When they say yes: charge it on the Terminal when they come in (hub, New order or Log a walk-in), or send them a Square invoice.
 Dashboard: ${env.WORKER_URL || ""}/admin` });
-      await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `Quote request ${ref}: ${who}`, text:
+      if (await notifyOn(env, "quote", "email")) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `Quote request ${ref}: ${who}`, text:
 `Quote request ${ref} from hdlaser.net. Reply with your price; your reply goes to ${first} (${email}).
 
 Customer: ${[name, c.business, email, c.phone].filter(Boolean).join(" · ")}
@@ -3051,11 +3179,12 @@ HD Laser Studio
 759 Turquoise St, Pacific Beach
 (858) 373-9866 · hdlaser.net` });
     }
-    await sendAlert(env, `Quote request ${ref}: ${who}, ${q.summary}. Price list says ${$(total)}; they did not see it.`);
+    await sendAlert(env, `Quote request ${ref}: ${who}, ${q.summary}. Price list says ${$(total)}; they did not see it.`, { kind: "quote" });
     return json({ ok: true, ref, quote: true }, 200, cors);
   }
+  const startKind = takenBy ? "counter" : "online_new"; // Square giving no payment link always emails: someone has to send an invoice
   if (env.RESEND_API_KEY) {
-    await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : terminal ? "Counter sale" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
+    if ((!terminal && !linkOk) || await notifyOn(env, startKind, "email")) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : terminal ? "Counter sale" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
 `New order ${ref} from hdlaser.net${takenBy ? " (taken at the counter by " + takenBy + ")" : ""}
 
 Customer: ${[name, c.business, email, c.phone].filter(Boolean).join(" · ")}
@@ -3094,7 +3223,7 @@ HD Laser Studio
 759 Turquoise St, Pacific Beach
 (858) 373-9866 · hdlaser.net` });
   }
-  await sendAlert(env, `Order ${ref}: ${who}, ${q.summary}, ${$(total)}. ${terminal ? "Paying on the Terminal." : linkOk ? "Paying through Square." : "NEEDS A PAYMENT LINK."}`);
+  await sendAlert(env, `Order ${ref}: ${who}, ${q.summary}, ${$(total)}. ${terminal ? "Paying on the Terminal." : linkOk ? "Paying through Square." : "NEEDS A PAYMENT LINK."}`, { kind: startKind });
   if (terminal) return json({ ok: true, ref, total: total / 100, terminal: terminal.id, status: terminal.status, tips_off: tipsOffReason || undefined }, 200, cors);
   if (!linkOk) return json({ ok: true, url: null, ref, total: total / 100, error: env.SQUARE_ACCESS_TOKEN ? squareErr(data) || "Square did not return a checkout link" : "Online payment is not set up" }, 200, cors);
   return json({ ok: true, url: data.payment_link.url, ref, total: total / 100 }, 200, cors);
@@ -3599,7 +3728,7 @@ async function socialProblem(env, msg, pause) {
   const last = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'social_alerted_at'`).first().catch(() => null);
   if (last && Date.now() - Date.parse(last.v) < 6 * 3600000) return;
   await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('social_alerted_at', ?)`).bind(now).run();
-  await sendAlert(env, `AI host${pause ? " paused" : ""}: ${String(msg).slice(0, 200)} Fix it on /admin/social${pause ? ", then turn it back on" : ""}.`, { emailShop: true }).catch(() => {});
+  await sendAlert(env, `AI host${pause ? " paused" : ""}: ${String(msg).slice(0, 200)} Fix it on /admin/social${pause ? ", then turn it back on" : ""}.`, { emailShop: true, kind: "ai" }).catch(() => {});
 }
 async function socialPublish(env, s, p) {
   const media = await blotatoMedia(env, p.video_url), results = {};
@@ -3678,7 +3807,7 @@ Sales from the AI host in the last 30 days: ${sales.length ? sales.map((r) => `$
   const bgs = new Set([...SOCIAL_BGS.talk, ...SOCIAL_BGS.product]), now = new Date().toISOString();
   const good = posts.filter((p) => p && ["talk", "product"].includes(p.kind) && SOCIAL_TAGS[p.pillar] && bgs.has(p.bg) && String(p.script || "").split(/\s+/).length >= 25 && String(p.script).length <= 900 && !/\$\s?\d/.test(p.script));
   if (good.length) await env.DB.batch(good.map((p) => env.DB.prepare(`INSERT INTO social_posts (created_at, kind, pillar, hook, script, bg, status, source) VALUES (?,?,?,?,?,?,?,'ai')`).bind(now, p.kind, p.pillar, String(p.hook).slice(0, 100), String(p.script).slice(0, 900), p.bg, s.auto_approve ? "approved" : "draft")));
-  if (good.length && !s.auto_approve) await sendAlert(env, `${good.length} new AI host posts are waiting for your OK on /admin/social`, { emailShop: true }).catch(() => {});
+  if (good.length && !s.auto_approve) await sendAlert(env, `${good.length} new AI host posts are waiting for your OK on /admin/social`, { emailShop: true, kind: "ai" }).catch(() => {});
   return { ok: true, added: good.length, dropped: posts.length - good.length };
 }
 async function socialState(env) {
@@ -4168,3 +4297,65 @@ async function googleReviews(env, force) {
     return { rating: next.rating, count: next.count, url: next.url, at: next.at, name: force ? next.name : undefined };
   } catch (e) { return { ...(cur || {}), error: "Google: " + (e && e.message || e) }; }
 }
+
+// /admin/notify (Hugh, Nov 2): which emails and texts the shop gets, item by item, with the quiet defaults one tap away.
+const NOTIFY_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Emails and texts | HD Laser</title>
+<style>
+:root{--bg:#F6F4EF;--ink:#15191E;--muted:#545B63;--red:#C8372A;--line:#E4E0D8;--card:#fff;--green:#2F6B4F}
+[hidden]{display:none !important}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 20px;background:#fff;border-bottom:1px solid var(--line)}h1{font-size:20px;margin:0}
+main{max-width:860px;margin:0 auto;padding:16px 16px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-top:14px}
+.act{font:inherit;padding:10px 16px;border:1px solid var(--line);background:#fff;border-radius:999px;cursor:pointer;text-decoration:none;color:inherit;display:inline-block}.act.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.small{font-size:13px;color:var(--muted)}.msg{font-weight:700}.ok{color:var(--green)}.bad{color:var(--red)}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 84px 84px;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #EDE8DF}.row:last-child{border-bottom:0}
+.row.head{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding-top:0}
+.row b{display:block;font-size:16px}.row .small{display:block;margin-top:3px}
+.sw{display:flex;justify-content:center}.sw input{appearance:none;-webkit-appearance:none;width:52px;height:30px;border-radius:999px;background:#D6D1C8;position:relative;cursor:pointer;margin:0;transition:background .15s}
+.sw input::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .15s}
+.sw input:checked{background:var(--green)}.sw input:checked::after{left:25px}.sw input:focus-visible{outline:3px solid #2B5F8A;outline-offset:2px}
+.na{text-align:center;color:#A9A196}
+@media (max-width:560px){.row{grid-template-columns:minmax(0,1fr) 60px 60px;gap:6px}.sw input{width:46px;height:28px}.sw input::after{width:22px;height:22px}.sw input:checked::after{left:21px}}
+</style></head><body>
+<header><h1>Emails and texts you get</h1><div class="bar"><a class="act" href="/admin">Sales dashboard</a></div></header>
+<main>
+<div class="card"><p style="margin:0">Pick what reaches you. Green is on. Everything still goes on the dashboard and the hub; this only changes what is sent to you. Customers' emails and texts are not affected.</p>
+<p class="small" id="where" style="margin:8px 0 0"></p></div>
+<div class="card" id="list"><p class="small">Loading…</p></div>
+<div class="card"><div class="bar"><button class="act dark" id="save">Save</button><button class="act" id="quiet">Back to the quiet settings</button><span class="msg" id="msg"></span></div>
+<p class="small" style="margin:8px 0 0">Quiet settings: emails only for quote requests and online orders paid, texts only when nobody has opened the shop or someone texts the shop's text number, and one end-of-day summary.</p></div>
+<div class="card"><div class="bar"><button class="act" id="sum">Send today's summary now</button><span class="msg" id="summsg"></span></div>
+<p class="small" style="margin:8px 0 0" id="last">See what the end-of-day email looks like. It still goes out by itself at 6 PM.</p></div>
+</main>
+<script>
+var $=function(s){return document.querySelector(s);}, state=null;
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function render(set){
+  var h='<div class="row head"><span>What happened</span><span style="text-align:center">Email</span><span style="text-align:center">Text</span></div>';
+  state.kinds.forEach(function(k){ var v=set[k.k]||{};
+    h+='<div class="row"><div><b>'+esc(k.label)+'</b><span class="small">'+esc(k.note)+'</span></div>'
+      +'<label class="sw"><input type="checkbox" data-k="'+k.k+'" data-how="email" aria-label="Email: '+esc(k.label)+'"'+(v.email?' checked':'')+'></label>'
+      +(k.has_text?'<label class="sw"><input type="checkbox" data-k="'+k.k+'" data-how="text" aria-label="Text: '+esc(k.label)+'"'+(v.text?' checked':'')+'></label>':'<span class="na">-</span>')+'</div>';
+  });
+  $('#list').innerHTML=h;
+}
+$('#list').addEventListener('change',function(){ $('#msg').textContent='Not saved yet'; $('#msg').className='msg bad'; });
+function load(){ fetch('/api/notify',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ state=d; render(d.settings);
+  $('#where').textContent='Emails go to '+(d.email_to||'(no address set)')+'. Texts go to '+(d.texts_to?d.texts_to+' phone number'+(d.texts_to===1?'':'s')+' (ALERT_SMS_TO in Cloudflare)':'no phone number yet')+(d.sms_ready?'':', but texting is not set up')+'.'+(d.alert_to?' ALERT_TO is set in Cloudflare: those addresses follow the Text switches.':'')+(d.ntfy?' The ntfy app follows the Text switches.':'');
+  if(d.last_summary) $('#last').textContent='See what the end-of-day email looks like. It still goes out by itself at 6 PM. Last one: '+d.last_summary+'.';
+}).catch(function(){ $('#list').innerHTML='<p class="bad">Could not load. Reload the page.</p>'; }); }
+function collect(){ var o={}; document.querySelectorAll('#list input[data-k]').forEach(function(i){ (o[i.dataset.k]=o[i.dataset.k]||{})[i.dataset.how]=i.checked; }); return o; }
+function save(body){ $('#save').disabled=true; $('#msg').textContent='Saving…'; $('#msg').className='msg';
+  fetch('/api/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(d){ $('#save').disabled=false;
+    if(!d.ok){ $('#msg').textContent='Not saved: '+(d.error||'try again'); $('#msg').className='msg bad'; return; }
+    render(d.settings); $('#msg').textContent='Saved. It works from the next email or text.'; $('#msg').className='msg ok';
+  }).catch(function(){ $('#save').disabled=false; $('#msg').textContent='No connection. Try again.'; $('#msg').className='msg bad'; }); }
+$('#save').onclick=function(){ save(collect()); };
+$('#quiet').onclick=function(){ var o={}; state.kinds.forEach(function(k){ o[k.k]={email:k.default_email,text:k.default_text}; }); save(o); };
+$('#sum').onclick=function(){ var b=$('#sum'); b.disabled=true; $('#summsg').textContent='Sending…'; $('#summsg').className='msg';
+  fetch('/api/notify/summary',{method:'POST'}).then(function(r){return r.json();}).then(function(d){ b.disabled=false;
+    $('#summsg').textContent=d.ok?'Sent to '+(state&&state.email_to||'your email')+'.':'Not sent: '+(d.error||d.skipped||'try again'); $('#summsg').className='msg '+(d.ok?'ok':'bad');
+  }).catch(function(){ b.disabled=false; $('#summsg').textContent='No connection. Try again.'; $('#summsg').className='msg bad'; }); };
+load();
+</script></body></html>`;
