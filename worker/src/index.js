@@ -29,7 +29,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-11-02 v69"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-11-02 v70"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -4167,16 +4167,26 @@ async function sendCampaign(env, b, origin) {
   if (!id) { const prev = await env.DB.prepare(`SELECT id FROM campaigns WHERE lower(trim(subject)) = lower(?) AND created_at > ? ORDER BY id DESC LIMIT 1`).bind(subject, new Date(Date.now() - 30 * 864e5).toISOString()).first(); if (prev) id = prev.id; }
   if (!id) { const r = await env.DB.prepare(`INSERT INTO campaigns (created_at, subject, body) VALUES (?,?,?)`).bind(new Date().toISOString(), subject, body).run(); id = r.meta && r.meta.last_row_id; }
   const people = (await env.DB.prepare(`SELECT email, name FROM customers WHERE email IS NOT NULL AND email != '' AND unsubscribed_at IS NULL AND deleted_at IS NULL AND email NOT IN (SELECT email FROM campaign_sends WHERE campaign_id = ?) ORDER BY id`).bind(id).all()).results;
+  // Hugh, Nov 2: a mailing used up Resend's daily quota (about 300 emails), and after that quote requests couldn't reach his inbox
+  // that evening. A mailing now stops at 250 emails in any 24 hours (CAMPAIGN_DAILY_MAX in Cloudflare changes it), which leaves
+  // room for the shop's own emails; Send again after the time the page shows picks up with the people who don't have it yet.
+  const capIn = parseInt(env.CAMPAIGN_DAILY_MAX, 10), cap = Number.isFinite(capIn) && capIn >= 0 ? capIn : 250;
+  const dayAgo = new Date(Date.now() - 864e5).toISOString();
+  const recent = await env.DB.prepare(`SELECT COUNT(*) n FROM campaign_sends WHERE sent_at > ?`).bind(dayAgo).first();
+  const limit = Math.min(1000, Math.max(0, cap - ((recent && recent.n) || 0)));
   let sent = 0, error = null;
-  for (let i = 0; i < people.length && i < 1000; i += 100) {
-    const chunk = people.slice(i, i + 100), r = await post(await Promise.all(chunk.map((p) => build(p.email, p.name))));
+  for (let i = 0; i < people.length && i < limit; i += 50) {
+    const chunk = people.slice(i, Math.min(i + 50, limit)), r = await post(await Promise.all(chunk.map((p) => build(p.email, p.name))));
     if (!r.ok) { error = r.error; break; }
     const now = new Date().toISOString();
     await env.DB.batch(chunk.map((p) => env.DB.prepare(`INSERT OR IGNORE INTO campaign_sends (campaign_id, email, sent_at) VALUES (?,?,?)`).bind(id, p.email, now)));
     sent += chunk.length;
   }
   await env.DB.prepare(`UPDATE campaigns SET sent = sent + ? WHERE id = ?`).bind(sent, id).run();
-  return { ok: !error || sent > 0, campaign_id: id, sent, remaining: people.length - sent, error };
+  const capped = !error && sent < people.length && sent >= limit && limit < 1000;
+  let next_at = null;
+  if (capped) { const first = await env.DB.prepare(`SELECT MIN(sent_at) t FROM campaign_sends WHERE sent_at > ?`).bind(dayAgo).first(); next_at = new Date((first && first.t ? Date.parse(first.t) : Date.now()) + 864e5 + 60000).toISOString(); }
+  return { ok: !error || sent > 0 || capped, campaign_id: id, sent, remaining: people.length - sent, error, capped, cap, next_at };
 }
 
 async function unsubscribePage(env, url) {
@@ -4222,7 +4232,7 @@ tr.off td{color:#9AA0A6}tr.off td b{text-decoration:line-through}.pill{display:i
   <div class="bar" style="margin-top:10px"><button class="act dark" type="submit" id="save">Add customer</button><button class="act" type="button" id="clear">Clear</button><button class="act" type="button" id="del" hidden>Delete this customer</button><span class="msg" id="fmsg"></span></div></form></div>
 <h2>Email everyone</h2>
 <div class="card">
-  <p class="small" style="margin-top:0">For a sale, a holiday or a celebration. Goes to everyone with an email who hasn't unsubscribed. Type {first_name} to use each person's first name. The shop address and an unsubscribe link are added at the bottom of every email, as the law requires. Send a test to yourself first.</p>
+  <p class="small" style="margin-top:0">For a sale, a holiday or a celebration. Goes to everyone with an email who hasn't unsubscribed. Type {first_name} to use each person's first name. The shop address and an unsubscribe link are added at the bottom of every email, as the law requires. Send a test to yourself first. A mailing stops at 250 emails a day, so quote requests always reach you; press Send again the next day for the rest.</p>
   <input id="subject" placeholder="Subject, e.g. 20% off engraved gifts this week" style="width:100%">
   <textarea id="body" rows="8" placeholder="Hi {first_name}," style="margin-top:8px"></textarea>
   <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-weight:700"><input type="checkbox" id="design" checked style="width:20px;height:20px"> Add my logo and the gift photos</label>
@@ -4272,6 +4282,8 @@ function send(test){ var s=$('#subject').value.trim(), m=$('#body').value.trim()
     if(r.test){ $('#smsg').textContent='Test sent to '+r.to+'. Check your inbox.'; $('#smsg').className='msg ok'; return; }
     if(!r.ok){ $('#smsg').textContent=r.error||'Could not send'; $('#smsg').className='msg bad'; return; }
     CAMPAIGN=r.remaining>0?r.campaign_id:0;
+    if(r.capped){ var at=new Date(r.next_at).toLocaleString('en-US',{timeZone:'America/Los_Angeles',weekday:'long',hour:'numeric',minute:'2-digit'});
+      $('#smsg').textContent=(r.sent?'Sent to '+r.sent+' today. ':'Nothing sent yet: the '+r.cap+' for today are used. ')+r.remaining+' still to go. Mailings stop at '+r.cap+' emails a day so quote requests always reach you. Press Send to everyone again after '+at+'; nobody gets it twice.'; $('#smsg').className='msg ok'; load(); return; }
     $('#smsg').textContent='Sent to '+r.sent+'.'+(r.remaining>0?' '+r.remaining+' still to go'+(r.error?' (stopped: '+r.error+')':'')+'. Click Send again later to send to the rest; nobody gets it twice.':' Everyone has it.'); $('#smsg').className='msg '+(r.error?'bad':'ok'); load(); }); }
 fetch('/reviews',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ if(d&&d.count){ $('#gcount').value=d.count; $('#grating').value=Number(d.rating).toFixed(1); } }).catch(function(){});
 $('#gsave').onclick=function(){ api('/api/reviews/set',{rating:$('#grating').value,count:$('#gcount').value}).then(function(r){ $('#gmsg').textContent=r.ok?'Saved. The website shows '+Number(r.rating).toFixed(1)+' stars from '+r.count+' reviews.':(r.error||'Failed'); $('#gmsg').className='msg '+(r.ok?'ok':'bad'); }); };
