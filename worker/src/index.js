@@ -29,7 +29,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-11-02 v68"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-11-02 v69"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -852,7 +852,7 @@ async function kpis(env, from, to) {
 
   const fin = await q(`SELECT COUNT(*) n, COALESCE(SUM(amount_cents),0) gross, COALESCE(SUM(fee_cents),0) fees, COALESCE(SUM(refunded_cents),0) refunded, COALESCE(SUM(CASE WHEN ref IS NULL THEN amount_cents ELSE 0 END),0) other_gross FROM payments WHERE status = 'COMPLETED' AND created_at >= ? AND created_at < ?`, fromIso, toIso).first();
   const taxRate = parseFloat(env.TAX_RATE || "0.0775");
-  const taxDue = await q(`SELECT COUNT(*) n, COALESCE(SUM(cups_subtotal_cents + setup_fee_cents),0) base FROM orders WHERE status = 'paid' AND resale_received_at IS NULL AND tax_invoiced_at IS NULL`).first();
+  const taxDue = await q(`SELECT COUNT(*) n, COALESCE(SUM(cups_subtotal_cents + setup_fee_cents),0) base FROM orders WHERE status = 'paid' AND (kind IS NULL OR kind = 'cups') AND resale_received_at IS NULL AND tax_invoiced_at IS NULL`).first();
   const months = (await q(`SELECT substr(created_at,1,7) month, COUNT(*) payments, SUM(amount_cents) gross, SUM(fee_cents) fees, SUM(refunded_cents) refunded FROM payments WHERE status='COMPLETED' AND created_at >= ? AND created_at < ? GROUP BY month ORDER BY month DESC`, fromIso, toIso).all()).results;
   const topItems = (await q(`SELECT name || CASE WHEN variation != '' THEN ' - ' || variation ELSE '' END k, SUM(qty) qty, SUM(gross_cents) revenue, COUNT(DISTINCT order_id) orders FROM square_items WHERE created_at >= ? AND created_at < ? GROUP BY k ORDER BY revenue DESC LIMIT 25`, fromIso, toIso).all()).results;
   const cards = (await q(`SELECT COALESCE(card_brand, source, 'other') k, COUNT(*) n, SUM(amount_cents) amount FROM payments WHERE status='COMPLETED' AND created_at >= ? AND created_at < ? GROUP BY k ORDER BY amount DESC`, fromIso, toIso).all()).results;
@@ -861,8 +861,14 @@ async function kpis(env, from, to) {
     unpaid: (await q(`SELECT o.ref, o.created_at, o.business, o.name, o.email, o.phone, o.total_cents, o.status,
         (SELECT p.created_at FROM payments p WHERE p.amount_cents = o.total_cents AND (p.ref IS NULL OR p.ref = '') AND p.created_at >= strftime('%Y-%m-%dT%H:%M:%SZ', o.created_at, '-1 day') AND p.created_at <= strftime('%Y-%m-%dT%H:%M:%SZ', o.created_at, '+14 days') ORDER BY p.created_at LIMIT 1) sq_match_at
         FROM orders o WHERE o.status IN ('checkout_started','pay_later') AND o.created_at < ? ORDER BY o.created_at DESC LIMIT 50`, new Date(Date.now() - 3600000).toISOString()).all()).results,
-    missing_logo: (await q(`SELECT ref, paid_at, business, name, email, phone FROM orders WHERE status = 'paid' AND logo_received_at IS NULL ORDER BY paid_at DESC LIMIT 50`).all()).results,
-    tax_due: (await q(`SELECT ref, paid_at, business, name, email, phone, cups_subtotal_cents + setup_fee_cents base_cents, resale_permit FROM orders WHERE status = 'paid' AND resale_received_at IS NULL AND tax_invoiced_at IS NULL ORDER BY paid_at ASC LIMIT 50`).all()).results.map((r) => ({ ...r, tax_cents: Math.round(r.base_cents * taxRate) })),
+    // Hugh, Nov 2 (a screenshot of 50 and 50 here): both lists were made for the first logo-cup orders. Missing logo now lists only
+    // what the Work queue shows as waiting for a logo: not done yet, and not text only, a logo on file, an uploaded logo or name cups.
+    missing_logo: (await q(`SELECT ref, paid_at, business, name, email, phone, kind, spec, logo_asset_id FROM orders WHERE status = 'paid' AND logo_received_at IS NULL AND completed_at IS NULL ORDER BY paid_at DESC LIMIT 300`).all()).results
+      .filter((r) => { if (r.kind !== "custom") return true; let sp = {}; try { sp = JSON.parse(r.spec || "{}"); } catch {} return !(r.logo_asset_id || sp.art === "text" || sp.art === "file" || sp.product === "namecup"); })
+      .slice(0, 50).map(({ kind, spec, logo_asset_id, ...r }) => r),
+    // Sales tax to invoice is for the wholesale logo cups sold without tax to coffee shops that owe a resale certificate. Every other
+    // order charged its tax at checkout (7.75% on items the shop supplies, CA addresses for name cups) or owes none (the customer's own item).
+    tax_due: (await q(`SELECT ref, paid_at, business, name, email, phone, cups_subtotal_cents + setup_fee_cents base_cents, resale_permit FROM orders WHERE status = 'paid' AND (kind IS NULL OR kind = 'cups') AND resale_received_at IS NULL AND tax_invoiced_at IS NULL ORDER BY paid_at ASC LIMIT 50`).all()).results.map((r) => ({ ...r, tax_cents: Math.round(r.base_cents * taxRate) })),
     in_production: (await q(`SELECT ref, paid_at, proof_approved_at, business, name, cups FROM orders WHERE status = 'paid' AND proof_approved_at IS NOT NULL AND completed_at IS NULL ORDER BY proof_approved_at ASC LIMIT 50`).all()).results,
   };
   const recent = (await q(`SELECT o.ref, o.created_at, o.paid_at, o.status, o.business, o.name, o.email, o.phone, o.cups, o.total_cents, o.paid_cents, o.fee_cents, o.refunded_cents, o.resale_received_at, o.logo_received_at, o.proof_approved_at, o.completed_at, o.tax_invoiced_at, o.admin_notes,
