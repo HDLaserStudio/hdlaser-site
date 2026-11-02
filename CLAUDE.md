@@ -132,7 +132,7 @@ The container cannot reach hdlaser.net or workers.dev. Test the worker by import
 4. ~~Open question from Hugh (Oct 5): showing prices may scare people.~~ Answered Oct 19: no prices for customers, every job is quoted (quote mode on the order page, v53; see the order page section). Coffee cup pages keep their prices.
 4b. ~~Holiday page public~~ done Oct 7 (four packages; deadline December 31 since Oct 7, was December 1). Hugh sent the holiday email ("Your holiday gifts, made personal 🎁", link `https://hdlaser.net/holiday/?src=email-holiday`) to all 481 customers with an email: 300 on Oct 9 (stopped by Resend's daily quota) and the other 181 on Oct 10 after v52, nobody twice. Results show on `/admin` under Where customers come from as "Email from us (holiday)". Remove the home page ribbon and menu link after December 31.
 4d. ~~Hub app on Hugh's iPhone~~ done Nov 2: v67 deployed, added to his home screen, signed in, hub opens (Hugh: "its working, hub opens on my phone"); also installed on the iPad the same day (Hugh: "its working on the ipad too").
-4c. v66 deployed Nov 2. Have Hugh look at `/admin/notify` (Emails & texts), change anything he wants, Save, and press Send today's summary now once to see it.
+4c. ~~Emails & texts settings~~ done Nov 2: v66 deployed, Hugh saved his settings on `/admin/notify` and sent himself the summary ("summary sent, settings saved"); which switches he changed is not known here, read them on the page if it matters.
 5. Add `terminal.checkout.updated` to the Square webhook subscription.
 6. Press "Load the price list from the code" after any pricing change so Hugh's saved book matches the code.
 7. Twilio and Apple decisions arrive by email; forward to the session.
