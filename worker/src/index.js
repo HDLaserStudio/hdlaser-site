@@ -29,7 +29,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-11-02 v66"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-11-02 v67"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -1377,7 +1377,10 @@ async function staffRoutes(request, env, cors, path, url) {
     if (!p || !p.pin_hash || !timingSafeEqual(await pbkdf(pin, p.pin_salt), p.pin_hash)) { await staffLog(env, p && p.id, "login_failed", name); return json({ error: "Name or PIN doesn't match" }, 401, cors); }
     await rememberPin(env, p.id, pin);
     const token = randomHex(32);
-    await env.DB.prepare(`INSERT INTO staff_sessions (token, staff_id, created_at, expires_at, ip) VALUES (?,?,?,?,?)`).bind(token, p.id, now, new Date(Date.now() + 14 * 3600000).toISOString(), ip).run();
+    // a shift on the shop iPad: 14 hours. The hub installed on someone's own phone (Hugh, Nov 2) asks to stay signed in: 30 days.
+    // Sign out on the hub, or switching the person off on the Team tab, ends it sooner.
+    const hours = b.remember === true ? 30 * 24 : 14;
+    await env.DB.prepare(`INSERT INTO staff_sessions (token, staff_id, created_at, expires_at, ip) VALUES (?,?,?,?,?)`).bind(token, p.id, now, new Date(Date.now() + hours * 3600000).toISOString(), ip).run();
     if (b.smsConsent === true && !p.sms_consent_at) { await env.DB.prepare(`UPDATE staff SET sms_consent_at = ? WHERE id = ?`).bind(now, p.id).run(); await staffLog(env, p.id, "sms_consent", ip); p.sms_consent_at = now; }
     await staffLog(env, p.id, "login", ip);
     return json({ ok: true, token, me: pub(p) }, 200, cors);
