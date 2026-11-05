@@ -29,7 +29,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-11-02 v70"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-11-05 v71"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -4083,7 +4083,7 @@ async function customerList(env) {
   await syncCustomers(env);
   const rows = (await env.DB.prepare(`SELECT * FROM customers WHERE deleted_at IS NULL ORDER BY COALESCE(last_seen, first_seen) DESC`).all()).results;
   return { customers: rows.map((r) => ({ id: r.id, name: r.name || "", business: r.business || "", email: r.email || "", phone: fmtPhone(r.phone), sources: r.sources || "", first_seen: r.first_seen, last_seen: r.last_seen, orders: r.orders || 0, spent_cents: r.spent_cents || 0, unsubscribed: !!r.unsubscribed_at, note: r.note || "" })),
-    email_configured: !!env.RESEND_API_KEY, campaigns: (await env.DB.prepare(`SELECT id, created_at, subject, sent, failed FROM campaigns ORDER BY id DESC LIMIT 10`).all()).results };
+    email_configured: !!env.RESEND_API_KEY, campaigns: (await env.DB.prepare(`SELECT id, created_at, subject, body, sent, failed FROM campaigns ORDER BY id DESC LIMIT 10`).all()).results };
 }
 
 async function saveCustomer(env, b) {
@@ -4164,7 +4164,11 @@ async function sendCampaign(env, b, origin) {
   let id = +b.campaign_id || 0;
   // The same subject within 30 days is the same mailing, so Send after a reload or the next day picks up where the daily
   // limit stopped it and nobody gets it twice (Hugh, Oct 9: 300 of 481 went out, then Resend's daily limit).
-  if (!id) { const prev = await env.DB.prepare(`SELECT id FROM campaigns WHERE lower(trim(subject)) = lower(?) AND created_at > ? ORDER BY id DESC LIMIT 1`).bind(subject, new Date(Date.now() - 30 * 864e5).toISOString()).first(); if (prev) id = prev.id; }
+  // Hugh, Nov 5: the subject he pasted three days later didn't match the stored one character for character (an apostrophe or an
+  // invisible emoji mark), so the page offered to send to everyone again. Subjects are now compared loosely, and the page has a
+  // Send to the rest button on each mailing from the last 30 days that sends its campaign id.
+  const subjKey = (t) => String(t || "").normalize("NFC").replace(/[‘’ʼ`´]/g, "'").replace(/[“”]/g, '"').replace(/[︎️​-‍]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!id) { const recentC = (await env.DB.prepare(`SELECT id, subject FROM campaigns WHERE created_at > ? ORDER BY id DESC`).bind(new Date(Date.now() - 30 * 864e5).toISOString()).all()).results || []; const prev = recentC.find((c) => subjKey(c.subject) === subjKey(subject)); if (prev) id = prev.id; }
   if (!id) { const r = await env.DB.prepare(`INSERT INTO campaigns (created_at, subject, body) VALUES (?,?,?)`).bind(new Date().toISOString(), subject, body).run(); id = r.meta && r.meta.last_row_id; }
   const people = (await env.DB.prepare(`SELECT email, name FROM customers WHERE email IS NOT NULL AND email != '' AND unsubscribed_at IS NULL AND deleted_at IS NULL AND email NOT IN (SELECT email FROM campaign_sends WHERE campaign_id = ?) ORDER BY id`).bind(id).all()).results;
   // Hugh, Nov 2: a mailing used up Resend's daily quota (about 300 emails), and after that quote requests couldn't reach his inbox
@@ -4243,6 +4247,7 @@ tr.off td{color:#9AA0A6}tr.off td b{text-decoration:line-through}.pill{display:i
 </main>
 <script>
 var $=function(s){return document.querySelector(s);}, D=null, CAMPAIGN=0, NL=String.fromCharCode(10);
+function skey(t){ return String(t||'').normalize('NFC').replace(/[\\u2018\\u2019\\u02BC\\u0060\\u00B4]/g,\"'\").replace(/[\\u201C\\u201D]/g,'\"').replace(/[\\uFE0E\\uFE0F\\u200B-\\u200D]/g,'').replace(/\\s+/g,' ').trim().toLowerCase(); }
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function money(c){return '$'+Math.round((c||0)/100).toLocaleString('en-US');}
 function day(s){return s?new Date(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';}
@@ -4253,7 +4258,8 @@ function render(){ var all=D.customers, em=all.filter(function(c){return c.email
   $('#sendall').textContent='Send to everyone ('+em+')';
   var rows=shown();
   $('#list').innerHTML='<tr><th>Name</th><th>Email</th><th>Phone</th><th>From</th><th class="num">Orders</th><th class="num">Spent</th><th>Last seen</th><th></th></tr>'+(rows.length?rows.map(function(c){ return '<tr class="'+(c.unsubscribed?'off':'')+'"><td><b>'+esc(c.name||'(no name)')+'</b>'+(c.business?'<div class="small">'+esc(c.business)+'</div>':'')+(c.note?'<div class="small">'+esc(c.note)+'</div>':'')+'</td><td>'+esc(c.email)+(c.unsubscribed?'<div class="small">unsubscribed</div>':'')+'</td><td style="white-space:nowrap">'+esc(c.phone)+'</td><td>'+c.sources.split(',').filter(Boolean).map(function(s){return '<span class="pill">'+esc(s)+'</span>';}).join('')+'</td><td class="num">'+c.orders+'</td><td class="num">'+money(c.spent_cents)+'</td><td class="small">'+day(c.last_seen)+'</td><td style="white-space:nowrap"><button class="btn" data-edit="'+c.id+'">Edit</button> '+(c.email?'<button class="btn" data-unsub="'+c.id+'" data-v="'+(c.unsubscribed?0:1)+'">'+(c.unsubscribed?'Resubscribe':'Unsubscribe')+'</button>':'')+'</td></tr>'; }).join(''):'<tr><td colspan="8" class="small">No customers match.</td></tr>');
-  $('#camps').innerHTML=D.campaigns.length?'Sent before: '+D.campaigns.map(function(c){return esc(c.subject)+' ('+c.sent+' sent, '+day(c.created_at)+')';}).join(' · '):''; }
+  var recent=Date.now()-30*864e5;
+  $('#camps').innerHTML=D.campaigns.length?'Sent before: '+D.campaigns.map(function(c){return esc(c.subject)+' ('+c.sent+' sent, '+day(c.created_at)+')'+(new Date(c.created_at).getTime()>recent&&c.sent>0?' <button class="btn" data-rest="'+c.id+'">Send to the rest</button>':'');}).join(' · '):''; }
 function load(after){ $('#msg').textContent='Loading…'; $('#msg').className='msg'; api('/api/customers').then(function(d){ if(d.error){ $('#msg').textContent=d.error; $('#msg').className='msg bad'; return; } D=d; $('#msg').textContent=''; render(); if(after) after(); }).catch(function(e){ $('#msg').textContent='Could not load: '+e.message; $('#msg').className='msg bad'; }); }
 function copy(text,label){ var done=function(){ $('#msg').textContent=label; $('#msg').className='msg ok'; };
   if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done,function(){ fallback(); }); } else fallback();
@@ -4272,10 +4278,13 @@ function fill(c){ F.id.value=c?c.id:''; F.name.value=c?c.name:''; F.business.val
 $('#clear').onclick=function(){ fill(null); };
 F.onsubmit=function(e){ e.preventDefault(); api('/api/customers',{id:F.id.value||undefined,name:F.name.value,business:F.business.value,email:F.email.value,phone:F.phone.value,note:F.note.value}).then(function(r){ if(r.ok){ fill(null); load(); } $('#fmsg').textContent=r.ok?(r.restored?'Added back to the list.':'Saved.'):(r.error||'Failed'); $('#fmsg').className='msg '+(r.ok?'ok':'bad'); }); };
 $('#del').onclick=function(){ if(!F.id.value||!confirm('Delete this customer from the list?')) return; api('/api/customers',{id:F.id.value,delete:true}).then(function(){ fill(null); load(); $('#fmsg').textContent='Deleted. They stay off the list and off emails.'; $('#fmsg').className='msg ok'; }); };
-document.addEventListener('click',function(e){ var b=e.target.closest('[data-edit]'); if(b){ fill(D.customers.filter(function(c){return String(c.id)===b.dataset.edit;})[0]); F.scrollIntoView({behavior:'smooth'}); return; }
+document.addEventListener('click',function(e){ var rb=e.target.closest('[data-rest]'); if(rb){ var c=D.campaigns.filter(function(x){return String(x.id)===rb.dataset.rest;})[0]; if(!c) return;
+    $('#subject').value=c.subject; if(!$('#body').value.trim()&&c.body) $('#body').value=c.body; CAMPAIGN=c.id;
+    $('#smsg').textContent='The subject is now exactly the one from '+day(c.created_at)+'. Check the message, then tap Send to everyone: it goes only to the people who still need it.'; $('#smsg').className='msg ok'; $('#subject').scrollIntoView({behavior:'smooth',block:'center'}); return; }
+  var b=e.target.closest('[data-edit]'); if(b){ fill(D.customers.filter(function(c){return String(c.id)===b.dataset.edit;})[0]); F.scrollIntoView({behavior:'smooth'}); return; }
   var u=e.target.closest('[data-unsub]'); if(u){ api('/api/customers',{id:u.dataset.unsub,unsubscribed:u.dataset.v==='1'}).then(load); } });
 function send(test){ var s=$('#subject').value.trim(), m=$('#body').value.trim(); if(s.length<2||m.length<5){ $('#smsg').textContent='Write a subject and a message first.'; $('#smsg').className='msg bad'; return; }
-  if(!test){ var n=D.customers.filter(function(c){return c.email&&!c.unsubscribed;}).length, prev=D.campaigns.filter(function(c){return c.subject.trim().toLowerCase()===s.toLowerCase()&&c.sent>0;})[0];
+  if(!test){ var n=D.customers.filter(function(c){return c.email&&!c.unsubscribed;}).length, prev=D.campaigns.filter(function(c){return (CAMPAIGN?c.id===CAMPAIGN:skey(c.subject)===skey(s))&&c.sent>0;})[0];
     if(!confirm(prev?'This email already went to '+prev.sent+' people. Send it to the rest now? Nobody gets it twice.':'Send this email to '+n+' customers now?')) return; }
   $('#smsg').textContent='Sending…'; $('#smsg').className='msg';
   api('/api/customers/send',{subject:s,body:m,test:!!test,design:$('#design').checked?'photos':'plain',campaign_id:test?undefined:(CAMPAIGN||undefined)}).then(function(r){
@@ -4291,6 +4300,7 @@ $('#preview').onclick=function(){ var m=$('#body').value.trim(); if(m.length<5){
   api('/api/customers/send',{subject:$('#subject').value||'Preview',body:m,preview:true,design:$('#design').checked?'photos':'plain'}).then(function(r){ var f=$('#pv'); f.style.display='block';
     f.srcdoc=r.html||('<pre style="font:16px Helvetica,Arial,sans-serif;white-space:pre-wrap;padding:20px">'+esc(m)+'</pre>'); f.scrollIntoView({behavior:'smooth'}); }); };
 $('#test').onclick=function(){ send(true); }; $('#sendall').onclick=function(){ send(false); };
+$('#subject').addEventListener('input',function(){ if(!CAMPAIGN) return; var c=D.campaigns.filter(function(x){return x.id===CAMPAIGN;})[0]; if(!c||skey(c.subject)!==skey($('#subject').value)) CAMPAIGN=0; });
 load();
 </script></body></html>`;
 
