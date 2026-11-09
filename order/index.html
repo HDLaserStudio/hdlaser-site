@@ -151,6 +151,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
     <p class="sub">From Log a walk-in. Check the job and the amount, then the customer fills in steps 7 and 8.</p>
     <div id="wlist" hidden></div>
     <div id="wsingle"><div class="f"><label for="wdesc">What we&#8217;re making</label><input id="wdesc" type="text" maxlength="180"></div></div>
+    <div class="f" style="margin-top:12px"><label for="wdid">What I did <small style="color:var(--muted)">(for the shop&#8217;s records, not on the receipt)</small></label><textarea id="wdid" rows="2" maxlength="500"></textarea></div>
     <div class="grid" style="margin-top:12px">
       <div class="f" id="wamountf"><label for="wamount">Amount for the whole job ($)</label><input id="wamount" type="text" inputmode="decimal" autocomplete="off"></div>
       <label class="check" style="align-self:end"><input type="checkbox" id="wtax"><span><b>We supply the item</b><br><small style="color:var(--muted)">Adds sales tax. Leave unticked when it&#8217;s the customer&#8217;s own item.</small></span></label>
@@ -615,7 +616,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
       logo: S.logo ? { name: S.logoName, data: S.logo } : null };
     if (HUB && $('#staffpin').value) body.staff = { name: SERVER(), pin: $('#staffpin').value };
     if (QUOTE) { body.quote = true; delete body.attest; }
-    if (v.q.ov) { body.spec = { custom: { description: ovDescription(v.q), unit_cents: v.q.ov.unit, we_supply_item: v.q.taxable }, qty: v.q.qty }; body.notes = [body.notes, v.q.walkin ? 'Walk-in job, amount set at the counter: '+money(v.q.ov.unit)+'.' : 'Price set at the counter: '+money(v.q.ov.price)+' x '+v.q.ov.spots+' spot'+(v.q.ov.spots>1?'s':'')+' = '+money(v.q.ov.unit)+' each. Choices: '+(S.inches+' in, ')+(S.art==='text'?'text only':S.art==='file'?'logo on file':'new logo')+'.'].filter(Boolean).join('\n'); if (v.q.walkin) { body.spec.custom.no_logo = true; body.from = 'walkin'; if (v.q.lines) { body.spec.custom.lines = v.q.lines.map(function(l){ return { name: l.name, qty: l.qty, unit_cents: l.unit }; }); body.spec.custom.setup = !!v.q.setupW; } } }
+    if (v.q.ov) { body.spec = { custom: { description: ovDescription(v.q), unit_cents: v.q.ov.unit, we_supply_item: v.q.taxable }, qty: v.q.qty }; body.notes = [body.notes, v.q.walkin ? 'Walk-in job, amount set at the counter: '+money(v.q.ov.unit)+'.' : 'Price set at the counter: '+money(v.q.ov.price)+' x '+v.q.ov.spots+' spot'+(v.q.ov.spots>1?'s':'')+' = '+money(v.q.ov.unit)+' each. Choices: '+(S.inches+' in, ')+(S.art==='text'?'text only':S.art==='file'?'logo on file':'new logo')+'.'].filter(Boolean).join('\n'); if (v.q.walkin) { body.spec.custom.no_logo = true; body.from = 'walkin'; var wdid = $('#wdid').value.trim(); if (wdid) body.spec.custom.did = wdid.slice(0,500); if (v.q.lines) { body.spec.custom.lines = v.q.lines.map(function(l){ return { name: l.name, qty: l.qty, unit_cents: l.unit }; }); body.spec.custom.setup = !!v.q.setupW; } } }
     return body;
   }
   $('#pay').onclick = function(){
@@ -694,6 +695,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
         $('#wsingle').hidden = true; $('#wamountf').hidden = true; $('#wlist').hidden = false;
         $('#wlist').innerHTML = '<table style="width:100%;border-collapse:collapse">' + WLINES.map(function(l){ return '<tr><td style="padding:6px 0">'+l.qty+' \u00d7 '+esc(l.name)+'</td><td style="text-align:right">'+money(l.unit)+' each</td><td style="text-align:right;font-weight:700">'+money(l.qty*l.unit)+'</td></tr>'; }).join('') + (WSETUP ? '<tr><td style="padding:6px 0">Logo digitizing and setup</td><td></td><td style="text-align:right;font-weight:700">'+money(WSETUP)+'</td></tr>' : '') + '<tr><td style="padding:8px 0;border-top:1px solid var(--line)"><b>Total before tax</b></td><td style="border-top:1px solid var(--line)"></td><td style="text-align:right;border-top:1px solid var(--line);font-size:20px"><b>'+money(WLINES.reduce(function(a,l){ return a+l.qty*l.unit; },0)+WSETUP)+'</b></td></tr></table>'; }
       if (qs.get('name')) $('#name').value = qs.get('name').slice(0,80); if (qs.get('email')) $('#email').value = qs.get('email').slice(0,120); if (qs.get('phone')) $('#phone').value = qs.get('phone').slice(0,40);
+      $('#wdid').value = (qs.get('did') || '').slice(0,500);
       if (qs.get('notes')) $('#notes').value = qs.get('notes').slice(0,2000); if (/^\d{4}-\d{2}-\d{2}$/.test(qs.get('needed') || '')) $('#needed').value = qs.get('needed'); syncWorkDone();
       ['wdesc','wamount','wtax'].forEach(function(id){ $('#'+id).addEventListener('input', function(){ renderSummary(); renderWords(); }); $('#'+id).addEventListener('change', function(){ renderSummary(); renderWords(); }); });
       $('#hubwho').textContent = 'Walk-in job' + (BY ? ' · logged by ' + BY : '') + '. The customer fills in steps 7 and 8.';

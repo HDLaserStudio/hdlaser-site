@@ -29,7 +29,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-11-05 v71"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-11-08 v72"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS plaid_items (item_id TEXT PRIMARY KEY, access_token T
 CREATE TABLE IF NOT EXISTS coffee_orders (ref TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, name TEXT, phone TEXT, email TEXT, items TEXT, summary TEXT, total_cents INTEGER, pickup TEXT, note TEXT, text_consent INTEGER DEFAULT 0, square_order_id TEXT, square_payment_id TEXT, paid_at TEXT, paid_cents INTEGER DEFAULT 0, tip_cents INTEGER DEFAULT 0, notified_at TEXT, ready_at TEXT, picked_up_at TEXT);
 CREATE INDEX IF NOT EXISTS coffee_created ON coffee_orders(created_at);`;
 // Columns added after the first release. Each ALTER is tried once and ignored if the column already exists.
-const ALTERS = ["ALTER TABLE orders ADD COLUMN ship_to TEXT", "ALTER TABLE orders ADD COLUMN done_on_pay INTEGER", "ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT", "ALTER TABLE jobs ADD COLUMN email TEXT"];
+const ALTERS = ["ALTER TABLE jobs ADD COLUMN did TEXT", "ALTER TABLE orders ADD COLUMN ship_to TEXT", "ALTER TABLE orders ADD COLUMN done_on_pay INTEGER", "ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT", "ALTER TABLE jobs ADD COLUMN email TEXT"];
 
 let migrated = false;
 async function ensureSchema(env) {
@@ -999,9 +999,10 @@ async function dailySummary(env, force) {
   const asks = await all(`SELECT kind, name, business, email, phone, fields FROM inquiries WHERE created_at >= ? AND created_at < ? ORDER BY created_at`);
   const unpaid = await all(`SELECT ref, name, business, total_cents, spec, cups, taken_by FROM orders WHERE status IN ('checkout_started','pay_later') AND created_at >= ? AND created_at < ? ORDER BY created_at`);
   const shifts = await all(`SELECT s.in_at, s.out_at, s.minutes, st.name FROM shifts s LEFT JOIN staff st ON st.id = s.staff_id WHERE s.in_at >= ? AND s.in_at < ? ORDER BY s.in_at`);
+  const work = await all(`SELECT j.done_at, j.customer, j.product, j.qty, j.amount_cents, j.did, j.ref, st.name FROM jobs j LEFT JOIN staff st ON st.id = j.done_by WHERE j.status = 'done' AND j.done_at >= ? AND j.done_at < ? ORDER BY j.done_at`);
   const owners = String(env.ALERT_SMS_TO || "").split(",").map((x) => e164(x.trim())).filter(Boolean);
   const texts = (await all(`SELECT ts, detail FROM staff_log WHERE action = 'sms_in' AND ts >= ? AND ts < ? ORDER BY ts`)).filter((t) => !owners.some((n) => String(t.detail || "").startsWith(n + ":")));
-  const empty = !pays.length && !quotes.length && !asks.length && !unpaid.length && !shifts.length && !texts.length;
+  const empty = !pays.length && !quotes.length && !asks.length && !unpaid.length && !shifts.length && !texts.length && !work.length;
   if (empty && !force) { await markSent(); return { ok: true, skipped: "nothing happened today" }; }
   const net = pays.reduce((a, p) => a + (p.amount_cents || 0) - (p.refunded_cents || 0), 0);
   const who = (r) => r.business ? `${r.business} (${r.name || ""})` : r.name || "";
@@ -1025,6 +1026,10 @@ async function dailySummary(env, force) {
   if (unpaid.length) {
     out.push(``, `NOT PAID YET: ${unpaid.length} checkout${unpaid.length === 1 ? "" : "s"} started today and not paid`);
     for (const u of unpaid) out.push(`${u.ref}  ${who(u)}, ${$(u.total_cents)}${u.taken_by ? ", at the counter by " + u.taken_by : ""}${what(u) ? ": " + what(u) : ""}`);
+  }
+  if (work.length) {
+    out.push(``, `WORK DONE: ${work.length} job${work.length === 1 ? "" : "s"} marked done`);
+    for (const w of work) out.push(`${fmtLocal(w.done_at)}  ${w.name || "Someone"}: ${w.customer ? w.customer + ", " : ""}${w.ref ? String(w.product || "").replace(/^custom: /, "") : ((w.qty || 1) > 1 ? w.qty + " × " : "") + prodName(env, w.product)}${w.amount_cents ? ", " + $(w.amount_cents) : ""}${w.did ? ". What was done: " + w.did : ""}`);
   }
   out.push(``, `WHO WORKED`);
   for (const s of shifts) out.push(`${s.name || "Someone"}  ${fmtLocal(s.in_at)} to ${s.out_at ? fmtLocal(s.out_at) + ", " + ((s.minutes || 0) / 60).toFixed(1) + " h" : "now, still clocked in"}`);
@@ -1399,6 +1404,7 @@ async function staffRoutes(request, env, cors, path, url) {
   if (path === "/staff/logout" && request.method === "POST") { await env.DB.prepare(`DELETE FROM staff_sessions WHERE token = ?`).bind(me.token).run(); return json({ ok: true }, 200, cors); }
 
   if (path === "/staff/me") return json(await staffHome(env, me), 200, { ...cors, "Cache-Control": "no-store" });
+  if (path === "/staff/work") return json(await staffWork(env, me, url.searchParams.get("all") === "1" && ROLE_RANK[me.role] >= 2, parseInt(url.searchParams.get("days"), 10) || 30), 200, { ...cors, "Cache-Control": "no-store" });
   // names only, for the order page's "Served by" picker on the shop iPad; whoever is picked still proves it with their own PIN
   if (path === "/staff/names") return json({ names: (await env.DB.prepare(`SELECT name FROM staff WHERE active = 1 ORDER BY name`).all()).results.map((r) => r.name) }, 200, { ...cors, "Cache-Control": "no-store" });
 
@@ -1473,15 +1479,15 @@ async function staffRoutes(request, env, cors, path, url) {
 
   if (path === "/staff/jobs" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));
-    const product = String(b.product || "other"), qty = clamp(parseInt(b.qty, 10) || 1, 1, 10000);
+    const product = String(b.product || "other").slice(0, 120), qty = clamp(parseInt(b.qty, 10) || 1, 1, 10000), did = cleanDid(b.did);
     const minutes = clamp(parseInt(b.minutes, 10) || productMinutes(env, product, qty), 1, 100000);
     const amount = Math.round((parseFloat(b.amount) || 0) * 100);
     const due = b.due ? new Date(b.due) : null;
-    const r = await env.DB.prepare(`INSERT INTO jobs (created_at, staff_id, customer, phone, product, qty, minutes, amount_cents, due_at, status, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(now, me.id, String(b.customer || "").slice(0, 120), String(b.phone || "").slice(0, 40), product, qty, minutes, amount, due && !isNaN(due) ? due.toISOString() : null, "queued", String(b.note || "").slice(0, 500)).run();
+    const r = await env.DB.prepare(`INSERT INTO jobs (created_at, staff_id, customer, phone, product, qty, minutes, amount_cents, due_at, status, note, did) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(now, me.id, String(b.customer || "").slice(0, 120), String(b.phone || "").slice(0, 40), product, qty, minutes, amount, due && !isNaN(due) ? due.toISOString() : null, "queued", String(b.note || "").slice(0, 500), did || null).run();
     const jemail = String(b.email || "").trim().toLowerCase().slice(0, 120);
     if (jemail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(jemail)) await env.DB.prepare(`UPDATE jobs SET email = ? WHERE id = ?`).bind(jemail, r.meta && r.meta.last_row_id).run();
-    await staffLog(env, me.id, "job_new", `${product} x${qty} ${minutes}m $${amount / 100}`);
+    await staffLog(env, me.id, "job_new", `${product} x${qty} ${minutes}m $${amount / 100}${did ? ": " + did.slice(0, 80) : ""}`);
     return json({ ok: true, id: r.meta && r.meta.last_row_id, minutes }, 200, cors);
   }
   let m = path.match(/^\/staff\/jobs\/(\d+)$/);
@@ -1559,6 +1565,24 @@ async function upsertStaff(env, b) {
   return { ok: true, id: r.meta && r.meta.last_row_id };
 }
 
+// "What I did" on a walk-in (Hugh, Nov 8: "add custom section a window i wanna specifize what i did so that way i can see
+// actually what ive done"): free text, one line, kept with the job and with a Terminal walk-in's order.
+function cleanDid(v) { return String(v || "").replace(/\s+/g, " ").replace(/[<>]/g, "").trim().slice(0, 500); }
+// My numbers, What I did: finished and logged jobs (walk-ins and orders marked done), newest first. Managers can see everyone's.
+async function staffWork(env, me, all, days) {
+  days = clamp(days, 1, 366);
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const rows = (await env.DB.prepare(`SELECT j.id, j.created_at, j.done_at, j.status, j.customer, j.phone, j.product, j.qty, j.minutes, j.amount_cents, j.note, j.did, j.ref, a.name logged_by, d.name done_name
+      FROM jobs j LEFT JOIN staff a ON a.id = j.staff_id LEFT JOIN staff d ON d.id = j.done_by
+      WHERE j.status != 'cancelled' AND COALESCE(j.done_at, j.created_at) >= ?${all ? "" : " AND (j.done_by = ? OR (j.done_by IS NULL AND j.staff_id = ?))"}
+      ORDER BY COALESCE(j.done_at, j.created_at) DESC LIMIT 300`).bind(...(all ? [since] : [since, me.id, me.id])).all()).results;
+  const jobs = rows.map((r) => ({ id: r.id, at: r.done_at || r.created_at, done: r.status === "done", status: r.status, customer: r.customer || "", phone: r.phone || "",
+    what: r.ref ? String(r.product || "").replace(/^custom: /, "") : ((r.qty || 1) > 1 ? r.qty + " \u00d7 " : "") + prodName(env, r.product), did: r.did || "", note: r.note === "auto: order done" ? "" : (r.note || ""),
+    ref: r.ref || null, amount_cents: r.amount_cents || 0, minutes: r.minutes || 0, by: r.done_name || r.logged_by || "" }));
+  const done = jobs.filter((j) => j.done);
+  return { days, all, jobs, done_n: done.length, done_cents: done.reduce((a, j) => a + j.amount_cents, 0), open_n: jobs.length - done.length };
+}
+
 // What one employee sees when they open the portal.
 async function staffHome(env, me) {
   const q = (sql, ...a) => env.DB.prepare(sql).bind(...a);
@@ -1592,14 +1616,14 @@ async function orderJob(env, ref, doneBy) {
   const qty = Math.max(1, parseInt(spec.qty || o.cups || 1, 10) || 1);
   const minutes = o.kind === "custom" ? Math.round(qty * (spec.service === "uv" ? 3 + (spec.inches || 2) * 1.5 : 4 + (spec.inches || 2) * 2) + 10) : Math.round(qty * 2.5 + 20);
   const now = new Date().toISOString();
-  await env.DB.prepare(`INSERT INTO jobs (created_at, staff_id, customer, phone, product, qty, minutes, amount_cents, status, started_at, done_at, done_by, note, ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(o.paid_at || o.created_at || now, o.taken_by_id || doneBy, String(o.business || o.name || "").slice(0, 120), String(o.phone || "").slice(0, 40), String(spec.summary || (o.cups ? o.cups + " logo cups" : "Web order")).slice(0, 200), qty, minutes, Math.max(0, (o.paid_cents || o.total_cents || 0) - (o.refunded_cents || 0) - (o.tip_cents || 0)), "done", o.paid_at || now, now, doneBy, "auto: order done", ref).run();
+  await env.DB.prepare(`INSERT INTO jobs (created_at, staff_id, customer, phone, product, qty, minutes, amount_cents, status, started_at, done_at, done_by, note, ref, did) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(o.paid_at || o.created_at || now, o.taken_by_id || doneBy, String(o.business || o.name || "").slice(0, 120), String(o.phone || "").slice(0, 40), String(spec.summary || (o.cups ? o.cups + " logo cups" : "Web order")).slice(0, 200), qty, minutes, Math.max(0, (o.paid_cents || o.total_cents || 0) - (o.refunded_cents || 0) - (o.tip_cents || 0)), "done", o.paid_at || now, now, doneBy, "auto: order done", ref, cleanDid(spec.did) || null).run();
 }
 async function workQueue(env) {
   const q = (sql, ...a) => env.DB.prepare(sql).bind(...a);
   const items = [];
   const jobs = (await q(`SELECT j.*, p.name staff_name FROM jobs j LEFT JOIN staff p ON p.id = j.staff_id WHERE j.status IN ('queued','started') ORDER BY j.created_at`).all()).results;
-  for (const j of jobs) items.push({ kind: "job", id: j.id, title: `${j.customer || "Walk-in"}: ${prodName(env, j.product)} x${j.qty}`, note: j.note, phone: j.phone, minutes: j.minutes, amount_cents: j.amount_cents, due_at: j.due_at, created_at: j.created_at, status: j.status, by: j.staff_name });
+  for (const j of jobs) items.push({ kind: "job", id: j.id, title: `${j.customer || "Walk-in"}: ${prodName(env, j.product)} x${j.qty}`, did: j.did || null, note: j.note, phone: j.phone, minutes: j.minutes, amount_cents: j.amount_cents, due_at: j.due_at, created_at: j.created_at, status: j.status, by: j.staff_name });
   const orders = (await q(`SELECT o.ref, o.business, o.name, o.phone, o.cups, o.paid_at, o.paid_cents, o.logo_received_at, o.proof_approved_at, o.kind, o.spec, o.needed_by, o.rush, o.logo_asset_id, o.attest_initials, o.ship_to,
       (SELECT SUM(CASE WHEN finish='printed' THEN qty*3+30 ELSE qty*2.5+20 END) FROM order_lines l WHERE l.ref=o.ref) minutes,
       (SELECT SUM(qty * (CASE WHEN service='uv' THEN 3 + inches*1.5 ELSE 4 + inches*2 END)) + 10 FROM order_items i WHERE i.ref=o.ref) cminutes,
@@ -1613,7 +1637,7 @@ async function workQueue(env) {
     const wait = spec.product === "namecup" ? 3 : custom ? (o.rush ? 3 : 7) : 21;
     let due = o.proof_approved_at ? new Date(new Date(o.proof_approved_at).getTime() + wait * 86400000).toISOString() : (o.logo_received_at ? new Date(new Date(o.logo_received_at).getTime() + 2 * 86400000).toISOString() : null);
     if (custom && o.needed_by && (!due || o.needed_by + "T23:00:00Z" < due)) due = o.needed_by + "T23:00:00Z";
-    items.push({ kind: "order", id: o.ref, title: custom ? `${o.business || o.name}: ${spec.summary || "custom order"}` : `${o.business || o.name}: ${o.cups} logo cups`, note: spec.product === "namecup" ? `Ship to: ${o.ship_to || "?"}` : custom ? `Initialed ${o.attest_initials || "?"}${o.logo_asset_id ? " · logo on file" : ""}` : o.items, phone: o.phone, minutes: stage === "in production" ? Math.round(o.minutes || 0) : stage === "send proof" ? 20 : 0, amount_cents: o.paid_cents, due_at: due, created_at: o.paid_at, status: stage, stage, logo: !!o.logo_received_at, proof: !!o.proof_approved_at, logo_id: o.logo_asset_id || null });
+    items.push({ kind: "order", id: o.ref, title: custom ? `${o.business || o.name}: ${spec.summary || "custom order"}` : `${o.business || o.name}: ${o.cups} logo cups`, note: spec.product === "namecup" ? `Ship to: ${o.ship_to || "?"}` : custom ? `Initialed ${o.attest_initials || "?"}${o.logo_asset_id ? " · logo on file" : ""}` : o.items, phone: o.phone, minutes: stage === "in production" ? Math.round(o.minutes || 0) : stage === "send proof" ? 20 : 0, amount_cents: o.paid_cents, due_at: due, created_at: o.paid_at, status: stage, stage, did: spec.did || null, logo: !!o.logo_received_at, proof: !!o.proof_approved_at, logo_id: o.logo_asset_id || null });
   }
   const now = Date.now();
   for (const it of items) {
@@ -1978,9 +2002,13 @@ const DEFAULT_RULES = [
 ];
 const DEFAULT_SETTINGS = {
   cash_balance_cents: 0, cash_as_of: null, reserve_months: 1, pay_period_days: 14, pay_period_anchor: "2026-09-14",
-  monthly_fixed_costs_cents: 0, // fallback when no bank data yet
+  monthly_fixed_costs_cents: 0, // fallback when no bank data yet (besides rent)
+  rent_monthly_cents: 485000, rent_from: "2026-01", // Hugh, Nov 8: "update my rent to $4850", "from the beginning of 2026"
   unit: { cup12_blank: 450, cup16_blank: 525, ink12: 35, ink16: 45, engrave_consumable: 8, packaging: 30, labor_rate_hour: 2200, minutes_engraved: 2.5, minutes_printed: 3 },
 };
+// Rent from the money page's setting: from rent_from on (every month when it is empty), a month counts the set rent instead
+// of the bank rows filed as Rent, so a late, early, split or unconnected payment doesn't skew a month and nothing counts twice.
+function rentFor(settings, month) { const c = Math.round(+settings.rent_monthly_cents || 0); return c > 0 && (!settings.rent_from || month >= settings.rent_from) ? c : null; }
 async function finSettings(env) {
   const row = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'fin_settings'`).first();
   const s = row ? JSON.parse(row.v) : {};
@@ -1990,6 +2018,8 @@ async function saveFinSettings(env, patch) {
   const cur = await finSettings(env);
   const next = { ...cur, ...patch, unit: { ...cur.unit, ...(patch.unit || {}) } };
   for (const k of Object.keys(next.unit)) next.unit[k] = +next.unit[k] || 0;
+  next.rent_monthly_cents = clamp(Math.round(+next.rent_monthly_cents || 0), 0, 10000000);
+  next.rent_from = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(next.rent_from || "")) ? next.rent_from : null;
   await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('fin_settings', ?)`).bind(JSON.stringify(next)).run();
   return next;
 }
@@ -2112,16 +2142,21 @@ async function trends(env) {
     else if (r.category === "other_income") row.other_income_cents += Math.max(0, r.c);
     else if (g === "cogs") row.cogs_cents += r.c; else if (g === "opex") row.opex_cents += r.c;
     else if (r.category === "personal") row.personal_cents += r.c; else if (r.category === "owner_draw") row.owner_draw_cents += r.c; else if (r.category === "uncategorized") row.uncategorized_cents += r.c; }
+  const fin = await finSettings(env), bankRent = {}; let rentSetAny = false;
+  for (const r of cats) if (r.category === "rent") bankRent[r.m] = (bankRent[r.m] || 0) + r.c;
+  for (const row of Object.values(byM)) { const set = rentFor(fin, row.month), b = bankRent[row.month] || 0; row.rent_cents = set != null ? -set : b; if (set != null) { row.opex_cents += -set - b; rentSetAny = true; } }
   for (const row of Object.values(byM)) { const rev = row.square_net_cents + row.other_income_cents; row.ebitda_cents = rev + row.cogs_cents + row.opex_cents; row.margin_pct = rev ? Math.round(row.ebitda_cents / rev * 100) : null; }
   // last 12 months vs the 12 before, by category and by vendor
   const cut12 = months[Math.max(0, months.length - 12)] + "-01", cut24 = start;
   const catRows = (await q(`SELECT category, SUM(CASE WHEN posted_at >= ? THEN amount_cents ELSE 0 END) recent, SUM(CASE WHEN posted_at < ? THEN amount_cents ELSE 0 END) prior, COUNT(*) n FROM bank_txns WHERE posted_at >= ? GROUP BY category`, cut12, cut12, cut24).all()).results;
+  if (rentSetAny) { let rr = catRows.find((r) => r.category === "rent"); if (!rr) { rr = { category: "rent", recent: 0, prior: 0, n: 0 }; catRows.push(rr); }
+    rr.recent = Object.values(byM).filter((r) => r.month + "-01" >= cut12).reduce((t, r) => t + r.rent_cents, 0); rr.prior = Object.values(byM).filter((r) => r.month + "-01" < cut12).reduce((t, r) => t + r.rent_cents, 0); }
   const revRecent = Object.values(byM).filter((r) => r.month + "-01" >= cut12).reduce((t, r) => t + r.square_net_cents + r.other_income_cents, 0);
   const categories = catRows.map((r) => ({ key: r.category, name: CAT[r.category] ? CAT[r.category].name : r.category, group: CAT[r.category] ? CAT[r.category].group : "excluded", recent_cents: r.recent, prior_cents: r.prior, change_pct: r.prior ? Math.round((r.recent - r.prior) / Math.abs(r.prior) * 100) : null, share_of_sales_pct: revRecent && r.recent < 0 ? Math.round(-r.recent / revRecent * 1000) / 10 : null, target_pct: CAT[r.category] && CAT[r.category].target ? Math.round(CAT[r.category].target * 1000) / 10 : null, rows: r.n })).sort((a, b) => a.recent_cents - b.recent_cents);
   const vendors = (await q(`SELECT COALESCE(NULLIF(vendor,''), description) k, category, COUNT(*) n, SUM(amount_cents) c FROM bank_txns WHERE posted_at >= ? AND amount_cents < 0 AND category NOT IN ('personal','transfer','credit_card_payment','owner_draw','loan','cash_deposit') GROUP BY k, category ORDER BY c ASC LIMIT 40`, cut12).all()).results.map((r) => ({ vendor: r.k, category: r.category, category_name: CAT[r.category] ? CAT[r.category].name : r.category, rows: r.n, total_cents: r.c, share_of_sales_pct: revRecent ? Math.round(-r.c / revRecent * 1000) / 10 : null }));
   const items = (await q(`SELECT name k, SUM(qty) qty, SUM(gross_cents) c, COUNT(DISTINCT order_id) orders FROM square_items WHERE created_at >= ? GROUP BY name ORDER BY c DESC LIMIT 25`, cut12).all()).results;
   const customers = (await q(`SELECT COALESCE(NULLIF(business,''), name, email) k, COUNT(*) orders, SUM(paid_cents) paid FROM orders WHERE status IN ('paid','refunded') AND paid_at >= ? GROUP BY k ORDER BY paid DESC LIMIT 15`, cut12).all()).results;
-  return { start, months: Object.values(byM), recent_from: cut12, revenue_recent_cents: revRecent, categories, vendors, items, customers };
+  return { start, months: Object.values(byM), recent_from: cut12, rent: { monthly_cents: fin.rent_monthly_cents || 0, from: fin.rent_from || null }, revenue_recent_cents: revRecent, categories, vendors, items, customers };
 }
 function trendsCsv(t) {
   const h = ["month", "square_net_sales", "payments", "avg_ticket", "bank_deposits", "other_income", "cogs", "opex", "ebitda", "margin_pct", "personal", "owner_draws", "uncategorized"];
@@ -2149,8 +2184,8 @@ async function moneyReport(env, fromIn, toIn, whatIf = {}) {
   const hasBank = bankRows.n > 0;
 
   const pnl = months.map((m) => {
-    const s = sq[m], b = bank[m];
-    const cat = (k) => Math.abs((b[k] && b[k].amount_cents) || 0);
+    const s = sq[m], b = bank[m], rentSet = rentFor(settings, m);
+    const cat = (k) => k === "rent" && rentSet != null ? rentSet : Math.abs((b[k] && b[k].amount_cents) || 0);
     const grp = (g) => CATEGORIES.filter((c) => c.group === g).reduce((n, c) => n + cat(c.key), 0);
     const net = s.gross - s.refunds - s.fees;
     const cogs = grp("cogs"), opex = grp("opex");
@@ -2158,7 +2193,7 @@ async function moneyReport(env, fromIn, toIn, whatIf = {}) {
     const bankIncome = (b.square_payout && b.square_payout.amount_cents || 0) + (b.other_income && b.other_income.amount_cents || 0);
     return { month: m, gross_cents: s.gross, refunds_cents: s.refunds, square_fees_cents: s.fees, net_sales_cents: net, web_cents: s.web, cash_cents: s.cash, payments: s.payments,
       cogs_cents: cogs, opex_cents: opex, ebitda_cents: ebitda, ebitda_pct: net ? +((ebitda / net) * 100).toFixed(1) : null, gross_margin_pct: net ? +(((net - cogs) / net) * 100).toFixed(1) : null,
-      bank_income_cents: bankIncome, bank_vs_square_cents: bankIncome - net, uncategorized_cents: cat("uncategorized"), excluded_cents: grp("excluded") - cat("uncategorized"),
+      bank_income_cents: bankIncome, bank_vs_square_cents: bankIncome - net, rent_from_setting: rentSet != null, rent_in_bank_cents: Math.abs((b.rent && b.rent.amount_cents) || 0), uncategorized_cents: cat("uncategorized"), excluded_cents: grp("excluded") - cat("uncategorized"),
       categories: Object.fromEntries(CATEGORIES.map((c) => [c.key, cat(c.key)])) };
   });
   const tot = pnl.reduce((a, r) => { for (const k of ["gross_cents", "refunds_cents", "square_fees_cents", "net_sales_cents", "cogs_cents", "opex_cents", "ebitda_cents", "web_cents", "cash_cents", "bank_income_cents", "uncategorized_cents"]) a[k] = (a[k] || 0) + r[k]; return a; }, {});
@@ -2191,11 +2226,12 @@ async function moneyReport(env, fromIn, toIn, whatIf = {}) {
   const wk = 7 * 86400000; const now = Date.now();
   const w8 = new Date(now - 8 * wk).toISOString();
   const inflow8 = (await q(`SELECT COALESCE(SUM(amount_cents - fee_cents - refunded_cents),0) a FROM payments WHERE status='COMPLETED' AND created_at >= ?`, w8).first()).a;
-  const bankOut8 = hasBank ? Math.abs((await q(`SELECT COALESCE(SUM(amount_cents),0) a FROM bank_txns WHERE amount_cents < 0 AND posted_at >= ? AND category NOT IN ('transfer','owner_draw','credit_card_payment','loan','equipment','cash_deposit')`, w8.slice(0, 10)).first()).a) : 0;
+  const rentNow = rentFor(settings, new Date().toISOString().slice(0, 7)) || 0; // the set rent replaces bank rows filed as Rent
+  const bankOut8 = hasBank ? Math.abs((await q(`SELECT COALESCE(SUM(amount_cents),0) a FROM bank_txns WHERE amount_cents < 0 AND posted_at >= ? AND category NOT IN ('transfer','owner_draw','credit_card_payment','loan','equipment','cash_deposit'${rentNow ? ",'rent'" : ""})`, w8.slice(0, 10)).first()).a) : 0;
   const bankWeeks = hasBank ? Math.max(1, Math.min(8, (now - new Date(bankRows.first).getTime()) / wk)) : 8;
   const weeklyIn = inflow8 / 8;
   const payrollWeekly = await payrollWeeklyEstimate(env);
-  const weeklyOut = hasBank ? bankOut8 / bankWeeks : (settings.monthly_fixed_costs_cents / 4.33) + payrollWeekly;
+  const weeklyOut = hasBank ? bankOut8 / bankWeeks + rentNow / 4.33 : ((settings.monthly_fixed_costs_cents + rentNow) / 4.33) + payrollWeekly;
   const hireW = (+whatIf.hire_monthly_cents || 0) / 4.33, growthW = (+whatIf.growth_monthly_cents || 0) / 4.33, restock = +whatIf.restock_cents || 0, salesPct = +whatIf.sales_change_pct || 0;
   const start = settings.cash_balance_cents + (inTransit.a || 0);
   const series = []; let cash = start, minCash = start, minWeek = 0;
@@ -2207,7 +2243,7 @@ async function moneyReport(env, fromIn, toIn, whatIf = {}) {
   const reserve = Math.round(weeklyOut * 4.33 * settings.reserve_months);
   const burn = weeklyOut + hireW + growthW - weeklyIn * (1 + salesPct / 100);
   const forecast = { start_cash_cents: start, cash_balance_cents: settings.cash_balance_cents, cash_as_of: settings.cash_as_of, in_transit_cents: inTransit.a || 0, receivable_cents: unpaid.amt, receivable_n: unpaid.n,
-    weekly_in_cents: Math.round(weeklyIn), weekly_out_cents: Math.round(weeklyOut), payroll_weekly_cents: Math.round(payrollWeekly), basis: hasBank ? `bank, ${bankWeeks.toFixed(1)} weeks of data` : "fixed-cost setting", weeks_of_data: +bankWeeks.toFixed(1),
+    weekly_in_cents: Math.round(weeklyIn), weekly_out_cents: Math.round(weeklyOut), payroll_weekly_cents: Math.round(payrollWeekly), basis: (hasBank ? `bank, ${bankWeeks.toFixed(1)} weeks of data` : "fixed-cost setting") + (rentNow ? `, rent $${Math.round(rentNow / 100).toLocaleString("en-US")} a month` : ""), weeks_of_data: +bankWeeks.toFixed(1), rent_monthly_cents: rentNow,
     reserve_cents: reserve, min_cash_cents: Math.round(minCash), min_cash_week: minWeek, safe_to_spend_cents: Math.round(minCash - reserve), runway_weeks: burn > 0 ? Math.max(0, Math.floor(start / burn)) : null, series, what_if: { hire_monthly_cents: +whatIf.hire_monthly_cents || 0, growth_monthly_cents: +whatIf.growth_monthly_cents || 0, restock_cents: restock, sales_change_pct: salesPct } };
 
   // Health score: EBITDA 30, reserve 25, categorized 20, reconciled 15, receivables 10
@@ -2333,8 +2369,10 @@ svg text{font-size:11px;fill:var(--muted)}
     <label>Sales change, %<input type="number" id="w-sales" value="0" step="5"></label>
     <label>Cash in bank now, $<input type="number" id="w-cash" step="100"></label>
     <label>Reserve, months of costs<input type="number" id="w-reserve" step="0.5" min="0"></label>
-    <label>Monthly fixed costs, $ (used until bank data exists)<input type="number" id="w-fixed" step="100"></label>
-  </div><p style="margin:10px 0 0"><button class="act dark" id="w-run">Recalculate</button> <button class="act" id="w-save">Save cash &amp; reserve</button></p><p class="small" id="verdict" style="margin-top:10px;line-height:1.5"></p></div>
+    <label>Rent, $ per month<input type="number" id="w-rent" step="50" min="0"></label>
+    <label>Rent counted from<select id="w-rentfrom"></select></label>
+    <label>Other monthly fixed costs, $ (besides rent, used until bank data exists)<input type="number" id="w-fixed" step="100"></label>
+  </div><p style="margin:10px 0 0"><button class="act dark" id="w-run">Recalculate</button> <button class="act" id="w-save">Save cash, rent &amp; reserve</button> <span class="small" id="w-msg"></span></p><p class="small" id="verdict" style="margin-top:10px;line-height:1.5"></p></div>
 </div>
 
 <h2>Bank ledger</h2>
@@ -2384,7 +2422,7 @@ function render(){
   html+='<tr><td colspan="'+(ms.length+2)+'" class="small" style="padding-top:12px"><b>Operating expenses</b></td></tr>'+cat('opex')+row('<b>EBITDA</b>',p=>money(p.ebitda_cents)+(p.ebitda_pct!=null?' <span class="small">'+p.ebitda_pct+'%</span>':''),'tot');
   html+='<tr><td colspan="'+(ms.length+2)+'" class="small" style="padding-top:12px"><b>Not in EBITDA</b> (transfers, draws, loans, card payments, equipment)</td></tr>'+CATS.filter(c=>c.group==='excluded').map(c=>row(c.name,p=>money(-(p.categories?p.categories[c.key]:t.categories[c.key])),'sub',c.key)).join('');
   $('#pnl').innerHTML=html;
-  $('#pnlnote').innerHTML=R.categories.filter(c=>c.status).map(c=>'<span class="pill '+c.status+'">'+esc(c.name)+' '+c.pct_of_net+'% (target ≤'+Math.round(c.target*100)+'%)</span> ').join('');
+  const rs=R.settings; $('#pnlnote').innerHTML=(rs.rent_monthly_cents>0?'<span style="display:block;margin-bottom:6px">Rent counts as '+money(rs.rent_monthly_cents)+' a month'+(rs.rent_from?' from '+new Date(rs.rent_from+'-02').toLocaleDateString('en-US',{month:'long',year:'numeric'}):'')+' (change it under What if, next to the cash forecast). In those months, bank payments filed as Rent are not added on top.</span>':'')+R.categories.filter(c=>c.status).map(c=>'<span class="pill '+c.status+'">'+esc(c.name)+' '+c.pct_of_net+'% (target ≤'+Math.round(c.target*100)+'%)</span> ').join('');
   // forecast
   const f=R.forecast; drawChart(f); 
   $('#fctiles').innerHTML=tile('Cash now',money(f.cash_balance_cents),f.cash_as_of?'as of '+f.cash_as_of:'set it in What if')+tile('Square in transit',money(f.in_transit_cents),'not yet paid out')+tile('Receivable',money(f.receivable_cents),f.receivable_n+' unpaid web orders')+tile('Weekly in',money(f.weekly_in_cents),'avg last 8 weeks')+tile('Weekly out',money(f.weekly_out_cents),'basis: '+f.basis)+tile('Lowest cash',money(f.min_cash_cents),'week '+f.min_cash_week)+tile('Safe to spend',money(f.safe_to_spend_cents),'above a '+R.settings.reserve_months+'-month reserve');
@@ -2393,6 +2431,8 @@ function render(){
   if(!R.has_bank) v.push('No bank data yet, so weekly costs come from the fixed-cost setting. Import a statement for real numbers.');
   $('#verdict').innerHTML=v.join(' ');
   if(!$('#w-cash').value) $('#w-cash').value=Math.round(f.cash_balance_cents/100); if(!$('#w-reserve').value) $('#w-reserve').value=R.settings.reserve_months; if(!$('#w-fixed').value) $('#w-fixed').value=Math.round(R.settings.monthly_fixed_costs_cents/100);
+  if(!$('#w-rent').value) $('#w-rent').value=Math.round((R.settings.rent_monthly_cents||0)/100);
+  if(!$('#w-rentfrom').options.length){ const opts=['<option value="">Every month</option>']; const d0=new Date(); for(let i=0;i<36;i++){ const d=new Date(Date.UTC(d0.getUTCFullYear(),d0.getUTCMonth()-i,1)); const v=d.toISOString().slice(0,7); opts.push('<option value="'+v+'">'+d.toLocaleDateString('en-US',{month:'long',year:'numeric',timeZone:'UTC'})+'</option>'); } $('#w-rentfrom').innerHTML=opts.join(''); if(R.settings.rent_from&&![...$('#w-rentfrom').options].some(o=>o.value===R.settings.rent_from)) $('#w-rentfrom').insertAdjacentHTML('beforeend','<option value="'+esc(R.settings.rent_from)+'">'+esc(R.settings.rent_from)+'</option>'); $('#w-rentfrom').value=R.settings.rent_from||''; }
   // reconciliation
   const rc=R.reconciliation; $('#recpill').textContent=(rc.payouts.matched||0)+'/'+(rc.payouts.n||0)+' payouts matched';
   $('#recon').innerHTML=(rc.unmatched_payouts.length?'<p><b>Square says it sent these, not found in the bank:</b></p><table>'+rc.unmatched_payouts.map(p=>'<tr><td class="small">'+(p.arrival_date||p.created_at||'').slice(0,10)+'</td><td>'+esc(p.status)+'</td><td class="num">'+money(p.amount_cents)+'</td></tr>').join('')+'</table>':'<p class="small">Every Square payout in range matches a bank deposit'+(rc.payouts.n?'.':', once payouts are synced.')+'</p>')
@@ -2438,7 +2478,7 @@ document.addEventListener('click',async e=>{ const b=e.target.closest('button[da
   if(e.target.id==='reloadbook'){ if(!confirm('Replace every price with the list in the worker code? Prices you changed by hand here will be overwritten. Each change is logged.')) return; e.target.disabled=true; const r=await (await fetch('/api/pricing/reload',{method:'POST'})).json(); e.target.disabled=false; $('#reviewmsg').textContent=r.ok?('Loaded. '+r.changed+' price'+(r.changed===1?'':'s')+' changed.'):(r.error||'Failed'); loadPricing(); return; }
   if(e.target.id==='runreview'||e.target.id==='rr2'){ e.target.disabled=true; const r=await (await fetch('/api/pricing/analyze',{method:'POST'})).json(); e.target.disabled=false; $('#reviewmsg').textContent=r.ok?('Checked '+r.checked+' thing'+(r.checked===1?'':'s')+', '+r.created+' new suggestion'+(r.created===1?'':'s')+'.'):(r.error||'Failed'); loadPricing(); } });
 document.addEventListener('keydown',async e=>{ const i=e.target.closest('#pricelist input[data-t]'); if(!i||e.key!=='Enter') return; const c=Math.round(parseFloat(i.value)*100); if(!(c>=0)) return; i.disabled=true; const r=await (await fetch('/api/pricing/book',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:JSON.parse(i.dataset.t),cents:c,note:'edited on the money page'})})).json(); if(!r.ok) alert(r.error||'Failed'); loadPricing(); });
-$('#w-save').onclick=async()=>{ const body={cash_balance_cents:Math.round((+$('#w-cash').value||0)*100),cash_as_of:new Date().toISOString().slice(0,10),reserve_months:+$('#w-reserve').value||1,monthly_fixed_costs_cents:Math.round((+$('#w-fixed').value||0)*100)}; await fetch('/api/money/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); load(); };
+$('#w-save').onclick=async()=>{ const body={cash_balance_cents:Math.round((+$('#w-cash').value||0)*100),cash_as_of:new Date().toISOString().slice(0,10),reserve_months:+$('#w-reserve').value||1,monthly_fixed_costs_cents:Math.round((+$('#w-fixed').value||0)*100),rent_monthly_cents:Math.round((+$('#w-rent').value||0)*100),rent_from:$('#w-rentfrom').value||null}; $('#w-msg').textContent='Saved.'; setTimeout(()=>{ $('#w-msg').textContent=''; },3000); await fetch('/api/money/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); load(); };
 $('#unitsave').onclick=async()=>{ const unit={}; document.querySelectorAll('input[data-unit]').forEach(i=>unit[i.dataset.unit]=+i.value); await fetch('/api/money/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit})}); $('#unitmsg').textContent='Saved.'; load(); };
 $('#sync').onclick=async()=>{ $('#sync').disabled=true; $('#sync').textContent='Working…'; const r=await fetch('/api/sync?days=30',{method:'POST'}); const j=await r.json(); $('#sync').disabled=false; $('#sync').textContent='Sync Square'; if(j.payout_error) alert('Payments synced, but payouts could not be read: '+j.payout_error+'\\n\\nIn Square Developer, give the app the PAYOUTS_READ permission and create a new access token.'); load(); };
 function parseCsv(text){ const rows=[]; let row=[],field='',q=false; for(let i=0;i<text.length;i++){ const c=text[i]; if(q){ if(c==='"'){ if(text[i+1]==='"'){field+='"';i++;} else q=false; } else field+=c; } else if(c==='"') q=true; else if(c===','){ row.push(field); field=''; } else if(c==='\\n'||c==='\\r'){ if(c==='\\r'&&text[i+1]==='\\n') i++; row.push(field); rows.push(row); row=[]; field=''; } else field+=c; } if(field||row.length){ row.push(field); rows.push(row);} return rows.filter(r=>r.some(x=>x&&x.trim())); }
@@ -2860,7 +2900,7 @@ function customQuote(book, spec) {
   const work = unit * qty;
   return { custom: true, product: { key: "custom", name: description }, material: { key: "custom", name: "" }, service: { key: "custom", name: "Custom work", setup_cents: 0 }, inches: 0, qty, rush: false, sides: null, prints: 1, taxable, art, text: "", art_ref: "", flat_text: false,
     work_unit_cents: unit, work_unit_after_cents: unit, discount_pct: 0, discount_cents: 0, blank_unit_cents: 0, handling_unit_cents: 0, work_cents: work, blank_cents: 0, handling_cents: 0, rush_cents: 0, setup_cents: 0, minimum_top_up_cents: 0, subtotal_cents: work, next_break: null,
-    summary: `${qty} × custom: ${description}${taxable ? " (we supply the item)" : ""}` };
+    summary: `${qty} × custom: ${description}${taxable ? " (we supply the item)" : ""}`, did: cleanDid(c.did) };
 }
 // The PIN says who took the sale. The named person is tried first; if it isn't their PIN, any active employee whose
 // PIN it is takes the sale (Hugh, Oct 5: whoever served the customer types their own PIN, whoever is signed in).
@@ -2884,7 +2924,7 @@ function customLinesQuote(book, c) {
   const description = lines.map((l) => `${l.qty} × ${l.name}`).join(", ").slice(0, 200);
   return { custom: true, lines, product: { key: "custom", name: description }, material: { key: "custom", name: "" }, service: { key: "custom", name: "Custom work", setup_cents: setup }, inches: 0, qty, rush: false, sides: null, prints: 1, taxable, art: c.no_logo ? "text" : "logo", text: "", art_ref: "", flat_text: false,
     work_unit_cents: items, work_unit_after_cents: items, discount_pct: 0, discount_cents: 0, blank_unit_cents: 0, handling_unit_cents: 0, work_cents: items, blank_cents: 0, handling_cents: 0, rush_cents: 0, setup_cents: setup, minimum_top_up_cents: 0, subtotal_cents: items + setup, next_break: null,
-    summary: `custom: ${description}${setup ? ", logo digitizing and setup" : ""}${taxable ? " (we supply the item)" : ""}` };
+    summary: `custom: ${description}${setup ? ", logo digitizing and setup" : ""}${taxable ? " (we supply the item)" : ""}`, did: cleanDid(c.did) };
 }
 async function verifyStaff(env, name, pin) {
   name = String(name || "").trim(); pin = String(pin || "").trim();
@@ -3125,7 +3165,7 @@ async function orderCheckout(request, env, cors) {
     linkOk = res.ok && !!data.payment_link;
     if (!linkOk) console.error("Square error", res.status, JSON.stringify(data).slice(0, 800));
   }
-  const spec = { product: q.product.key, material: q.material.key, service: q.service.key, inches: q.inches, qty: q.qty, rush: q.rush, sides: q.sides, prints: q.prints, art: q.art, text: q.text || undefined, art_ref: q.art_ref || undefined, summary: q.summary, work_unit_cents: q.work_unit_cents, work_unit_after_cents: q.work_unit_after_cents, discount_pct: q.discount_pct, blank_unit_cents: q.blank_unit_cents, handling_unit_cents: q.handling_unit_cents, setup_cents: q.setup_cents, rush_cents: q.rush_cents, minimum_top_up_cents: q.minimum_top_up_cents, subtotal_cents: q.subtotal_cents, tax_cents: tax, book_version: book.version, book_updated_at: book.updated_at || null };
+  const spec = { product: q.product.key, material: q.material.key, service: q.service.key, inches: q.inches, qty: q.qty, rush: q.rush, sides: q.sides, prints: q.prints, art: q.art, text: q.text || undefined, art_ref: q.art_ref || undefined, summary: q.summary, did: q.did || undefined, work_unit_cents: q.work_unit_cents, work_unit_after_cents: q.work_unit_after_cents, discount_pct: q.discount_pct, blank_unit_cents: q.blank_unit_cents, handling_unit_cents: q.handling_unit_cents, setup_cents: q.setup_cents, rush_cents: q.rush_cents, minimum_top_up_cents: q.minimum_top_up_cents, subtotal_cents: q.subtotal_cents, tax_cents: tax, book_version: book.version, book_updated_at: book.updated_at || null };
   if (env.DB) {
     let assetId = null;
     if (logo) { const ins = await env.DB.prepare(`INSERT INTO order_assets (ref, created_at, name, type, bytes, data) VALUES (?,?,?,?,?,?)`).bind(ref, now, logo.name, logo.type, Math.round(logo.data.length * 0.75), logo.data).run(); assetId = ins.meta && ins.meta.last_row_id; }
@@ -4066,9 +4106,9 @@ async function customerHistory(env, c) {
     const paid = o.status === "paid" || o.status === "refunded";
     out.push({ at: o.created_at, ref: o.ref, kind: o.status === "quote" ? "Quote request" : o.taken_by ? "At the counter" : "Online", what: sp.summary || (o.cups ? o.cups + " logo cups" : ""), notes: String(o.notes || "").slice(0, 120), art: sp.art || null, logo: !!o.logo_asset_id, total_cents: paid ? Math.max(0, (o.paid_cents || 0) - (o.refunded_cents || 0) - (o.tip_cents || 0)) : o.status === "quote" ? 0 : (o.total_cents || 0), status: o.completed_at ? "done" : o.status }); // a quote's price-list amount stays off the iPad screen
   }
-  for (const j of await q(`SELECT created_at, phone, email, product, qty, amount_cents, note, status FROM jobs WHERE status != 'cancelled' AND (ref IS NULL OR ref = '') ORDER BY created_at DESC LIMIT 3000`)) {
+  for (const j of await q(`SELECT created_at, phone, email, product, qty, amount_cents, note, did, status FROM jobs WHERE status != 'cancelled' AND (ref IS NULL OR ref = '') ORDER BY created_at DESC LIMIT 3000`)) {
     if (!mine(j.email, j.phone)) continue;
-    out.push({ at: j.created_at, ref: null, kind: "Walk-in", what: ((j.qty || 1) > 1 ? j.qty + " × " : "") + (names[j.product] || j.product || "Job"), notes: String(j.note || "").slice(0, 120), total_cents: j.amount_cents || 0, status: j.status === "done" ? "done" : "queued" });
+    out.push({ at: j.created_at, ref: null, kind: "Walk-in", what: ((j.qty || 1) > 1 ? j.qty + " × " : "") + (names[j.product] || j.product || "Job") + (j.did ? ": " + j.did : ""), notes: String(j.note || "").slice(0, 120), total_cents: j.amount_cents || 0, status: j.status === "done" ? "done" : "queued" });
   }
   for (const i of await q(`SELECT created_at, ref, email, phone, fields FROM inquiries ORDER BY created_at DESC LIMIT 3000`)) {
     if (!mine(i.email, i.phone)) continue;
