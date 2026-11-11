@@ -1,0 +1,7 @@
+# GitHub Pages builds hdlaser.net with Jekyll, which publishes every Markdown file as a page
+# (CLAUDE.md would be served as /CLAUDE.html) and copies everything else as is.
+# Keep the shop's internal notes and the Cloudflare Worker code off the website.
+exclude:
+  - CLAUDE.md
+  - HANDOFF.md
+  - worker

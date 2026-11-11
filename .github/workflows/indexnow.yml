@@ -1,0 +1,29 @@
+name: Tell Bing about changed pages
+# IndexNow: Bing (and through it Yahoo, DuckDuckGo, Copilot and ChatGPT search), Yandex, Seznam, Naver, Yep.
+on:
+  push:
+    branches: [main]
+    paths: ['index.html', '*/index.html', 'sitemap.xml', '*.txt']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: indexnow
+  cancel-in-progress: false
+jobs:
+  indexnow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Give GitHub Pages time to publish
+        if: github.event_name == 'push'
+        run: sleep 120
+      - name: Send the changed public pages to IndexNow
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          ALL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: python3 .github/indexnow.py
