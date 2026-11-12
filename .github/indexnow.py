@@ -34,19 +34,21 @@ else:
     if changed is None or any(re.fullmatch(KEY_RE, f) for f in changed):
         urls = current  # first run with a new key: send every page once
     else:
-        pages = set()
+        pages, moved = set(), []
         for f in changed:
             if f == "index.html":
                 pages.add(f"https://{HOST}/")
             elif f.endswith("/index.html"):
                 pages.add(f"https://{HOST}/{f[:-len('index.html')]}")
+            elif f.endswith(".html") and os.path.isfile(f) and 'http-equiv="refresh"' in open(f, encoding="utf-8").read():
+                moved.append(f"https://{HOST}/{f[:-len('.html')]}")  # an old address that now forwards (wall-print.html serves /wall-print)
         if "sitemap.xml" in changed:
             try:
                 old = sitemap_urls(git("show", f"{before}:sitemap.xml"))
             except subprocess.CalledProcessError:
                 old = []
             pages |= set(current) - set(old)
-        urls = [u for u in current if u in pages]  # only pages in the sitemap; private pages never go out
+        urls = [u for u in current if u in pages] + sorted(moved)  # sitemap pages only, plus forwarded old addresses; private pages never go out
 
 if not urls:
     print("No public page changed, nothing to send.")

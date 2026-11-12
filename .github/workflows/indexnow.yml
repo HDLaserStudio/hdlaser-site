@@ -3,7 +3,7 @@ name: Tell Bing about changed pages
 on:
   push:
     branches: [main]
-    paths: ['index.html', '*/index.html', 'sitemap.xml', '*.txt']
+    paths: ['*.html', '*/*.html', 'sitemap.xml', '*.txt']
   workflow_dispatch:
 permissions:
   contents: read
