@@ -105,12 +105,7 @@ button[type=submit]:hover{background:var(--redd)}
     <div class="summary" id="summary" hidden>
       <div class="sum-head"><h2>Your order</h2><a href="/grounds-for-profit/#calc">Edit order</a></div>
       <ul id="sum-lines"></ul>
-      <dl class="sum-money">
-        <div><dt>Cups</dt><dd id="sum-cups"></dd></div>
-        <div><dt>One-time setup fee <small>(first order only)</small></dt><dd>$50</dd></div>
-        <div class="tot"><dt>Total</dt><dd id="sum-total"></dd></div>
-      </dl>
-      <p class="note">We&#8217;ll confirm the exact total on your proof. Just tell us how to reach you below.</p>
+      <p class="note">We&#8217;ll email you a price and a free proof. Just tell us how to reach you below.</p>
     </div>
 
     <fieldset id="fs-for">
@@ -203,16 +198,14 @@ button[type=submit]:hover{background:var(--redd)}
   // An order built with the calculator on the Grounds for Profit page: show it, skip the questions it already answered
   if (qs.get('order')) {
     var lines = qs.get('order').split(';').map(function (s) { var f = s.split('|'); return { size: f[0], finish: f[1], lid: f[2], color: f[3], qty: +f[4] || 0 }; });
-    var total = Number(qs.get('total')) || 0, count = lines.reduce(function (a, l) { return a + l.qty; }, 0);
+    var count = lines.reduce(function (a, l) { return a + l.qty; }, 0);
     var text = function (l) { return l.qty + ' x ' + l.size + ' oz ' + (l.finish === 'printed' ? 'UV printed' : 'laser engraved') + ', ' + l.color + ', ' + (l.lid === 'black' ? 'black' : 'matching') + ' lid'; };
-    var money = function (n) { return '$' + n.toLocaleString('en-US'); };
     // visible summary
     var ul = document.getElementById('sum-lines');
     lines.forEach(function (l) { var li = document.createElement('li'); li.innerHTML = '<span>' + text(l).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span><span>' + l.qty + '</span>'; ul.appendChild(li); });
-    document.getElementById('sum-total').textContent = money(total);
     document.getElementById('summary').hidden = false;
     // values that still get emailed, without asking again
-    document.getElementById('order-field').value = lines.map(text).join('; ') + ' | ' + count + ' cups | est. ' + money(total) + ' incl. setup';
+    document.getElementById('order-field').value = lines.map(text).join('; ') + ' | ' + count + ' cups';
     var sizes = lines.map(function (l) { return l.size; }).filter(function (v, i, a) { return a.indexOf(v) === i; });
     document.getElementById('material').value = sizes.length === 1 ? sizes[0] + ' oz cup' : 'Other / not sure';
     document.getElementById('qty').value = count;
@@ -222,12 +215,10 @@ button[type=submit]:hover{background:var(--redd)}
   }
 
   var form = document.querySelector('form'), btn = document.getElementById('submit-btn'), errBox = document.getElementById('form-err');
-  var orderMode = !!qs.get('order'), payOnline = orderMode && !!CFG.CHECKOUT_ENDPOINT;
+  var orderMode = !!qs.get('order'), payOnline = false; // every order is quoted, no online checkout (Hugh, Nov 13); was: orderMode && !!CFG.CHECKOUT_ENDPOINT
   var ref = 'HD-' + Date.now().toString(36).toUpperCase();
   document.getElementById('ref-field').value = ref;
   if (orderMode) {
-    var cupsSub = Number(qs.get('cups')) || 0;
-    document.getElementById('sum-cups').textContent = '$' + cupsSub.toLocaleString('en-US');
     document.getElementById('side-h1').textContent = payOnline ? 'Last step before your proof.' : 'Almost there.';
     document.getElementById('side-p').textContent = payOnline
       ? 'Tell us how to reach you, then pay securely through Square. Your digital proof follows within 1–2 business days, and nothing is made until you approve it.'

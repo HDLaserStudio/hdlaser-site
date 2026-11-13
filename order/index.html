@@ -161,8 +161,8 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   <section class="step" id="s-product">
     <h2><span class="n">1</span>Are you bringing your own item?</h2>
     <div class="two" id="owntog">
-      <button type="button" class="svc" data-own="0"><b>No, use one of yours</b><span>Tumblers, boards, glasses and more. Item price plus the work, plus sales tax.</span></button>
-      <button type="button" class="svc" data-own="1"><b>Yes, it&#8217;s my own</b><span>We price the work only. No sales tax. $3 handling per piece.</span></button>
+      <button type="button" class="svc" data-own="0"><b>No, use one of yours</b><span>Tumblers, cups, bottles, cutting boards and more.</span></button>
+      <button type="button" class="svc" data-own="1"><b>Yes, it&#8217;s my own</b><span>Bring it in and we engrave or print it.</span></button>
     </div>
     <p class="sub" id="prodsub" style="margin-top:16px">The logo shown is ours. Yours takes its place in step 5.</p>
     <div class="tiles" id="products"></div>
@@ -299,7 +299,7 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   </div>
 </aside>
 </main>
-<div class="bar" id="bar"><div><div style="font-size:12px;color:#9AA3AD">Your total</div><b id="bartot">$0</b></div><a href="#s-confirm">Review &amp; pay</a></div>
+<div class="bar" id="bar"><div><div style="font-size:12px;color:#9AA3AD">Your total</div><b id="bartot"></b></div><a href="#s-confirm">Review &amp; pay</a></div>
 
 <script src="/assets/site-config.js?v=7"></script>
 <script src="/assets/app-nav.js?v=1"></script>
@@ -681,7 +681,11 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
   // ---- boot
   function boot(b){ BOOK = b.book; TAX = b.tax_rate || 0; TAX_OWN = !!b.tax_own_items; $('#rushpct').textContent = BOOK.rush_pct;
     $('#heard').addEventListener('change', function(){ var o = $('#heard').value === 'Other'; $('#heardother').style.display = o ? 'block' : 'none'; if (o) $('#heardother').focus(); }); // Other: type where (ChatGPT, Reddit…)
-    QUOTE = !HUB && BOOK.show_prices === false; if (QUOTE) quoteMode(); else $('h1').textContent = 'Build your order.'; // the shop iPad, or prices switched back on
+    QUOTE = !HUB && BOOK.show_prices === false; if (QUOTE) quoteMode(); else { $('h1').textContent = 'Build your order.'; // the shop iPad, or prices switched back on
+      // the money words live only here, so the page itself (what crawlers and AI tools read) carries no prices (Hugh, Nov 13: "delete all of pricing")
+      var o0 = document.querySelector('[data-own="0"] span'), o1 = document.querySelector('[data-own="1"] span'), hc = BOOK.own_item_handling_cents || 0;
+      if (o0) o0.textContent = 'Tumblers, boards, glasses and more. Item price plus the work, plus sales tax.';
+      if (o1) o1.textContent = 'We price the work only. No sales tax.' + (hc ? ' ' + money(hc) + ' handling per piece.' : ''); }
     var pre = qs.get('product'); if (pre && BOOK.products.some(function(p){return p.key===pre;})) { S.product = pre; var pp = BOOK.products.filter(function(p){return p.key===pre;})[0]; S.material = pp.material; S.own = pre==='own' || pre==='garment'; var pm = qs.get('material'); if (pre==='own' && pm && BOOK.materials.some(function(m){return m.key===pm;})) S.material = pm; }
     var svc = qs.get('service'); if (BOOK.services.some(function(x){return x.key===svc;})) S.service = svc;
     var pin = parseFloat(qs.get('inches')); if (pin >= 0.5 && pin <= BOOK.max_inches) S.inches = Math.round(pin*2)/2;
