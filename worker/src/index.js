@@ -29,7 +29,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-11-08 v72"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-11-17 v73"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -1218,20 +1218,76 @@ const CLOSE_STEPS = [
   "Clock out on this page",
   "Lock the front door",
 ];
-// Time value per product. Minutes = setup + each × quantity. Override with PRODUCT_MINUTES (JSON array) in Cloudflare.
+// Walk-in items for the staff portal's Log a walk-in, in groups, with planning minutes (setup + each × quantity).
+// Hugh, Nov 17: more specific items. Entries with hide: true are the older, broader names, kept so walk-ins
+// logged with them keep their names; they are not offered any more. Override with PRODUCT_MINUTES (JSON array) in Cloudflare.
 const PRODUCTS = [
-  { key: "cup_engraved", name: "Logo cups, laser engraved", setup: 20, each: 2.5 },
-  { key: "cup_printed", name: "Logo cups, UV printed", setup: 30, each: 3 },
-  { key: "tumbler", name: "Tumbler or bottle engraving", setup: 10, each: 12 },
-  { key: "uv_small", name: "UV print, small item", setup: 10, each: 8 },
-  { key: "dtf", name: "DTF print on apparel", setup: 15, each: 4 },
-  { key: "cut", name: "Laser cutting", setup: 10, each: 6 },
-  { key: "award", name: "Plaque, award or trophy", setup: 15, each: 25 },
-  { key: "board", name: "Cutting board or wood engraving", setup: 10, each: 20 },
-  { key: "glass", name: "Glassware engraving", setup: 10, each: 10 },
-  { key: "tags", name: "Metal tags or plates", setup: 10, each: 3 },
-  { key: "cut", name: "Laser cut or layered art", setup: 20, each: 45 },
-  { key: "other", name: "Other or custom", setup: 15, each: 20 },
+  { group: "Drinkware", key: "tumbler_brand", name: "Tumbler (YETI, Stanley, Hydro Flask)", setup: 10, each: 12 },
+  { group: "Drinkware", key: "water_bottle", name: "Water bottle (Hydrojug, Owala)", setup: 10, each: 12 },
+  { group: "Drinkware", key: "cup_engraved", name: "Logo cups, laser engraved", setup: 20, each: 2.5 },
+  { group: "Drinkware", key: "cup_printed", name: "Logo cups, UV printed", setup: 30, each: 3 },
+  { group: "Drinkware", key: "wine_glass", name: "Wine glass", setup: 10, each: 8 },
+  { group: "Drinkware", key: "pint_glass", name: "Pint or beer glass", setup: 10, each: 8 },
+  { group: "Drinkware", key: "rocks_glass", name: "Whiskey or rocks glass", setup: 10, each: 8 },
+  { group: "Drinkware", key: "flute", name: "Champagne flute", setup: 10, each: 8 },
+  { group: "Drinkware", key: "shot_glass", name: "Shot glass", setup: 10, each: 5 },
+  { group: "Drinkware", key: "mug", name: "Coffee or camp mug", setup: 10, each: 10 },
+  { group: "Drinkware", key: "shaker", name: "Protein shaker bottle", setup: 10, each: 10 },
+  { group: "Drinkware", key: "flask", name: "Flask", setup: 10, each: 8 },
+  { group: "Drinkware", key: "bottle_liquor", name: "Wine, champagne or liquor bottle", setup: 10, each: 15 },
+  { group: "Wood & home", key: "board_cutting", name: "Cutting or charcuterie board", setup: 10, each: 20 },
+  { group: "Wood & home", key: "coaster", name: "Coaster", setup: 10, each: 4 },
+  { group: "Wood & home", key: "frame", name: "Picture frame", setup: 10, each: 12 },
+  { group: "Wood & home", key: "sign_wood", name: "Wood sign", setup: 15, each: 30 },
+  { group: "Wood & home", key: "wood_blocks", name: "Wood blocks or wood slice", setup: 10, each: 15 },
+  { group: "Wood & home", key: "box", name: "Keepsake or jewelry box", setup: 10, each: 12 },
+  { group: "Wood & home", key: "watch_box", name: "Watch box, humidor or cigar box", setup: 10, each: 15 },
+  { group: "Wood & home", key: "game_board", name: "Cribbage or game board", setup: 10, each: 20 },
+  { group: "Wood & home", key: "pizza_peel", name: "Pizza peel or serving paddle", setup: 10, each: 20 },
+  { group: "Wood & home", key: "ornament", name: "Christmas ornament", setup: 10, each: 6 },
+  { group: "Gifts & personal", key: "pen", name: "Pen (ballpoint or fountain)", setup: 5, each: 4 },
+  { group: "Gifts & personal", key: "knife", name: "Knife, pocket knife or multitool", setup: 10, each: 6 },
+  { group: "Gifts & personal", key: "keychain", name: "Keychain", setup: 5, each: 3 },
+  { group: "Gifts & personal", key: "jewelry", name: "Jewelry (bracelet, necklace, ring)", setup: 10, each: 8 },
+  { group: "Gifts & personal", key: "pet_tag", name: "Pet tag or dog tag", setup: 5, each: 3 },
+  { group: "Gifts & personal", key: "tech", name: "Laptop, phone case, AirPods or headphones", setup: 10, each: 12 },
+  { group: "Gifts & personal", key: "keyboard", name: "Keyboard case or other electronics", setup: 15, each: 20 },
+  { group: "Gifts & personal", key: "shoes", name: "Shoes (sole or upper)", setup: 15, each: 15 },
+  { group: "Leather", key: "leather_wallet", name: "Leather wallet or card holder", setup: 10, each: 8 },
+  { group: "Leather", key: "leather_portfolio", name: "Leather portfolio, padfolio or journal", setup: 10, each: 12 },
+  { group: "Leather", key: "leather_small", name: "Other leather (pen sleeve, bag, belt)", setup: 10, each: 10 },
+  { group: "Leather", key: "patch_hat", name: "Leather patch on a hat", setup: 15, each: 6 },
+  { group: "Sports & tools", key: "golf_club", name: "Golf club", setup: 10, each: 8 },
+  { group: "Sports & tools", key: "golf_ball", name: "Golf balls or ball marker", setup: 10, each: 3 },
+  { group: "Sports & tools", key: "whistle", name: "Whistle", setup: 10, each: 5 },
+  { group: "Sports & tools", key: "tool", name: "Tool (hammer, wrench, axe)", setup: 10, each: 10 },
+  { group: "Awards & business", key: "plaque", name: "Plaque with metal plate", setup: 15, each: 25 },
+  { group: "Awards & business", key: "award_glass", name: "Glass or acrylic award", setup: 15, each: 20 },
+  { group: "Awards & business", key: "trophy_plate", name: "Trophy or award plate", setup: 10, each: 6 },
+  { group: "Awards & business", key: "metal_plate", name: "Metal plate (brass, copper, aluminum)", setup: 10, each: 8 },
+  { group: "Awards & business", key: "nameplate", name: "Door or desk nameplate", setup: 10, each: 8 },
+  { group: "Awards & business", key: "name_badge", name: "Name badge", setup: 10, each: 3 },
+  { group: "Awards & business", key: "biz_card", name: "Metal business cards", setup: 15, each: 1 },
+  { group: "Awards & business", key: "asset_tag", name: "Equipment or asset tags", setup: 10, each: 2 },
+  { group: "Awards & business", key: "sign_acrylic", name: "Acrylic sign", setup: 15, each: 25 },
+  { group: "Awards & business", key: "sign_led", name: "Light-up acrylic sign (LED base)", setup: 15, each: 20 },
+  { group: "Shirts & hats", key: "dtf_tee", name: "DTF print, T-shirt", setup: 10, each: 4 },
+  { group: "Shirts & hats", key: "dtf_hoodie", name: "DTF print, hoodie or sweatshirt", setup: 10, each: 5 },
+  { group: "Shirts & hats", key: "dtf_hat", name: "DTF print, hat or tote bag", setup: 10, each: 5 },
+  { group: "UV printing", key: "uv_drinkware", name: "UV print, tumbler or bottle", setup: 10, each: 10 },
+  { group: "UV printing", key: "uv_phone", name: "UV print, phone case or small item", setup: 10, each: 6 },
+  { group: "UV printing", key: "uv_sign", name: "UV print, sign or panel", setup: 15, each: 20 },
+  { group: "Cutting", key: "cut", name: "Laser cutting (shapes, letters)", setup: 10, each: 6 },
+  { group: "Cutting", key: "cut_art", name: "Laser cut or layered art", setup: 20, each: 45 },
+  { group: "Other", key: "other", name: "Other or custom", setup: 15, each: 20 },
+  // older, broader names
+  { key: "tumbler", name: "Tumbler or bottle engraving", setup: 10, each: 12, hide: true },
+  { key: "uv_small", name: "UV print, small item", setup: 10, each: 8, hide: true },
+  { key: "dtf", name: "DTF print on apparel", setup: 15, each: 4, hide: true },
+  { key: "award", name: "Plaque, award or trophy", setup: 15, each: 25, hide: true },
+  { key: "board", name: "Cutting board or wood engraving", setup: 10, each: 20, hide: true },
+  { key: "glass", name: "Glassware engraving", setup: 10, each: 10, hide: true },
+  { key: "tags", name: "Metal tags or plates", setup: 10, each: 3, hide: true },
 ];
 const WALKIN_MINUTES = 30;       // planning size of a typical same-day walk-in job
 const UTILIZATION = 0.7;         // share of a shift that is real machine time; the rest is customers, cleanup, breaks
@@ -1242,7 +1298,7 @@ function products(env) {
   return PRODUCTS;
 }
 function productMinutes(env, key, qty) {
-  const p = products(env).find((x) => x.key === key) || PRODUCTS[PRODUCTS.length - 1];
+  const p = products(env).find((x) => x.key === key) || PRODUCTS.find((x) => x.key === "other");
   return Math.round(p.setup + p.each * Math.max(1, qty || 1));
 }
 // Local (Pacific) time parts for a Date, so shifts and opening times follow the shop clock, not UTC.

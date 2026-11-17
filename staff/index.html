@@ -227,8 +227,14 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;p
   // ---- walk-in items: one row per item (product, quantity, price each), optional logo setup, running total
   var PRODS=[], SETUP=5000;
   fetch(BASE+'/pricing',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ var e=d&&d.book&&d.book.services.filter(function(x){return x.key==='engrave';})[0]; if(e&&e.setup_cents>0) SETUP=e.setup_cents; $('#jsetupamt').textContent='('+money2(SETUP)+', once)'; total(); }).catch(function(){});
+  // the item list comes in groups (Drinkware, Leather, Sports & tools...); older broad names are hidden
+  function prodOptions(){ var html='', grp=null, open=false;
+    PRODS.filter(function(p){ return !p.hide; }).forEach(function(p){ var g=p.group||'';
+      if(g!==grp){ if(open) html+='</optgroup>'; open=!!g; if(g) html+='<optgroup label="'+esc(g)+'">'; grp=g; }
+      html+='<option value="'+esc(p.key)+'" data-setup="'+p.setup+'" data-each="'+p.each+'">'+esc(p.name)+'</option>'; });
+    return html+(open?'</optgroup>':''); }
   function addLine(){ var d=document.createElement('div'); d.className='row jl';
-    d.innerHTML='<label>Product<select class="jp">'+PRODS.map(function(p){ return '<option value="'+esc(p.key)+'" data-setup="'+p.setup+'" data-each="'+p.each+'">'+esc(p.name)+'</option>'; }).join('')+'</select></label><label style="flex:0 1 90px">Qty<input class="jq" type="number" min="1" value="1" inputmode="numeric"></label><label style="flex:0 1 130px">Price each $<input class="ju" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0"></label><span class="jlt">$0.00</span><button type="button" class="jrm" title="Remove">&#10005;</button>';
+    d.innerHTML='<label>Product<select class="jp">'+prodOptions()+'</select></label><label style="flex:0 1 90px">Qty<input class="jq" type="number" min="1" value="1" inputmode="numeric"></label><label style="flex:0 1 130px">Price each $<input class="ju" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0"></label><span class="jlt">$0.00</span><button type="button" class="jrm" title="Remove">&#10005;</button>';
     $('#jlines').appendChild(d); total(); }
   function lines(){ return [].slice.call(document.querySelectorAll('#jlines .jl')).map(function(d){ var sel=d.querySelector('.jp'), o=sel.selectedOptions[0]; var q=Math.max(1,parseInt(d.querySelector('.jq').value,10)||1), u=Math.round((parseFloat(d.querySelector('.ju').value)||0)*100);
     return { el:d, key:sel.value, name:o?o.textContent:'Item', qty:q, unit:u, line:q*u, mins:o?Math.round(+o.dataset.setup+(+o.dataset.each)*q):0 }; }); }
