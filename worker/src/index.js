@@ -29,7 +29,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-11-17 v74"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-11-18 v75"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -75,16 +75,32 @@ CREATE TABLE IF NOT EXISTS bank_rules (id INTEGER PRIMARY KEY AUTOINCREMENT, pat
 CREATE TABLE IF NOT EXISTS payouts (payout_id TEXT PRIMARY KEY, created_at TEXT, arrival_date TEXT, status TEXT, amount_cents INTEGER DEFAULT 0, location_id TEXT, type TEXT, matched_txn_id INTEGER);
 CREATE TABLE IF NOT EXISTS plaid_items (item_id TEXT PRIMARY KEY, access_token TEXT NOT NULL, institution TEXT, accounts TEXT, balances TEXT, cursor TEXT, status TEXT, last_error TEXT, synced_at TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS coffee_orders (ref TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, name TEXT, phone TEXT, email TEXT, items TEXT, summary TEXT, total_cents INTEGER, pickup TEXT, note TEXT, text_consent INTEGER DEFAULT 0, square_order_id TEXT, square_payment_id TEXT, paid_at TEXT, paid_cents INTEGER DEFAULT 0, tip_cents INTEGER DEFAULT 0, notified_at TEXT, ready_at TEXT, picked_up_at TEXT);
-CREATE INDEX IF NOT EXISTS coffee_created ON coffee_orders(created_at);`;
+CREATE INDEX IF NOT EXISTS coffee_created ON coffee_orders(created_at);
+CREATE INDEX IF NOT EXISTS orders_square_order ON orders(square_order_id);
+CREATE INDEX IF NOT EXISTS orders_status_paid ON orders(status, paid_at);
+CREATE INDEX IF NOT EXISTS orders_created ON orders(created_at);
+CREATE INDEX IF NOT EXISTS coffee_square_order ON coffee_orders(square_order_id);
+CREATE INDEX IF NOT EXISTS payments_ref ON payments(ref);
+CREATE INDEX IF NOT EXISTS payments_order ON payments(square_order_id);
+CREATE INDEX IF NOT EXISTS refunds_payment ON refunds(payment_id);
+CREATE INDEX IF NOT EXISTS jobs_done_by ON jobs(done_by, done_at);
+CREATE INDEX IF NOT EXISTS jobs_staff_created ON jobs(staff_id, created_at);
+CREATE INDEX IF NOT EXISTS payouts_unmatched ON payouts(matched_txn_id, status);`;
+// v75 (Nov 18): D1's free plan allows 5 million row reads a day and the shop hit it; these indexes turn whole-table reads into lookups.
 // Columns added after the first release. Each ALTER is tried once and ignored if the column already exists.
 const ALTERS = ["ALTER TABLE jobs ADD COLUMN did TEXT", "ALTER TABLE orders ADD COLUMN ship_to TEXT", "ALTER TABLE orders ADD COLUMN done_on_pay INTEGER", "ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT", "ALTER TABLE jobs ADD COLUMN email TEXT"];
 
 let migrated = false;
+// A fingerprint of the schema: a new copy of the worker runs its CREATE and ALTER statements only once per schema change,
+// not every time Cloudflare starts it up (about 70 statements each start; v75, after the daily row-read limit was hit).
+const SCHEMA_HASH = (() => { let h = 5381; const s = SCHEMA + ALTERS.join(";"); for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return "s" + h.toString(36); })();
 async function ensureSchema(env) {
   if (migrated || !env.DB) return;
+  try { const r = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'schema_hash'`).first(); if (r && r.v === SCHEMA_HASH) { migrated = true; return; } } catch (e) { /* first run: no meta table yet */ }
   const stmts = SCHEMA.split(";").map((s) => s.trim()).filter(Boolean);
   await env.DB.batch(stmts.map((s) => env.DB.prepare(s)));
   for (const a of ALTERS) { try { await env.DB.prepare(a).run(); } catch (e) { /* already applied */ } }
+  await env.DB.prepare(`INSERT OR REPLACE INTO meta (k, v) VALUES ('schema_hash', ?)`).bind(SCHEMA_HASH).run();
   migrated = true;
 }
 
@@ -253,7 +269,8 @@ export default {
       if (d.getUTCMinutes() >= 10) return;                                 // the :15 crons only add no-show checks
       await googleReviews(env, false).catch((e) => console.error("reviews", e)); // refreshes itself at most once a day
       await socialTick(env, false).catch((e) => console.error("social", e));       // the AI host's two videos a day (off until switched on)
-      await syncSquare(env, 3);
+      // Square's webhook brings payments in within seconds; this is the backstop: the last 6 hours every hour, 3 days once a night (11:00 UTC, 3 AM Pacific)
+      await syncSquare(env, d.getUTCHours() === 11 ? 3 : 0.25);
       await dailySummary(env, false).catch((e) => console.error("daily summary", e)); // from 6 PM: the day in one email
       if (env.PLAID_CLIENT_ID) await plaidSync(env, null, 12);
       if (d.getUTCDay() === 1 && d.getUTCHours() === 15) { await analyzePricing(env).catch((e) => console.error("pricing review", e)); await sendDigest(env, true); }
@@ -2145,7 +2162,8 @@ async function upsertPayout(env, p) {
     .bind(p.id, p.created_at || null, p.arrival_date || (p.end_time ? String(p.end_time).slice(0, 10) : null), p.status || null, money(p.amount_money), p.location_id || null, p.type || null).run();
 }
 async function reconcile(env) {
-  const payouts = (await env.DB.prepare(`SELECT * FROM payouts WHERE matched_txn_id IS NULL AND status IN ('PAID','SENT') AND amount_cents > 0`).all()).results;
+  const since = new Date(Date.now() - 45 * 86400000).toISOString();
+  const payouts = (await env.DB.prepare(`SELECT * FROM payouts WHERE matched_txn_id IS NULL AND status IN ('PAID','SENT') AND amount_cents > 0 AND created_at >= ?`).bind(since).all()).results;
   let matched = 0;
   for (const p of payouts) {
     const day = (p.arrival_date || p.created_at || "").slice(0, 10); if (!day) continue;
