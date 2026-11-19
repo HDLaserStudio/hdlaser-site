@@ -279,7 +279,19 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
       <label class="check" style="margin-top:12px"><input type="checkbox" id="workdone" checked><span><b>The work is done.</b> Once they pay, it comes off the work queue as done. Untick it if they're paying now and picking up later.</span></label>
       <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
         <button type="button" class="btn red" id="payterm">Charge on the Terminal</button>
-        <span class="note">The customer taps their card on the Square Terminal. Cash or a card by phone? Use the online button below.</span>
+        <span class="note">The customer taps their card on the Square Terminal. A card over the phone? Use the online button below.</span>
+      </div>
+      <div style="margin-top:12px"><button type="button" class="chip" id="payotherbtn">Paid another way: cash, check, Zelle, Venmo</button></div>
+      <div id="payother" hidden style="margin-top:12px;padding:14px;border-radius:12px;background:var(--sel)">
+        <b>How did they pay?</b>
+        <div id="pmlist" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="chip" data-pm="cash">Cash</button><button type="button" class="chip" data-pm="check">Check</button><button type="button" class="chip" data-pm="zelle">Zelle</button><button type="button" class="chip" data-pm="venmo">Venmo</button><button type="button" class="chip" data-pm="cashapp">Cash App</button><button type="button" class="chip" data-pm="other">Other</button>
+        </div>
+        <div class="f" id="pmrefw" hidden style="max-width:300px;margin-top:12px"><label for="pmref" id="pmreflabel">Check number</label><input id="pmref" maxlength="40" autocomplete="off"></div>
+        <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <button type="button" class="btn red" id="payrecord" disabled>Record the payment</button>
+          <span class="note">Only once you have the money: the cash or check in hand, or the Zelle or Venmo payment showing in your app. It goes into Square as a sale.</span>
+        </div>
       </div>
       <div id="termwait" hidden style="margin-top:14px;padding:14px;border-radius:12px;background:var(--sel)"><b id="termmsg">Waiting for the card on the Terminal…</b><div style="margin-top:10px"><button type="button" class="chip" id="termcancel">Cancel on the Terminal</button></div></div>
     </div>
@@ -668,6 +680,31 @@ input[type=text],input[type=email],input[type=tel],input[type=date],textarea,sel
         }, 2000);
       })
       .catch(function(){ termFail('We couldn’t reach the shop’s server. Try again in a minute.'); });
+  };
+  // ---- counter: paid another way (cash, check, Zelle, Venmo, Cash App, other), recorded in Square as a sale (Hugh, Nov 19)
+  var PM = null, PMLABEL = { cash: 'Cash', check: 'Check', zelle: 'Zelle', venmo: 'Venmo', cashapp: 'Cash App', other: 'Other' }, PMBTN = { cash: 'cash', check: 'check', zelle: 'Zelle', venmo: 'Venmo', cashapp: 'Cash App', other: 'other' };
+  var PMREF = { check: 'Check number', zelle: 'Name it came from (optional)', venmo: 'Name or @handle it came from (optional)', cashapp: 'Name or $cashtag it came from (optional)', other: 'What was it? (for example gift card)' };
+  $('#payotherbtn').onclick = function(){ var p = $('#payother'); p.hidden = !p.hidden; $('#payotherbtn').classList.toggle('on', !p.hidden); };
+  $('#pmlist').addEventListener('click', function(e){ var b = e.target.closest('[data-pm]'); if (!b) return; PM = b.dataset.pm;
+    [].forEach.call($('#pmlist').children, function(x){ x.classList.toggle('on', x === b); });
+    $('#pmrefw').hidden = !PMREF[PM]; $('#pmreflabel').textContent = PMREF[PM] || ''; $('#pmref').value = '';
+    $('#payrecord').disabled = false; $('#payrecord').textContent = 'Record ' + PMBTN[PM] + ' payment'; if (PMREF[PM]) $('#pmref').focus(); });
+  $('#payrecord').onclick = function(){
+    var v = checkForm(); if (!v || !PM) return;
+    if (!/^\d{4,8}$/.test($('#staffpin').value)) return fail('Enter your employee PIN first.');
+    if (PM === 'check' && !$('#pmref').value.trim()) { $('#pmref').focus(); return fail('Type the check number, so it can be found later.'); }
+    if (PM === 'other' && !$('#pmref').value.trim()) { $('#pmref').focus(); return fail('Say what they paid with.'); }
+    var amt = money(v.q.subtotal + v.q.tax);
+    if (!confirm('Record ' + amt + ' paid by ' + PMLABEL[PM] + ($('#pmref').value.trim() ? ' (' + $('#pmref').value.trim() + ')' : '') + '?\n\nOnly if you already have the money.')) return;
+    var btn = $('#payrecord'); btn.disabled = true; btn.textContent = 'Recording in Square…';
+    var body = orderBody(v); body.pay = 'other'; body.method = PM; body.method_ref = $('#pmref').value.trim(); body.staff = { name: SERVER(), pin: $('#staffpin').value }; DONEPAY = $('#workdone').checked; body.done_on_pay = DONEPAY;
+    fetch(BASE + '/order/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d && d.ok && d.paid) { if (window.hdTrack) hdTrack('payment_started', d.ref); location.href = '/thanks/?paid=1&kind=custom&counter=1&method=' + encodeURIComponent(PM) + '&ref=' + encodeURIComponent(d.ref) + (S.logo ? '&logo=1' : '') + (DONEPAY ? '&done=1' : ''); return; }
+        btn.disabled = false; btn.textContent = 'Record ' + PMBTN[PM] + ' payment'; fail((d && d.error) || 'Square didn’t record it. Nothing was charged; try again.');
+      })
+      .catch(function(){ btn.disabled = false; btn.textContent = 'Record ' + PMBTN[PM] + ' payment'; fail('We couldn’t reach the shop’s server. Try again in a minute.'); });
   };
   $('#termcancel').onclick = function(){
     if (!TERM) return; $('#termcancel').disabled = true;

@@ -29,7 +29,7 @@
 //   POST /api/digest          send the weekly digest now (Basic auth)
 // Cron (hourly): sync Square; on Mondays at 15:00 UTC also send the digest.
 
-const WORKER_VERSION = "2026-11-18 v75"; // shown on /health and the prices page so we can tell which copy is deployed
+const WORKER_VERSION = "2026-11-19 v76"; // shown on /health and the prices page so we can tell which copy is deployed
 const PRICING = {
   tiers: [[200, 12], [150, 13], [100, 14], [0, 15]], // [min cups, base price per 12 oz engraved cup]
   add16oz: 2,
@@ -88,7 +88,11 @@ CREATE INDEX IF NOT EXISTS jobs_staff_created ON jobs(staff_id, created_at);
 CREATE INDEX IF NOT EXISTS payouts_unmatched ON payouts(matched_txn_id, status);`;
 // v75 (Nov 18): D1's free plan allows 5 million row reads a day and the shop hit it; these indexes turn whole-table reads into lookups.
 // Columns added after the first release. Each ALTER is tried once and ignored if the column already exists.
-const ALTERS = ["ALTER TABLE jobs ADD COLUMN did TEXT", "ALTER TABLE orders ADD COLUMN ship_to TEXT", "ALTER TABLE orders ADD COLUMN done_on_pay INTEGER", "ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT", "ALTER TABLE jobs ADD COLUMN email TEXT"];
+const ALTERS = ["ALTER TABLE jobs ADD COLUMN did TEXT", "ALTER TABLE orders ADD COLUMN ship_to TEXT", "ALTER TABLE orders ADD COLUMN done_on_pay INTEGER", "ALTER TABLE events ADD COLUMN detail TEXT", "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'cups'", "ALTER TABLE orders ADD COLUMN spec TEXT", "ALTER TABLE orders ADD COLUMN needed_by TEXT", "ALTER TABLE orders ADD COLUMN rush INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN taken_by TEXT", "ALTER TABLE orders ADD COLUMN tax_cents INTEGER DEFAULT 0", "ALTER TABLE orders ADD COLUMN attest_initials TEXT", "ALTER TABLE orders ADD COLUMN attest_text TEXT", "ALTER TABLE orders ADD COLUMN attest_at TEXT", "ALTER TABLE orders ADD COLUMN attest_ip TEXT", "ALTER TABLE orders ADD COLUMN attest_ua TEXT", "ALTER TABLE orders ADD COLUMN attest_hash TEXT", "ALTER TABLE orders ADD COLUMN logo_asset_id INTEGER", "ALTER TABLE orders ADD COLUMN taken_by_id INTEGER", "ALTER TABLE orders ADD COLUMN terminal_checkout_id TEXT", "ALTER TABLE staff ADD COLUMN sms_consent_at TEXT", "ALTER TABLE orders ADD COLUMN notified_paid_at TEXT", "ALTER TABLE payments ADD COLUMN team_member_id TEXT", "ALTER TABLE staff ADD COLUMN hourly_rate_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN commission_pct REAL DEFAULT 0", "ALTER TABLE orders ADD COLUMN channel TEXT", "ALTER TABLE orders ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN src TEXT", "ALTER TABLE inquiries ADD COLUMN channel TEXT", "ALTER TABLE inquiries ADD COLUMN heard TEXT", "ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0", "ALTER TABLE staff ADD COLUMN pin_key TEXT", "ALTER TABLE jobs ADD COLUMN email TEXT", "ALTER TABLE orders ADD COLUMN pay_method TEXT"];
+// Paid another way at the counter (v76, Hugh Nov 19: "when someone want to pay with check i need diffrent payment methods"):
+// recorded in Square with the Payments API, cash as source CASH and the rest as EXTERNAL with Square's type, so they sit in
+// Square's sales reports next to card sales, and the webhook and sync handle them like any other payment.
+const PAY_METHODS = { cash: { label: "Cash" }, check: { label: "Check", type: "CHECK" }, zelle: { label: "Zelle", type: "BANK_TRANSFER" }, venmo: { label: "Venmo", type: "SOCIAL" }, cashapp: { label: "Cash App", type: "SQUARE_CASH" }, other: { label: "Other", type: "OTHER" } };
 
 let migrated = false;
 // A fingerprint of the schema: a new copy of the worker runs its CREATE and ALTER statements only once per schema change,
@@ -691,7 +695,8 @@ function squareErr(data) { return (data && data.errors && data.errors[0] && (dat
 
 async function upsertPayment(env, p) {
   const amount = money(p.amount_money), fee = (p.processing_fee || []).reduce((a, f) => a + money(f.amount_money), 0), refunded = money(p.refunded_money);
-  const brand = p.card_details && p.card_details.card && p.card_details.card.card_brand || null;
+  // cash, check, Zelle and the like (recorded at the counter, v76) carry their method where a card carries its brand
+  const brand = p.card_details && p.card_details.card && p.card_details.card.card_brand || (p.source_type === "CASH" ? "Cash" : p.external_details && (p.external_details.source || p.external_details.type)) || null;
   const orderRow = p.order_id ? await env.DB.prepare(`SELECT ref FROM orders WHERE square_order_id = ?`).bind(p.order_id).first() : null;
   const coffeeRow = !orderRow && p.order_id ? await env.DB.prepare(`SELECT ref FROM coffee_orders WHERE square_order_id = ?`).bind(p.order_id).first() : null;
   const ref = orderRow ? orderRow.ref : (coffeeRow ? coffeeRow.ref : null);
@@ -1028,7 +1033,7 @@ async function dailySummary(env, force) {
   const out = [`HD Laser, ${dateLabel}`, ``];
   out.push(`SALES: ${$(net)} from ${pays.length} payment${pays.length === 1 ? "" : "s"}`);
   for (const p of pays) {
-    const tag = !p.ref ? "register sale" + (p.card_brand || p.source ? ", " + String(p.card_brand || p.source).replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : "") : p.taken_by ? "at the counter by " + p.taken_by : p.name ? "online" : p.ref;
+    const tag = !p.ref ? "register sale" + (p.card_brand || p.source ? ", " + String(p.card_brand || p.source).replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : "") : p.taken_by ? "at the counter by " + p.taken_by + (p.source === "CASH" || p.source === "EXTERNAL" ? ", " + (p.card_brand || "paid another way") : "") : p.name ? "online" : p.ref;
     out.push(`${fmtLocal(p.created_at)}  ${$(p.amount_cents)}${p.refunded_cents ? " (refunded " + $(p.refunded_cents) + ")" : ""}  ${p.name || p.business ? who(p) + ", " : ""}${tag}${p.ref && p.name ? ", " + p.ref : ""}${what(p) ? ": " + what(p) : ""}`);
   }
   if (!pays.length) out.push("No payments today.");
@@ -3179,10 +3184,14 @@ async function orderCheckout(request, env, cors) {
   const notes = String(b.notes || "").trim().slice(0, 2000);
   const neededBy = /^\d{4}-\d{2}-\d{2}$/.test(String(b.needed_by || "")) ? b.needed_by : null;
   let takenBy = String(b.taken_by || "").trim().slice(0, 60) || null, takenById = null;
-  const payHow = b.pay === "terminal" ? "terminal" : "link";
+  const payHow = b.pay === "terminal" ? "terminal" : b.pay === "other" ? "other" : "link";
+  const pm = payHow === "other" ? PAY_METHODS[String(b.method || "")] : null;
+  if (payHow === "other" && !pm) return json({ error: "Pick how they paid: cash, check, Zelle, Venmo, Cash App or other" }, 400, cors);
+  const pmRef = String(b.method_ref || "").replace(/[<>\u0000-\u001f]/g, "").trim().slice(0, 40);
+  const pmText = pm ? (pm.label === "Check" && pmRef ? `Check #${pmRef.replace(/^#/, "")}` : pm.label + (pmRef ? ` (${pmRef})` : "")) : "";
   const src = cleanSrc(b.src), from = String(b.from || "").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 40);
   if (src && from) src.via = from;
-  if (b.staff && (b.staff.pin || payHow === "terminal")) {
+  if (b.staff && (b.staff.pin || payHow === "terminal" || payHow === "other")) {
     // counter orders: the employee taking the order proves it with their PIN, so every sale is credited to a person
     if (rateLimited("pin:" + ip, 12, 600000)) return json({ error: "Too many PIN attempts. Wait 10 minutes." }, 429, cors);
     const who = await verifyStaff(env, b.staff.name, b.staff.pin);
@@ -3192,6 +3201,8 @@ async function orderCheckout(request, env, cors) {
   }
   if (q.custom && !takenById) return json({ error: "Enter your employee PIN to set a price at the counter" }, 400, cors);
   if (payHow === "terminal" && !takenById) return json({ error: "Enter your employee PIN to charge the Terminal" }, 400, cors);
+  if (payHow === "other" && !takenById) return json({ error: "Enter your employee PIN to record the payment" }, 400, cors);
+  if (payHow === "other" && !(env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID)) return json({ error: "Square isn't connected, so the payment can't be recorded" }, 503, cors);
   if (payHow === "terminal" && !env.SQUARE_TERMINAL_DEVICE_ID) return json({ error: "The Terminal isn't connected yet (SQUARE_TERMINAL_DEVICE_ID)" }, 503, cors);
   const taxRate = parseFloat(env.TAX_RATE || "0.0775") || 0;
   const tax = (q.taxable || env.TAX_OWN_ITEMS === "1") ? Math.round(q.subtotal_cents * taxRate) : 0;
@@ -3210,8 +3221,14 @@ async function orderCheckout(request, env, cors) {
   if (q.minimum_top_up_cents) lineItems.push({ name: "Shop minimum", quantity: "1", base_price_money: { amount: q.minimum_top_up_cents, currency: "USD" } });
   const order = { location_id: env.SQUARE_LOCATION_ID, reference_id: ref, line_items: lineItems };
   if (tax) order.taxes = [{ uid: "ca-sales-tax", name: "CA sales tax", percentage: String(+(taxRate * 100).toFixed(3)), scope: "ORDER" }];
-  let linkOk = false, data = {}, terminal = null, tipsOffReason = null;
-  if (!quoteReq && payHow === "terminal" && env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
+  let linkOk = false, data = {}, terminal = null, tipsOffReason = null, manual = null;
+  if (!quoteReq && payHow === "other") {
+    // paid another way: the Square order first (it carries the items and the tax), the payment once the order is saved here
+    const or = await squareFetch(env, "/v2/orders", { method: "POST", body: JSON.stringify({ idempotency_key: `${ref}-o-${Date.now()}`, order }) });
+    const od = await or.json().catch(() => ({}));
+    if (!(or.ok && od.order)) { console.error("Square order error", or.status, JSON.stringify(od).slice(0, 400)); return json({ error: "Square didn't take the order: " + (squareErr(od) || or.status) + ". Nothing was recorded; try again." }, 502, cors); }
+    manual = { order_id: od.order.id, amount: od.order.total_money && od.order.total_money.amount || total };   // Square's own total, tax rounding included
+  } else if (!quoteReq && payHow === "terminal" && env.SQUARE_ACCESS_TOKEN && env.SQUARE_LOCATION_ID) {
     // the Square Terminal on the counter shows the amount; the customer taps there. Completion arrives by webhook or the page's status poll.
     let sqOrderId = null;
     const or = await squareFetch(env, "/v2/orders", { method: "POST", body: JSON.stringify({ idempotency_key: `${ref}-o-${Date.now()}`, order }) });
@@ -3247,14 +3264,28 @@ async function orderCheckout(request, env, cors) {
     if (logo) { const ins = await env.DB.prepare(`INSERT INTO order_assets (ref, created_at, name, type, bytes, data) VALUES (?,?,?,?,?,?)`).bind(ref, now, logo.name, logo.type, Math.round(logo.data.length * 0.75), logo.data).run(); assetId = ins.meta && ins.meta.last_row_id; }
     await env.DB.batch([
       env.DB.prepare(`INSERT OR REPLACE INTO orders (ref, created_at, status, business, name, email, phone, notes, text_consent, cups, base_price_cents, cups_subtotal_cents, setup_fee_cents, total_cents, deposit_percent, square_order_id, kind, spec, needed_by, rush, taken_by, tax_cents, tax_invoiced_at, attest_initials, attest_text, attest_at, attest_ip, attest_ua, attest_hash, logo_asset_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, quoteReq ? "quote" : linkOk || terminal ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email || null, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
-        null, q.work_unit_cents, q.subtotal_cents - q.setup_cents, q.setup_cents, total, 100, terminal ? terminal.order_id : linkOk ? (data.payment_link.order_id || null) : null, "custom", JSON.stringify(spec), neededBy, q.rush ? 1 : 0, takenBy, tax, tax ? now : null, initials, text, now, ip, ua, hash, assetId),
-      env.DB.prepare(`UPDATE orders SET taken_by_id = ?, terminal_checkout_id = ?, done_on_pay = ? WHERE ref = ?`).bind(takenById, terminal ? terminal.id : null, terminal && b.done_on_pay !== false ? 1 : 0, ref),
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(ref, now, quoteReq ? "quote" : linkOk || terminal || manual ? "checkout_started" : "pay_later", String(c.business || "").trim().slice(0, 80), name, email || null, String(c.phone || "").trim().slice(0, 40), notes, c.textConsent ? 1 : 0,
+        null, q.work_unit_cents, q.subtotal_cents - q.setup_cents, q.setup_cents, total, 100, terminal ? terminal.order_id : manual ? manual.order_id : linkOk ? (data.payment_link.order_id || null) : null, "custom", JSON.stringify(spec), neededBy, q.rush ? 1 : 0, takenBy, tax, tax ? now : null, initials, text, now, ip, ua, hash, assetId),
+      env.DB.prepare(`UPDATE orders SET taken_by_id = ?, terminal_checkout_id = ?, done_on_pay = ?, pay_method = ? WHERE ref = ?`).bind(takenById, terminal ? terminal.id : null, (terminal || manual) && b.done_on_pay !== false ? 1 : 0, pmText || null, ref),
       env.DB.prepare(`UPDATE orders SET channel = ?, heard = ?, src = ? WHERE ref = ?`).bind(takenBy ? "At the counter" : channelOf(src), cleanHeard(b.heard), src ? JSON.stringify(src) : null, ref),
       env.DB.prepare(`DELETE FROM order_items WHERE ref = ?`).bind(ref),
       env.DB.prepare(`INSERT INTO order_items (ref, product, material, service, inches, qty, work_unit_cents, blank_unit_cents, discount_pct, line_cents) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(ref, q.product.key, q.material.key, q.service.key, q.inches, q.qty, q.work_unit_after_cents, q.blank_unit_cents, q.discount_pct, q.work_cents + q.blank_cents + q.handling_cents),
       env.DB.prepare(`INSERT INTO events (ts, name, session, ref, path, detail) VALUES (?,?,?,?,?,?)`).bind(now, quoteReq ? "quote_request" : "order_checkout", null, ref, "/order/", JSON.stringify({ product: q.product.key, service: q.service.key, inches: q.inches, qty: q.qty })),
     ]);
+  }
+  if (manual) {
+    const pay = { idempotency_key: `${ref}-m`, source_id: pm.type ? "EXTERNAL" : "CASH", amount_money: { amount: manual.amount, currency: "USD" }, order_id: manual.order_id, location_id: env.SQUARE_LOCATION_ID, reference_id: ref, autocomplete: true,
+      note: `hdlaser.net ${ref}: ${pmText}, recorded by ${takenBy}`.slice(0, 500) };
+    if (pm.type) pay.external_details = { type: pm.type, source: pm.label };
+    else pay.cash_details = { buyer_supplied_money: { amount: manual.amount, currency: "USD" } };
+    const pr = await squareFetch(env, "/v2/payments", { method: "POST", body: JSON.stringify(pay) });
+    const pd = await pr.json().catch(() => ({}));
+    if (!(pr.ok && pd.payment)) {
+      console.error("Square payment error", pr.status, JSON.stringify(pd).slice(0, 600));
+      if (env.DB) await env.DB.prepare(`UPDATE orders SET status = 'cancelled', completed_at = ? WHERE ref = ? AND status = 'checkout_started'`).bind(now, ref).run();
+      return json({ error: "Square didn't record the payment: " + (squareErr(pd) || pr.status) + ". Nothing was recorded; try again." }, 502, cors);
+    }
+    if (env.DB) await upsertPayment(env, pd.payment);   // marks the order paid, takes it off the work queue when the work is done, sends the thank-you
   }
   // tell the shop and the customer straight away; payment confirmation follows from the Square webhook.
   // The customer's logo is attached to the shop's email (Hugh, Oct 28: "i didnt get the attached file for logo"); it is also on the order in the dashboard.
@@ -3309,7 +3340,7 @@ HD Laser Studio
   }
   const startKind = takenBy ? "counter" : "online_new"; // Square giving no payment link always emails: someone has to send an invoice
   if (env.RESEND_API_KEY) {
-    if ((!terminal && !linkOk) || await notifyOn(env, startKind, "email")) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : terminal ? "Counter sale" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}`, text:
+    if ((!terminal && !linkOk && !manual) || await notifyOn(env, startKind, "email")) await sendEmail(env, { to: env.SUPPORT_EMAIL, replyTo: email, subject: `${linkOk ? "Order" : terminal || manual ? "Counter sale" : "Order (needs payment link)"} ${ref}: ${who}, ${$(total)}${manual ? ", paid by " + pmText : ""}`, text:
 `New order ${ref} from hdlaser.net${takenBy ? " (taken at the counter by " + takenBy + ")" : ""}
 
 Customer: ${[name, c.business, email, c.phone].filter(Boolean).join(" · ")}
@@ -3321,11 +3352,11 @@ Logo: ${logo ? "attached to this email (" + logo.name + "), and on the order in 
 Sizing confirmation: initialed "${initials}" at ${now} from ${ip || "unknown IP"}.
 "${text}"
 
-${terminal ? "Paying on the Terminal at the counter." : linkOk ? "They were sent to Square to pay." : "Square did not return a payment link. Send them a Square invoice for " + $(total) + "."}
+${terminal ? "Paying on the Terminal at the counter." : manual ? `Paid at the counter by ${pmText}, recorded in Square by ${takenBy}.` : linkOk ? "They were sent to Square to pay." : "Square did not return a payment link. Send them a Square invoice for " + $(total) + "."}
 Dashboard: ${env.WORKER_URL || ""}/admin`, attachments: logoFiles });
     const first = name.split(" ")[0] || "there";
     // paid at pickup with the work done: no "we've got your order, proof next"; the thank-you comes once they've paid
-    await sendEmail(env, { to: terminal && b.done_on_pay !== false ? null : email, subject: `We've got your order ${ref}`, text:
+    await sendEmail(env, { to: (terminal || manual) && b.done_on_pay !== false ? null : email, subject: `We've got your order ${ref}`, text:
 `Hi ${first},
 
 Thanks for your order. Here's what we have on file:
@@ -3334,7 +3365,7 @@ ${q.summary}
 ${breakdown}
 ${neededBy ? "\nNeeded by " + neededBy + "." : ""}
 ${logo ? "Your logo file came through with the order." : "Send your logo or artwork to " + env.SUPPORT_EMAIL + " or text it to (858) 373-9866 (vector AI/EPS/SVG/PDF is best; a clean PNG works)."}
-${terminal ? "You paid at the counter. You're all set." : linkOk ? "If you completed payment, you're all set." : "Payment didn't go through online, so we'll email you a secure payment link shortly."}
+${terminal || manual ? "You paid at the counter. You're all set." : linkOk ? "If you completed payment, you're all set." : "Payment didn't go through online, so we'll email you a secure payment link shortly."}
 
 What happens next:
 1. Digital proof by email within 1-2 business days.
@@ -3348,8 +3379,9 @@ HD Laser Studio
 759 Turquoise St, Pacific Beach
 (858) 373-9866 · hdlaser.net` });
   }
-  await sendAlert(env, `Order ${ref}: ${who}, ${q.summary}, ${$(total)}. ${terminal ? "Paying on the Terminal." : linkOk ? "Paying through Square." : "NEEDS A PAYMENT LINK."}`, { kind: startKind });
+  await sendAlert(env, `Order ${ref}: ${who}, ${q.summary}, ${$(total)}. ${terminal ? "Paying on the Terminal." : manual ? "Paid by " + pmText + "." : linkOk ? "Paying through Square." : "NEEDS A PAYMENT LINK."}`, { kind: startKind });
   if (terminal) return json({ ok: true, ref, total: total / 100, terminal: terminal.id, status: terminal.status, tips_off: tipsOffReason || undefined }, 200, cors);
+  if (manual) return json({ ok: true, ref, total: manual.amount / 100, paid: true, method: pmText }, 200, cors);
   if (!linkOk) return json({ ok: true, url: null, ref, total: total / 100, error: env.SQUARE_ACCESS_TOKEN ? squareErr(data) || "Square did not return a checkout link" : "Online payment is not set up" }, 200, cors);
   return json({ ok: true, url: data.payment_link.url, ref, total: total / 100 }, 200, cors);
 }
